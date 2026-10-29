@@ -34,6 +34,7 @@ interface Env {
   CONTACT: string;
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
+  USE_TEST_FIXTURES?: string;
   PREVIEW_DATA?: string;
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;

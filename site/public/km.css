@@ -35,7 +35,7 @@ body{margin:0;min-height:100vh;background:var(--km-bg)}
   text-shadow:0 0 12px rgb(255 255 255 / .9),0 1px 2px rgb(255 255 255 / .75)
 }
 .km-page-home .km-main{
-  background:transparent;padding-top:0;
+  background:transparent!important;padding-top:0;
   display:flex;flex-direction:column;min-height:calc(100dvh - 3.5rem);
 }
 .km-home-scene-gap{flex:1 1 auto;min-height:min(64vh,580px);width:100%;pointer-events:none}

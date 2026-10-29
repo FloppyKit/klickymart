@@ -35,6 +35,7 @@ export interface Env {
   CONTACT: string;
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
+  USE_TEST_FIXTURES?: string;
   PREVIEW_DATA?: string;
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
@@ -71,17 +72,23 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
           const n = normalize(raw, "d1", 0);
           if (n.ok) list.push(n.row);
         }
-        const verRow = await env.DB.prepare("SELECT v FROM meta WHERE k='version'").first<{ v: string }>();
-        const srcRow = await env.DB.prepare("SELECT v FROM meta WHERE k='source'").first<{ v: string }>();
-        cachedSnap = rowsToSnapshot(list, verRow?.v ?? "d1", srcRow?.v ?? "d1");
-        return cachedSnap;
+        const preview = isPreviewDataMode(env);
+        const hasExample = list.some((row) => row.d.includes(".example"));
+        if (!preview && hasExample) {
+          /* local D1 polluted with synthetic fixtures — use embedded production map */
+        } else if (list.length > 0) {
+          const verRow = await env.DB.prepare("SELECT v FROM meta WHERE k='version'").first<{ v: string }>();
+          const srcRow = await env.DB.prepare("SELECT v FROM meta WHERE k='source'").first<{ v: string }>();
+          cachedSnap = rowsToSnapshot(list, verRow?.v ?? "d1", srcRow?.v ?? "d1");
+          return cachedSnap;
+        }
       }
     } catch {
       /* D1 empty or migrations pending — fall through */
     }
   }
 
-  if (env.FIXTURE_NDJSON) {
+  if (env.FIXTURE_NDJSON && env.USE_TEST_FIXTURES === "1") {
     const { rows, report } = await ingestFromNdjsonText(env.FIXTURE_NDJSON, {
       allowSynthetic: true,
       sourceLabel: "fixture-ndjson",

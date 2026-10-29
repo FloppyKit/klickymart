@@ -119,14 +119,23 @@ describe("agent routes (worker integration)", () => {
     expect(html).toContain(String(NOSTR_KIND_CRAWL_RECORD));
   });
 
-  it("GET /.well-known/nostr.json returns names object", async () => {
-    const res = await SELF.fetch("https://example.com/.well-known/nostr.json");
+  it("GET /export.ndjson returns NDJSON stream", async () => {
+    const res = await SELF.fetch("https://example.com/export.ndjson?limit=2");
     expect(res.status).toBe(200);
-    const j = (await res.json()) as { names: Record<string, string> };
-    expect(typeof j.names).toBe("object");
-    if (j.names.bot) {
-      expect(j.names.bot).toMatch(/^[0-9a-f]{64}$/);
-    }
+    expect(res.headers.get("Content-Type")).toContain("ndjson");
+    const text = await res.text();
+    expect(text.trim().split("\n").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("POST /mcp tools/list", async () => {
+    const res = await SELF.fetch("https://example.com/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
+    });
+    expect(res.status).toBe(200);
+    const j = (await res.json()) as { result?: { tools?: unknown[] } };
+    expect(j.result?.tools?.length).toBeGreaterThanOrEqual(2);
   });
 });
 

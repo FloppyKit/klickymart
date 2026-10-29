@@ -27,6 +27,7 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             FIXTURE_NDJSON: loadFixtures(),
+            USE_TEST_FIXTURES: "1",
           },
         },
       }),

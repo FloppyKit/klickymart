@@ -3,6 +3,10 @@ import fs from "node:fs";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
 
+export function expectLandscapeInViewportCanvas(path: string, minAvgGreen = 15): void {
+  expectRoadPixelsInBand(path, 0.08, 0.72, minAvgGreen);
+}
+
 export async function waitFor2dLandscape(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {

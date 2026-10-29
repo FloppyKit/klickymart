@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { waitFor2dLandscape } from "./landscape-helpers";
+import { waitFor2dLandscape, expectLandscapeInViewportCanvas } from "./landscape-helpers";
 
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
 
@@ -97,7 +97,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test("screenshots", async ({ page }) => {
       test.setTimeout(240_000);
-      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.setViewportSize({ width: 1280, height: 800 });
       for (const [name, path] of [
         ["home", "/"],
         ["dashboard", "/dashboard"],
@@ -113,13 +113,23 @@ for (const theme of ["dark", "light"] as const) {
           await page.waitForSelector(".km-copy");
           await waitFor2dLandscape(page);
         }
-        await page.waitForTimeout(path === "/" ? 400 : 200);
-        await page.screenshot({
-          path: `e2e/artifacts/${name}-${theme}-desktop.png`,
-          fullPage: true,
-          timeout: 30_000,
-          animations: "disabled",
-        });
+        await page.waitForTimeout(path === "/" ? 500 : 200);
+        if (path === "/") {
+          await page.screenshot({
+            path: `e2e/artifacts/${name}-${theme}-desktop.png`,
+            fullPage: false,
+            clip: { x: 0, y: 0, width: 1280, height: 800 },
+            timeout: 30_000,
+            animations: "disabled",
+          });
+        } else {
+          await page.screenshot({
+            path: `e2e/artifacts/${name}-${theme}-desktop.png`,
+            fullPage: true,
+            timeout: 30_000,
+            animations: "disabled",
+          });
+        }
       }
       for (const [stage, qs] of [
         ["landscape-live", "?nomotion=1"],
@@ -167,13 +177,22 @@ for (const theme of ["dark", "light"] as const) {
         if (path === "/") {
           await page.waitForSelector(".km-copy");
           await waitFor2dLandscape(page);
+          await page.waitForTimeout(500);
+          await page.screenshot({
+            path: `e2e/artifacts/${name}-${theme}-mobile.png`,
+            fullPage: false,
+            clip: { x: 0, y: 0, width: 390, height: 844 },
+            timeout: 30_000,
+            animations: "disabled",
+          });
+        } else {
+          await page.screenshot({
+            path: `e2e/artifacts/${name}-${theme}-mobile.png`,
+            fullPage: true,
+            timeout: 30_000,
+            animations: "disabled",
+          });
         }
-        await page.screenshot({
-          path: `e2e/artifacts/${name}-${theme}-mobile.png`,
-          fullPage: true,
-          timeout: 30_000,
-          animations: "disabled",
-        });
       }
     });
   });
@@ -209,4 +228,34 @@ test("stats reflects 250 real records", async ({ request }) => {
   const j = (await res.json()) as { records?: number; by_status?: Record<string, number> };
   expect(j.records).toBe(250);
   expect(j.by_status?.crawled).toBe(121);
+});
+
+test("default homepage lists real merchants only (no .example)", async ({ page }) => {
+  await page.addInitScript(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await page.goto(`${base}/`);
+  await page.waitForSelector(".km-results");
+  const text = await page.locator(".km-results").innerText();
+  expect(text).not.toMatch(/\.example/i);
+  expect(text).not.toMatch(/Example Shop/i);
+  await expect(page.getByText("start9.com", { exact: false })).toBeVisible();
+});
+
+test("advertised agent routes respond", async ({ request }) => {
+  const exp = await request.get(`${base}/export.ndjson?limit=2`);
+  expect(exp.status()).toBe(200);
+  expect(exp.headers()["content-type"]).toContain("ndjson");
+  const body = await exp.text();
+  expect(body.trim().split("\n").length).toBeGreaterThanOrEqual(1);
+
+  const mcp = await request.post(`${base}/mcp`, {
+    data: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
+    headers: { "Content-Type": "application/json" },
+  });
+  expect(mcp.status()).toBe(200);
+  const j = (await mcp.json()) as { result?: { tools?: unknown[] } };
+  expect(j.result?.tools?.length).toBeGreaterThanOrEqual(2);
+});
+
+test("home dark desktop capture shows synthwave canvas", () => {
+  expectLandscapeInViewportCanvas("e2e/artifacts/home-dark-desktop.png", 12);
 });
