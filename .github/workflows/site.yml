@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "site/**"
+      - "data/**"
       - ".github/workflows/site.yml"
   pull_request:
     paths:
       - "site/**"
+      - "data/**"
       - ".github/workflows/site.yml"
 
 jobs:

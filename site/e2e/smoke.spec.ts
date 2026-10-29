@@ -61,7 +61,20 @@ async function expectDarkBackgroundRule(page: Page, path: string): Promise<void>
   expect(bad, `backgrounds too light on ${path}`).toEqual([]);
 }
 
-const pages = ["/", "/dashboard", "/merchant/microsoft.com", "/claim", "/about", "/contribute", "/docs/api", "/docs/nostr-tags", "/bot"];
+const pages = [
+  "/",
+  "/dashboard",
+  "/merchant/start9.com",
+  "/merchant/cryptocloaks.com",
+  "/merchant/netflix.com",
+  "/merchant/booking.com",
+  "/claim",
+  "/about",
+  "/contribute",
+  "/docs/api",
+  "/docs/nostr-tags",
+  "/bot",
+];
 
 for (const theme of ["dark", "light"] as const) {
   test.describe(`${theme} theme`, () => {
@@ -86,15 +99,20 @@ for (const theme of ["dark", "light"] as const) {
       for (const [name, path] of [
         ["home", "/"],
         ["dashboard", "/dashboard"],
-        ["merchant", "/merchant/dell.com"],
+        ["merchant-start9", "/merchant/start9.com"],
+        ["merchant-cryptocloaks", "/merchant/cryptocloaks.com"],
+        ["merchant-anw", "/merchant/netflix.com"],
+        ["merchant-blocked-tos", "/merchant/booking.com"],
         ["claim", "/claim"],
       ] as const) {
         await page.goto(`${base}${path}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
         if (path === "/") await page.waitForSelector(".km-copy");
+        await page.waitForTimeout(path === "/" ? 400 : 200);
         await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-desktop.png`, fullPage: true });
       }
       for (const [stage, qs] of [
+        ["landscape-live", ""],
         ["landscape-low", "?reach=0.12&btc=0.04"],
         ["landscape-mid", "?reach=0.52&btc=0.45"],
         ["landscape-high", "?reach=0.88&btc=0.92"],
@@ -110,9 +128,8 @@ for (const theme of ["dark", "light"] as const) {
         });
       }
       for (const [stage, qs] of [
+        ["landscape-live", ""],
         ["landscape-low", "?reach=0.12&btc=0.04"],
-        ["landscape-mid", "?reach=0.52&btc=0.45"],
-        ["landscape-high", "?reach=0.88&btc=0.92"],
       ] as const) {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${base}/${qs}`);
@@ -126,10 +143,16 @@ for (const theme of ["dark", "light"] as const) {
         });
       }
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto(`${base}/`);
-      await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-      await page.waitForSelector(".km-copy");
-      await page.screenshot({ path: `e2e/artifacts/home-${theme}-mobile.png`, fullPage: true });
+      for (const [name, path] of [
+        ["home", "/"],
+        ["dashboard", "/dashboard"],
+        ["merchant-start9", "/merchant/start9.com"],
+      ] as const) {
+        await page.goto(`${base}${path}`);
+        await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+        if (path === "/") await page.waitForSelector(".km-copy");
+        await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-mobile.png`, fullPage: true });
+      }
     });
   });
 }
@@ -153,7 +176,15 @@ test("footer signoff on home", async ({ page }) => {
   await expect(page.getByText("Thank You, Come Again.")).toBeVisible();
 });
 
-test("search dell finds dell.com", async ({ page }) => {
-  await page.goto(`${base}/?q=dell`);
-  await expect(page.getByText("dell.com", { exact: false })).toBeVisible();
+test("search start9 finds start9.com", async ({ page }) => {
+  await page.goto(`${base}/?q=start9`);
+  await expect(page.getByText("start9.com", { exact: false })).toBeVisible();
+});
+
+test("stats reflects 250 real records", async ({ request }) => {
+  const res = await request.get(`${base}/stats`);
+  expect(res.ok()).toBeTruthy();
+  const j = (await res.json()) as { records?: number; by_status?: Record<string, number> };
+  expect(j.records).toBe(250);
+  expect(j.by_status?.crawled).toBe(121);
 });

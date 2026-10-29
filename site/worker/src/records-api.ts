@@ -1,5 +1,5 @@
 import type { IndexRow } from "./index-mem";
-import { maskToArCodes, maskToPayCodes, PAY_LABELS } from "./codes";
+import { maskToArCodes, maskToPayCodes, PAY_GROUPS, PAY_LABELS } from "./codes";
 
 export interface CompactRecord {
   d: string;
@@ -79,16 +79,31 @@ export function rowToCompact(row: IndexRow, origin: string): CompactRecord {
   };
 }
 
+export function acceptsBitcoin(row: IndexRow): boolean {
+  if (row.btc !== null && row.btc >= 1) return true;
+  if (row.btc_any === 1) return true;
+  return (row.pay_any & PAY_GROUPS.bitcoin) !== 0;
+}
+
 export function computeStats(rows: IndexRow[]): Record<string, unknown> {
   const byStatus: Record<string, number> = {};
-  const btcHist: Record<string, number> = { "0": 0, "1": 0, "2": 0, "3": 0, "4": 0, null: 0 };
+  const btcHist: Record<string, number> = { "0": 0, "1": 0, "2": 0, "3": 0, "4": 0, ungraded: 0 };
+  const agDist: Record<string, number> = { "0": 0, "1": 0, "2": 0, "3": 0, unknown: 0 };
   const payCounts: Record<string, { online: number; instore: number; unscoped: number }> = {};
   const arCounts: Record<string, number> = {};
+  const bitcoinAccepting: { d: string; name: string | null; btc: number | null }[] = [];
 
   for (const row of rows) {
     byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
-    const bk = row.btc === null ? "null" : String(row.btc);
+    const bk = row.btc === null ? "ungraded" : String(row.btc);
     btcHist[bk] = (btcHist[bk] ?? 0) + 1;
+
+    if (row.ag === null || row.ag === undefined) agDist.unknown = (agDist.unknown ?? 0) + 1;
+    else agDist[String(row.ag)] = (agDist[String(row.ag)] ?? 0) + 1;
+
+    if (acceptsBitcoin(row)) {
+      bitcoinAccepting.push({ d: row.d, name: row.name, btc: row.btc });
+    }
 
     const raw = parseRaw(row.raw_json);
     for (const scope of ["online", "instore", "unscoped"] as const) {
@@ -107,11 +122,15 @@ export function computeStats(rows: IndexRow[]): Record<string, unknown> {
     }
   }
 
+  bitcoinAccepting.sort((a, b) => a.d.localeCompare(b.d));
+
   return {
     by_status: byStatus,
     btc_histogram: btcHist,
+    ag_distribution: agDist,
     pay_counts: payCounts,
     ar_counts: arCounts,
+    bitcoin_accepting: bitcoinAccepting,
     records: rows.length,
   };
 }

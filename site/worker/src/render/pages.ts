@@ -1,9 +1,31 @@
 import type { IndexRow, Snapshot } from "../index-mem";
 import { esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
-import { merchantUrl, parseRaw, payLabel, rowToCompact } from "../records-api";
-import { computeStats } from "../records-api";
+import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact } from "../records-api";
+import { landscapeFormulaInputs } from "../landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "../nostr-kinds";
+
+const ANW_LABELS: Record<string, string> = {
+  "block-page": "Block page shown to the crawler",
+  "http-403": "HTTP 403 Forbidden",
+  "http-429": "HTTP 429 Too Many Requests",
+  "http-503": "HTTP 503 Service Unavailable",
+  "robots-403": "robots.txt returned 403",
+  "robots-429": "robots.txt returned 429",
+  "robots-block-page": "robots.txt points to a block page",
+  "robots-disallow": "robots.txt disallows the crawler",
+  "home-unreachable": "Home page could not be fetched",
+  "robots-unreachable": "robots.txt could not be fetched",
+};
+
+function anwReasonText(raw: Record<string, unknown>): string {
+  const anw = raw.anw;
+  if (!anw || typeof anw !== "object") return "Agents not welcome (reason not recorded)";
+  const type = typeof (anw as { type?: unknown }).type === "string" ? (anw as { type: string }).type : "";
+  const q = typeof (anw as { q?: unknown }).q === "string" ? (anw as { q: string }).q : "";
+  const label = ANW_LABELS[type] ?? type.replace(/-/g, " ");
+  return q ? `${label}: ${q}` : label;
+}
 
 function pageLayout(
   base: Parameters<typeof layout>[0],
@@ -77,11 +99,16 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
   const stats = computeStats(snap.rows) as {
     by_status: Record<string, number>;
     btc_histogram: Record<string, number>;
+    ag_distribution: Record<string, number>;
+    pay_counts: Record<string, { online: number; instore: number; unscoped: number }>;
+    bitcoin_accepting: { d: string; name: string | null; btc: number | null }[];
     records: number;
   };
+  const landscapeIn = landscapeFormulaInputs(snap.rows);
   const reachable = snap.rows.filter((r) => r.status === "crawled" && r.ag !== null && r.ag >= 1).length;
   const tiles = [
-    { label: "Reachable", count: reachable, href: "/dashboard?reachable=1" },
+    { label: "Crawled", count: stats.by_status.crawled ?? 0, href: "/dashboard?status=crawled" },
+    { label: "Reachable (ag≥1)", count: reachable, href: "/dashboard?reachable=1" },
     { label: "Blocked by their terms", count: stats.by_status["blocked-tos"] ?? 0, href: "/dashboard?status=blocked-tos" },
     { label: "Agents not welcome", count: stats.by_status["agents-not-welcome"] ?? 0, href: "/dashboard?status=agents-not-welcome" },
     { label: "Errors", count: stats.by_status.error ?? 0, href: "/dashboard?status=error" },
@@ -89,23 +116,71 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
   ];
 
   const hist = stats.btc_histogram ?? {};
-  const maxH = Math.max(1, ...Object.values(hist));
-  const bars = ["0", "1", "2", "3", "4", "null"].map((k) => {
+  const histKeys = ["0", "1", "2", "3", "4", "ungraded"];
+  const maxH = Math.max(1, ...histKeys.map((k) => hist[k] ?? 0));
+  const bars = histKeys.map((k, i) => {
     const v = hist[k] ?? 0;
     const h = Math.round((v / maxH) * 100);
-    const label = k === "null" ? "?" : k;
-    return `<g><rect class="km-bar" x="${Number(k === "null" ? 5 : Number(k) * 40)}" y="${100 - h}" width="32" height="${h}"/><text x="${Number(k === "null" ? 5 : Number(k) * 40) + 16}" y="115">${label}</text></g>`;
+    const label = k === "ungraded" ? "∅" : k;
+    const x = i * 40 + 5;
+    return `<g><rect class="km-bar" x="${x}" y="${100 - h}" width="32" height="${h}"/><text x="${x + 16}" y="115">${label}</text><title>${k === "ungraded" ? "not graded" : `grade ${k}`}: ${v}</title></g>`;
   }).join("");
+
+  const agDist = stats.ag_distribution ?? {};
+  const agRows = ["0", "1", "2", "3", "unknown"].map((k) =>
+    `<tr><td>ag ${k === "unknown" ? "unknown" : k}</td><td>${agDist[k] ?? 0}</td></tr>`,
+  ).join("");
+
+  const payCounts = stats.pay_counts ?? {};
+  const payRows = Object.entries(payCounts)
+    .sort((a, b) => (b[1].online + b[1].instore + b[1].unscoped) - (a[1].online + a[1].instore + a[1].unscoped))
+    .slice(0, 20)
+    .map(([code, c]) => `<tr><td>${esc(payLabel(code))}</td><td>${c.online}</td><td>${c.instore}</td><td>${c.unscoped}</td></tr>`)
+    .join("");
+
+  const btcList = (stats.bitcoin_accepting ?? [])
+    .slice(0, 40)
+    .map((m) => `<li><a href="${esc(merchantUrl(origin, m.d))}">${esc(m.name ?? m.d)}</a> <span class="km-muted">${esc(m.d)}</span> ${gradeBadge(m.btc)}</li>`)
+    .join("");
 
   const tableRows = items.slice(0, 100).map((row) => renderTableRow(row, origin)).join("");
 
   const categoryVal = searchParams.get("category") ?? "";
+  const statusVal = searchParams.get("status") ?? "";
+  const statusOptions = ["crawled", "agents-not-welcome", "blocked-tos", "error"].map((s) =>
+    `<option value="${s}"${statusVal === s ? " selected" : ""}>${s}</option>`,
+  ).join("");
+
   const body = `
 <h1>The map, in numbers.</h1>
-<p class="km-lead">Every site we checked, what stopped us, and what they accept. Click any cell to see the quote behind it.</p>
+<p class="km-lead">Every site we checked, what stopped us, and what they accept. Landscape metrics below drive the retro grid and sun on every page.</p>
 <div class="km-tiles">${tiles.map((t) => `<a class="km-tile" href="${esc(t.href)}"><span class="km-tile-n">${t.count}</span><span class="km-tile-l">${esc(t.label)}</span></a>`).join("")}</div>
-<h2 class="km-h2">Bitcoin grade, all sites</h2>
+
+<section class="km-section">
+<h2 class="km-h2">Landscape inputs</h2>
+<dl class="km-dl">
+<dt>Reach (${landscapeIn.reach.value.toFixed(4)})</dt>
+<dd>${landscapeIn.reach.reachable_merchants} reachable of ${landscapeIn.reach.total_merchants} merchants · <code>${esc(landscapeIn.reach.formula)}</code></dd>
+<dt>BTC sun (${landscapeIn.btc_sun.value.toFixed(4)})</dt>
+<dd>${landscapeIn.btc_sun.candidate_merchants} BTC-accepting merchants · mean privacy score ${landscapeIn.btc_sun.mean_privacy_score.toFixed(4)} · <code>${esc(landscapeIn.btc_sun.formula)}</code>
+<ul>${landscapeIn.btc_sun.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></dd>
+</dl>
+</section>
+
+<h2 class="km-h2">Bitcoin grade (all sites)</h2>
+<p class="km-muted">Ungraded (<span class="km-grade km-g-ungraded">not graded</span>) is distinct from grade 0.</p>
 <svg class="km-chart" viewBox="0 0 260 120" role="img" aria-label="Bitcoin grade histogram">${bars}</svg>
+
+<h2 class="km-h2">Agent access (ag)</h2>
+<table class="km-table km-table-compact"><thead><tr><th>ag</th><th>Sites</th></tr></thead><tbody>${agRows}</tbody></table>
+
+<h2 class="km-h2">Payment methods (observed)</h2>
+<table class="km-table km-table-compact"><thead><tr><th>Method</th><th>Online</th><th>In-store</th><th>Unscoped</th></tr></thead><tbody>${payRows || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
+
+<h2 class="km-h2">Bitcoin-accepting merchants</h2>
+<ul class="km-btc-list">${btcList || `<li class="km-muted">None indexed</li>`}</ul>
+${(stats.bitcoin_accepting?.length ?? 0) > 40 ? `<p class="km-muted">Showing 40 of ${stats.bitcoin_accepting!.length}. Use <code>/q?pay_group=bitcoin</code> for the full set.</p>` : ""}
+
 <form class="km-filters" method="get" action="/dashboard">
   <details open><summary>Filters</summary>
   <label for="category-filter">Category</label>
@@ -114,7 +189,9 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
     <option value="shopping"${categoryVal === "shopping" ? " selected" : ""}>Shopping (v1)</option>
   </select>
   <label for="status-filter">Status</label>
-  <select id="status-filter" name="status" aria-label="Filter by status"><option value="">Any</option><option value="crawled">crawled</option><option value="agents-not-welcome">agents-not-welcome</option></select>
+  <select id="status-filter" name="status" aria-label="Filter by status">
+    <option value="">Any</option>${statusOptions}
+  </select>
   <button type="submit" class="km-btn km-btn-ghost">Apply</button>
   </details>
 </form>
@@ -149,11 +226,34 @@ export function renderMerchant(row: IndexRow, origin: string, shell: PageShell):
   const raw = parseRaw(row.raw_json);
   const issueTitle = encodeURIComponent(`Correction: ${row.d}`);
   const issueBody = encodeURIComponent(`Domain: ${row.d}\n\nDescribe the correction with evidence URL:\n`);
+
+  if (row.status === "blocked-tos") {
+    const quote = typeof raw.tos_q === "string" ? raw.tos_q : "";
+    const src = typeof raw.tos_url === "string" ? raw.tos_url : null;
+    const body = `
+<h1>${esc(row.name ?? row.d)}</h1>
+<p><a href="https://${esc(row.d)}/" rel="nofollow noopener">${esc(row.d)}</a> ${statusPill(row.status)}</p>
+${quote ? `<blockquote class="km-quote">${esc(quote)}</blockquote>` : ""}
+${src ? `<p><a href="${esc(src)}" rel="nofollow noopener">Source</a></p>` : ""}
+<p class="km-muted">Terms ban automation — no checkout crawl was attempted.</p>
+<p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>`;
+    return pageLayout({ title: row.name ?? row.d, origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
+  }
+
+  const anwBlock = row.status === "agents-not-welcome" || row.status === "error"
+    ? `<section id="anw"><h2>Why agents were turned away</h2><p>${esc(anwReasonText(raw))}</p>${
+      raw.anw && typeof raw.anw === "object" && typeof (raw.anw as { url?: unknown }).url === "string"
+        ? `<p><a href="${esc(String((raw.anw as { url: string }).url))}" rel="nofollow noopener">Source</a></p>`
+        : ""
+    }</section>`
+    : "";
+
   const body = `
 <h1>${esc(row.name ?? row.d)}</h1>
 <p><a href="https://${esc(row.d)}/" rel="nofollow noopener">${esc(row.d)}</a> ${statusPill(row.status)} ${gradeBadge(row.btc)}</p>
+${anwBlock}
 <section id="access"><h2>Can an agent get in?</h2><p>Agent access: ${row.ag ?? "unknown"}</p></section>
-<section id="terms"><h2>Their terms</h2><p>${esc(String(row.tos ?? "unknown"))}</p>${typeof raw.tos_url === "string" ? `<blockquote class="km-quote">${esc(String(raw.tos_q ?? ""))}</blockquote><p><a href="${esc(String(raw.tos_url))}">Source</a></p>` : ""}</section>
+<section id="terms"><h2>Their terms</h2><p>${esc(String(row.tos ?? "unknown"))}</p>${typeof raw.tos_url === "string" ? `<blockquote class="km-quote">${esc(String(raw.tos_q ?? ""))}</blockquote><p><a href="${esc(String(raw.tos_url))}" rel="nofollow noopener">Source</a></p>` : ""}</section>
 <section id="pay"><h2>How you can pay</h2>${renderPayTable(raw)}</section>
 <section id="checkout"><h2>Checkout</h2><p>ease: ${row.ease ?? "unknown"} · co: ${row.co ?? "unknown"}</p></section>
 <section id="crawl"><h2>About this record</h2><p>Crawled ${new Date(row.ts * 1000).toISOString()}</p>
@@ -170,9 +270,11 @@ function renderPayTable(raw: Record<string, unknown>): string {
   if (!pay_q.length) return `<p><a href="/about#unknowns">unknown</a></p>`;
   const rows = pay_q.map((item, i) => {
     const o = item as { c?: string; url?: string; q?: string; conf?: string; scope?: string };
-    return `<tr id="pay-${i}"><td>${esc(o.c ?? "")}</td><td>${esc(o.scope ?? "—")}</td><td>${esc(o.conf ?? "")}</td><td>${esc(o.q ?? "")}</td><td><a href="${esc(o.url ?? "#")}">↗</a></td></tr>`;
+    const method = o.c ? payLabel(o.c) : "—";
+    const url = o.url && o.url !== "#" ? o.url : "";
+    return `<tr id="pay-${i}"><td>${esc(method)}</td><td>${esc(o.scope ?? "—")}</td><td>${esc(o.conf ?? "")}</td><td class="km-quote-cell">${esc(o.q ?? "")}</td><td>${url ? `<a href="${esc(url)}" rel="nofollow noopener">Source</a>` : "—"}</td></tr>`;
   }).join("");
-  return `<table><thead><tr><th>Method</th><th>Scope</th><th>Confidence</th><th>Quote</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="km-table"><thead><tr><th>Method</th><th>Scope</th><th>Confidence</th><th>Quote</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 export function render404(origin: string, shell: PageShell): string {

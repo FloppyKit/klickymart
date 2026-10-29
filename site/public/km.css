@@ -77,7 +77,16 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-results{list-style:none;padding:0;margin:0}
 .km-result-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--km-s-2);padding:var(--km-s-2) 0;border-bottom:1px solid var(--km-border)}
 .km-grade{font-family:var(--km-font-mono);font-size:var(--km-fs-xs);padding:2px 6px;border-radius:var(--km-radius-sm);border:1px solid var(--km-border-strong);box-shadow:inset 0 -1px 0 rgb(0 0 0 / .35);background:var(--km-ink-850);color:var(--km-ink-100)}
-.km-g0{color:#b8bfce}.km-g1{color:#ffb09a}.km-g2{color:#ffe08a}.km-g3{color:#c8f090}.km-g4{color:#3df29a}.km-gnull{color:#b8bfce;background-image:repeating-linear-gradient(-45deg,transparent,transparent 2px,rgb(255 255 255 / .06) 2px,rgb(255 255 255 / .06) 4px)}
+.km-g0{color:#b8bfce}.km-g1{color:#ffb09a}.km-g2{color:#ffe08a}.km-g3{color:#c8f090}.km-g4{color:#3df29a}.km-gnull{color:#b8bfce;background-image:repeating-linear-gradient(-45deg,transparent,transparent 2px,rgb(255 255 255 / .06) 2px,rgb(255 255 255 / .06) 4px)}.km-g-ungraded{color:var(--km-ink-200);font-style:italic;border-style:dashed}
+[data-theme="light"] .km-grade,.km-grade:where([data-theme="light"] *){background:var(--km-surface-2);color:var(--km-text);box-shadow:inset 0 -1px 0 rgb(0 0 0 / .06)}
+[data-theme="light"] .km-g-ungraded{color:#5f6677}
+[data-theme="light"] .km-g0{color:#5f6677}[data-theme="light"] .km-g1{color:#8a2f1a}[data-theme="light"] .km-g2{color:#7a5a08}[data-theme="light"] .km-g3{color:#3a6a12}[data-theme="light"] .km-g4{color:#0b6b42}
+.km-table-compact td,.km-table-compact th{padding:var(--km-s-1) var(--km-s-2);font-size:var(--km-fs-sm)}
+.km-dl dt{font-family:var(--km-font-mono);font-size:var(--km-fs-sm);margin-top:var(--km-s-3)}
+.km-dl dd{margin:var(--km-s-1) 0 var(--km-s-2) var(--km-s-3);color:var(--km-text-muted)}
+.km-btc-list{columns:2;gap:var(--km-s-4);list-style:none;padding:0}
+@media(max-width:640px){.km-btc-list{columns:1}}
+.km-quote-cell{max-width:28rem;font-size:var(--km-fs-sm)}
 .km-status{font-family:var(--km-font-mono);font-size:var(--km-fs-xs);padding:2px 8px;border-radius:var(--km-radius-pill);border:1px solid var(--km-border)}
 .km-status-ok{color:var(--km-ok);border-color:color-mix(in srgb,var(--km-ok) 40%,var(--km-border))}
 .km-status-tos{color:var(--km-tos)}.km-status-anw{color:var(--km-anw)}.km-status-err{color:var(--km-err)}

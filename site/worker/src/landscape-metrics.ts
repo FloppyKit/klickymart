@@ -59,6 +59,52 @@ export function landscapeFromSnapshot(snap: Snapshot): { reach: number; btc: num
   };
 }
 
+export interface LandscapeFormulaInputs {
+  reach: {
+    reachable_merchants: number;
+    total_merchants: number;
+    formula: string;
+    value: number;
+  };
+  btc_sun: {
+    candidate_merchants: number;
+    mean_privacy_score: number;
+    formula: string;
+    value: number;
+    notes: string[];
+  };
+}
+
+export function landscapeFormulaInputs(rows: IndexRow[]): LandscapeFormulaInputs {
+  const total = rows.length;
+  const reachable = rows.filter((r) => r.status === "crawled" && r.ag !== null && r.ag >= 1).length;
+  const reachValue = total ? reachable / total : 0;
+
+  const candidates = rows.filter(
+    (r) => (r.btc !== null && r.btc > 0) || r.btc_any === 1 || (r.pay_any & (1 << 14)) !== 0,
+  );
+  const scores = candidates.map((r) => rowBtcPrivacyScore(r));
+  const meanScore = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+
+  return {
+    reach: {
+      reachable_merchants: reachable,
+      total_merchants: total,
+      formula: "count(status=crawled ∧ ag≥1) / count(all)",
+      value: reachValue,
+    },
+    btc_sun: {
+      candidate_merchants: candidates.length,
+      mean_privacy_score: meanScore,
+      formula: "mean(rowBtcPrivacyScore) over BTC-accepting merchants",
+      value: meanScore,
+      notes: [
+        "row score blends btc grade/4, btc_any (+0.15), Lightning/ecash pay methods (+0.12), on-chain (+0.04), btcpriv tags (+0.06–0.08), capped at 1",
+      ],
+    },
+  };
+}
+
 export function parseLandscapeOverride(
   reachRaw: string | null,
   btcRaw: string | null,

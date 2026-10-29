@@ -3,12 +3,12 @@
 export const PAY_CODES = [
   "card", "apay", "gpay", "spay", "pp", "venmo", "cashapp", "zelle", "ach", "check",
   "cod", "gift", "bnpl", "ebt", "btc", "ln", "lnurl", "bolt12", "sp", "ark", "cashu",
-  "fedi", "liq", "usdc", "usdt", "eth", "xmr", "ltc", "crypto", "oth",
+  "fedi", "liq", "usdc", "usdt", "eth", "xmr", "ltc", "crypto", "oth", "hsa",
 ] as const;
 export type PayCode = (typeof PAY_CODES)[number];
 
 export const AR_CODES = [
-  "rb_ai", "rb_ck", "cf", "ak", "px", "cap", "cap!", "403", "tarpit", "hl", "js", "tos", "acct", "geo",
+  "rb_ai", "rb_ck", "cf", "ak", "px", "cap", "cap!", "403", "429", "tarpit", "hl", "js", "net", "tos", "acct", "geo", "block",
 ] as const;
 export type ArCode = (typeof AR_CODES)[number];
 
@@ -88,6 +88,7 @@ export const PAY_LABELS: Record<string, string> = {
   btc: "Bitcoin on-chain", ln: "Lightning", lnurl: "LNURL", bolt12: "BOLT12", sp: "Silent payments",
   ark: "Ark", cashu: "Cashu", fedi: "Fedimint", liq: "Liquid", usdc: "USDC", usdt: "USDT",
   eth: "Ethereum", xmr: "Monero", ltc: "Litecoin", crypto: "Crypto", oth: "Other",
+  hsa: "HSA / FSA",
 };
 
 export const AR_LABELS: Record<string, string> = {
@@ -95,6 +96,7 @@ export const AR_LABELS: Record<string, string> = {
   ak: "Akamai block", px: "PerimeterX", cap: "Captcha present", "cap!": "Captcha served",
   "403": "HTTP 403", tarpit: "Timeout/tarpit", hl: "Headless blocked", js: "JS-only content",
   tos: "Terms ban automation", acct: "Account required", geo: "Region block",
+  "429": "HTTP 429", net: "Network / fetch failure", block: "Explicit block page",
 };
 
 export const BTC_GRADE_MEANINGS = [

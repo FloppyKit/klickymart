@@ -1,14 +1,14 @@
 import type { Snapshot } from "./index-mem";
 import { rowsToSnapshot, snapshotFromJson } from "./index-mem";
 import { normalize } from "./normalize";
-import { NdjsonFileSource, ingestFromLines, persistIngest } from "./ingest";
+import { ingestFromNdjsonText, persistIngest } from "./ingest";
 import { querySnapshot, validateQueryParams } from "./query";
 import { rowToCompact, computeStats, parseRaw, suggestDomains } from "./records-api";
 import { buildOpenApi, createMcpHandler, parseMcpRequest } from "./mcp";
 import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
 import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
-import { landscapeFromSnapshot } from "./landscape-metrics";
+import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
 import {
   renderHome,
@@ -76,8 +76,10 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
   }
 
   if (env.FIXTURE_NDJSON) {
-    const src = new NdjsonFileSource(env.FIXTURE_NDJSON);
-    const { rows, report } = await ingestFromLines(src.read(), { allowSynthetic: true });
+    const { rows, report } = await ingestFromNdjsonText(env.FIXTURE_NDJSON, {
+      allowSynthetic: true,
+      sourceLabel: "fixture-ndjson",
+    });
     cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
     return cachedSnap;
   }
@@ -85,8 +87,7 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
   if (isPreviewDataMode(env)) {
     const { EMBEDDED_SYNTHETIC_NDJSON } = await import("./fixture-data");
     if (EMBEDDED_SYNTHETIC_NDJSON) {
-      const src = new NdjsonFileSource(EMBEDDED_SYNTHETIC_NDJSON);
-      const { rows, report } = await ingestFromLines(src.read(), {
+      const { rows, report } = await ingestFromNdjsonText(EMBEDDED_SYNTHETIC_NDJSON, {
         allowSynthetic: true,
         sourceLabel: "preview-synthetic",
       });
@@ -95,10 +96,37 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
     }
   }
 
+  const { EMBEDDED_EVENTS_NDJSON, EMBEDDED_RECORDS_FALLBACK_NDJSON } = await import("./fixture-data");
+  if (EMBEDDED_EVENTS_NDJSON) {
+    const { rows, report } = await ingestFromNdjsonText(EMBEDDED_EVENTS_NDJSON, {
+      allowSynthetic: false,
+      verifyEvents: true,
+      sourceLabel: "nostr-31420-ndjson",
+      contentHash: "events-v1",
+    });
+    if (rows.size > 0) {
+      cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
+      return cachedSnap;
+    }
+  }
+
+  if (EMBEDDED_RECORDS_FALLBACK_NDJSON) {
+    const { rows, report } = await ingestFromNdjsonText(EMBEDDED_RECORDS_FALLBACK_NDJSON, {
+      allowSynthetic: false,
+      sourceLabel: "records-fallback",
+      contentHash: "records-v1",
+    });
+    cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
+    return cachedSnap;
+  }
+
   const { EMBEDDED_FIXTURE_NDJSON } = await import("./fixture-data");
   if (EMBEDDED_FIXTURE_NDJSON) {
-    const src = new NdjsonFileSource(EMBEDDED_FIXTURE_NDJSON);
-    const { rows, report } = await ingestFromLines(src.read(), { allowSynthetic: true });
+    const { rows, report } = await ingestFromNdjsonText(EMBEDDED_FIXTURE_NDJSON, {
+      allowSynthetic: false,
+      verifyEvents: true,
+      sourceLabel: "embedded-legacy",
+    });
     cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
     return cachedSnap;
   }
@@ -230,11 +258,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/stats" && request.method === "GET") {
     const stats = computeStats(snap.rows);
     const landscape = landscapeFromSnapshot(snap);
+    const landscape_inputs = landscapeFormulaInputs(snap.rows);
     return Response.json(
       {
         ...licenseMetaBlock(),
         ...stats,
         landscape,
+        landscape_inputs,
         preview_data: shell.previewData,
         version: snap.version,
         generated_at: new Date().toISOString(),
@@ -342,8 +372,10 @@ Contact: ${env.CONTACT}
     const auth = request.headers.get("Authorization");
     if (auth !== `Bearer ${env.INGEST_TOKEN}`) return new Response("unauthorized", { status: 401 });
     const text = await request.text();
-    const src = new NdjsonFileSource(text);
-    const { rows, report } = await ingestFromLines(src.read(), {});
+    const { rows, report } = await ingestFromNdjsonText(text, {
+      verifyEvents: true,
+      sourceLabel: "http-ingest",
+    });
     await persistIngest(rows, report, env);
     resetSnapshotCache();
     return Response.json(report);
@@ -382,8 +414,10 @@ function escXml(s: string): string {
 }
 
 export async function bootstrapFixtures(env: Env, ndjson: string): Promise<void> {
-  const src = new NdjsonFileSource(ndjson);
-  const { rows, report } = await ingestFromLines(src.read(), { allowSynthetic: true, sourceLabel: "fixture" });
+  const { rows, report } = await ingestFromNdjsonText(ndjson, {
+    allowSynthetic: true,
+    sourceLabel: "fixture",
+  });
   await persistIngest(rows, report, env);
   resetSnapshotCache();
 }

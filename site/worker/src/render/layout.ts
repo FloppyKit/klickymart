@@ -79,7 +79,7 @@ export function eyebrow(text: string): string {
 }
 
 export function gradeBadge(btc: number | null): string {
-  if (btc === null) return `<span class="km-grade km-gnull">BTC ?</span>`;
+  if (btc === null) return `<span class="km-grade km-g-ungraded">not graded</span>`;
   return `<span class="km-grade km-g${btc}">BTC ${btc}</span>`;
 }
 

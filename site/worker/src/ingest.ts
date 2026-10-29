@@ -1,7 +1,8 @@
 import type { RecordRow, RawRecord } from "./normalize";
 import { normalize, rejectExampleUnlessAllowed } from "./normalize";
 import { rowsToSnapshot, snapshotToJson, type Snapshot } from "./index-mem";
-import { parseRecordLine } from "./nostr-record-source";
+import { parseRecordLine, type NostrEventLine } from "./nostr-record-source";
+import { verifyNostr31420Event } from "./nostr-verify";
 
 export interface RecordSource {
   name: string;
@@ -37,6 +38,8 @@ export class ArrayRecordSource implements RecordSource {
 export interface IngestOptions {
   allowSynthetic?: boolean;
   sourceLabel?: string;
+  /** When true, kind 31420 lines must pass NIP-01 id + Schnorr verify. */
+  verifyEvents?: boolean;
 }
 
 export interface IngestReport {
@@ -55,6 +58,58 @@ function hashSource(text: string): string {
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+export async function ingestFromNdjsonText(
+  text: string,
+  opts: IngestOptions & { contentHash?: string } = {},
+): Promise<{ rows: Map<string, RecordRow>; report: IngestReport }> {
+  const sideRejected: IngestReport["rejected"] = [];
+  async function* linesWithReject(): AsyncIterable<RawRecord> {
+    let lineNum = 0;
+    for (const line of text.split("\n")) {
+      lineNum++;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let parsed: NostrEventLine | RawRecord;
+      try {
+        parsed = JSON.parse(trimmed) as NostrEventLine | RawRecord;
+      } catch {
+        throw new Error(`line ${lineNum}: invalid JSON`);
+      }
+
+      if (opts.verifyEvents && typeof (parsed as NostrEventLine).kind === "number") {
+        const ev = parsed as NostrEventLine;
+        const v = verifyNostr31420Event(ev);
+        if (!v.ok) {
+          sideRejected.push({ line: lineNum, d: tagDomain(ev.tags), reason: v.reason });
+          continue;
+        }
+      }
+
+      try {
+        const rec = parseRecordLine(trimmed);
+        if (rec) yield rec;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`line ${lineNum}: ${msg}`);
+      }
+    }
+  }
+
+  const { rows, report } = await ingestFromLines(linesWithReject(), opts);
+  if (sideRejected.length) {
+    report.rejected.push(...sideRejected);
+  }
+  return { rows, report };
+}
+
+function tagDomain(tags: string[][] | undefined): string | null {
+  if (!tags) return null;
+  for (const t of tags) {
+    if (t[0] === "d" && typeof t[1] === "string") return t[1];
+  }
+  return null;
 }
 
 export async function ingestFromLines(
