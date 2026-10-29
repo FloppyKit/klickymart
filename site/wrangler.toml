@@ -22,5 +22,35 @@ id = "REPLACE_AT_DEPLOY"
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
+# Comma-separated or JSON array of wss:// URLs (placeholder until relay is live).
+RELAY_URLS = "wss://relay.klickymart.com"
 # Set PREVIEW_DATA = "1" in a preview deployment to load synthetic *.example records only.
 # PREVIEW_DATA = "0"
+
+# Production: deploy with `wrangler deploy --env production` (custom domains; do not deploy from CI).
+[env.production]
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "klickymart.com"
+custom_domain = true
+
+[[env.production.routes]]
+pattern = "www.klickymart.com"
+custom_domain = true
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "klickymart"
+database_id = "REPLACE_AT_DEPLOY"
+migrations_dir = "worker/migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "REPLACE_AT_DEPLOY"
+
+[env.production.vars]
+SITE_ORIGIN = "https://klickymart.com"
+SNAPSHOT_TTL_S = "60"
+CONTACT = "bot@klickymart.com"
+RELAY_URLS = "wss://relay.klickymart.com"

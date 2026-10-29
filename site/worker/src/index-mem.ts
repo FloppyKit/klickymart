@@ -1,4 +1,5 @@
 import type { RecordRow } from "./normalize";
+import { discoverCrawlerPubkeyHex } from "./crawler-pubkey";
 
 /** Packed row for in-memory filtering */
 export interface IndexRow {
@@ -32,6 +33,7 @@ export interface SnapshotMeta {
   count: number;
   ts_min: number;
   ts_max: number;
+  crawler_pubkey_hex?: string | null;
 }
 
 export interface Snapshot {
@@ -78,6 +80,8 @@ export function rowsToSnapshot(rows: RecordRow[], version: string, source: strin
     ts_max = 0;
   }
 
+  const crawler_pubkey_hex = discoverCrawlerPubkeyHex(rows);
+
   return {
     version,
     source,
@@ -88,6 +92,7 @@ export function rowsToSnapshot(rows: RecordRow[], version: string, source: strin
       count: rows.length,
       ts_min,
       ts_max,
+      crawler_pubkey_hex,
     },
   };
 }

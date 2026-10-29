@@ -119,7 +119,7 @@ for (const theme of ["dark", "light"] as const) {
       ] as const) {
         await page.goto(`${base}/${qs}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        await page.waitForSelector("#km-landscape");
+        await page.waitForSelector("#km-landscape", { state: "attached" });
         await page.waitForTimeout(900);
         await page.screenshot({
           path: `e2e/artifacts/home-${stage}-${theme}-desktop.png`,
@@ -134,7 +134,7 @@ for (const theme of ["dark", "light"] as const) {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${base}/${qs}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        await page.waitForSelector("#km-landscape");
+        await page.waitForSelector("#km-landscape", { state: "attached" });
         await page.waitForTimeout(900);
         await page.screenshot({
           path: `e2e/artifacts/home-${stage}-${theme}-mobile.png`,

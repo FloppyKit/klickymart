@@ -126,9 +126,13 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
   };
 
   const pay = searchParams.get("pay");
-  const payParsed = parsePayList("pay", pay);
-  if (!payParsed.ok) return payParsed;
-  if (payParsed.list.length) params.pay = payParsed.list;
+  if (pay && !pay.includes(",") && pay in PAY_GROUPS) {
+    params.pay_group = pay;
+  } else {
+    const payParsed = parsePayList("pay", pay);
+    if (!payParsed.ok) return payParsed;
+    if (payParsed.list.length) params.pay = payParsed.list;
+  }
 
   const pay_all = searchParams.get("pay_all");
   const payAllParsed = parsePayList("pay_all", pay_all);

@@ -7,6 +7,8 @@ import { rowToCompact, computeStats, parseRaw, suggestDomains } from "./records-
 import { buildOpenApi, createMcpHandler, parseMcpRequest } from "./mcp";
 import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
 import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
+import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilities";
+import { buildSummaryJson } from "./summary-json";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
@@ -20,6 +22,8 @@ import {
   renderContribute,
   renderDocsApi,
   renderDocsNostrTags,
+  renderDocsRelayFilters,
+  renderQueryResults,
 } from "./render/pages";
 
 export interface Env {
@@ -32,6 +36,8 @@ export interface Env {
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
   PREVIEW_DATA?: string;
+  RELAY_URLS?: string;
+  CRAWLER_PUBKEY_HEX?: string;
 }
 
 let cachedSnap: Snapshot | null = null;
@@ -193,7 +199,26 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       });
       return new Response(stream, { headers: { ...apiHeaders(snap.version, result.filter_ms), "Content-Type": "application/x-ndjson" } });
     }
+    const format = url.searchParams.get("format");
+    const accept = request.headers.get("Accept") ?? "";
+    const wantsHtml = format === "html" || (accept.includes("text/html") && format !== "json");
+    if (wantsHtml) {
+      return new Response(
+        renderQueryResults(snap, origin, url.searchParams, result.items, result.total, shell),
+        { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } },
+      );
+    }
     return Response.json(body, { headers: apiHeaders(snap.version, result.filter_ms) });
+  }
+
+  if (path === "/summary.json" && request.method === "GET") {
+    const summary = buildSummaryJson(snap);
+    return Response.json(summary, {
+      headers: {
+        ...apiHeaders(snap.version, 0),
+        "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
+      },
+    });
   }
 
   if (path.startsWith("/records/") && request.method === "GET") {
@@ -293,17 +318,12 @@ Contact: ${env.CONTACT}
   }
 
   if (path === "/.well-known/klickymart.json") {
-    return Response.json({
-      api: "/q",
-      openapi: "/openapi.json",
-      mcp: "/mcp",
-      export: "/export.ndjson",
-      schema_version: "0.3-draft",
-      nostr: { kind: 31420, relays: [] },
+    const body = buildKlickymartWellKnown(origin, snap, {
       contact: env.CONTACT,
-      ...licenseMetaBlock(),
-      data_license_file: "/DATA-LICENSE",
-    }, { headers: apiHeaders(snap.version, 0) });
+      relayUrlsRaw: env.RELAY_URLS,
+      crawlerPubkeyHexEnv: env.CRAWLER_PUBKEY_HEX,
+    });
+    return Response.json(body, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/mcp.json") {
@@ -311,8 +331,8 @@ Contact: ${env.CONTACT}
   }
 
   if (path === "/.well-known/nostr.json") {
-    // Placeholder until Matt adds KlickyMart pubkey
-    return Response.json({ names: {} }, { headers: apiHeaders(snap.version, 0) });
+    const body = buildNostrWellKnown(snap, env.CRAWLER_PUBKEY_HEX);
+    return Response.json(body, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/robots.txt") {
@@ -400,6 +420,7 @@ Contact: ${env.CONTACT}
     if (path === "/contribute") return new Response(renderContribute(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (path === "/docs/api") return new Response(renderDocsApi(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (path === "/docs/nostr-tags") return new Response(renderDocsNostrTags(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (path === "/docs/relay-filters") return new Response(renderDocsRelayFilters(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
   return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });

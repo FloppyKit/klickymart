@@ -35,4 +35,6 @@ interface Env {
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
   PREVIEW_DATA?: string;
+  RELAY_URLS?: string;
+  CRAWLER_PUBKEY_HEX?: string;
 }

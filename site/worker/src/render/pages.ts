@@ -382,4 +382,76 @@ export function renderDocsNostrTags(origin: string, shell: PageShell): string {
   return pageLayout({ title: "Nostr tags", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/docs/nostr-tags" }, shell);
 }
 
+export function renderQueryResults(
+  snap: Snapshot,
+  origin: string,
+  searchParams: URLSearchParams,
+  items: IndexRow[],
+  total: number,
+  shell: PageShell,
+): string {
+  const qs = searchParams.toString();
+  const jsonHref = `/q${qs ? `?${qs}` : ""}`;
+  const tableRows = items.slice(0, 100).map((row) => renderTableRow(row, origin)).join("");
+  const body = `
+<h1>Query results</h1>
+<p class="km-lead">Same filters as <code>GET /q</code>. JSON for agents: <a href="${esc(jsonHref)}">${esc(jsonHref)}</a> (send <code>Accept: application/json</code> from a browser bookmarklet, or use <code>curl</code>).</p>
+<p class="km-muted">${total} matching record${total === 1 ? "" : "s"} · snapshot ${esc(snap.version)}</p>
+<table class="km-table km-table-compact">
+<thead><tr><th>Merchant</th><th>Status</th><th>ag</th><th>BTC</th></tr></thead>
+<tbody>${tableRows || `<tr><td colspan="4" class="km-empty">No matches.</td></tr>`}</tbody>
+</table>
+${total > 100 ? `<p><a href="${esc(`/q?${qs}&format=html`)}">Showing 100 of ${total}</a> · narrow filters or use <a href="/export.ndjson?${esc(qs)}">export.ndjson</a></p>` : ""}
+<p><a href="/docs/api">API docs</a> · <a href="/docs/relay-filters">Relay REQ filters</a></p>`;
+  return pageLayout({
+    title: "Query",
+    origin,
+    version: snap.version,
+    tsMin: snap.meta.ts_min,
+    tsMax: snap.meta.ts_max,
+    body,
+    path: "/q",
+  }, shell);
+}
+
+export function renderDocsRelayFilters(origin: string, shell: PageShell): string {
+  const ns = NIP_CRAWL_NAMESPACE;
+  const body = `
+<h1>Relay REQ filters (kind ${NOSTR_KIND_CRAWL_RECORD})</h1>
+<p class="km-lead">KlickyMart crawl records are Nostr kind ${NOSTR_KIND_CRAWL_RECORD} events. Filterable facts are NIP-32 <code>l</code> tags with shape <code>key:value</code> and label namespace <code>L = ${esc(ns)}</code>.</p>
+<h2>Minimal REQ skeleton</h2>
+<pre class="km-raw">{
+  "kinds": [${NOSTR_KIND_CRAWL_RECORD}],
+  "#L": ["${esc(ns)}"],
+  "#t": ["shopping"]
+}</pre>
+<p>Add <code>#l</code> filters for each fact (values are lowercase).</p>
+<h2>Recipes by <code>#l</code> label</h2>
+<table class="km-table km-table-compact">
+<thead><tr><th>Goal</th><th><code>#l</code> filter</th></tr></thead>
+<tbody>
+<tr><td>Reachable merchants</td><td><code>status:crawled</code></td></tr>
+<tr><td>Blocked by ToS</td><td><code>status:blocked-tos</code></td></tr>
+<tr><td>Agents not welcome</td><td><code>status:agents-not-welcome</code></td></tr>
+<tr><td>Crawl error</td><td><code>status:error</code></td></tr>
+<tr><td>Agent access ≥ 2</td><td><code>ag:2</code> (also <code>ag:3</code>)</td></tr>
+<tr><td>BTC privacy grade 3</td><td><code>btc:3</code></td></tr>
+<tr><td>Accepts Lightning (tag)</td><td><code>pay:ln</code></td></tr>
+<tr><td>Guest checkout</td><td><code>guest:1</code></td></tr>
+</tbody>
+</table>
+<h2>Example: Lightning + guest + BTC grade 2</h2>
+<pre class="km-raw">{
+  "kinds": [${NOSTR_KIND_CRAWL_RECORD}],
+  "#L": ["${esc(ns)}"],
+  "#l": ["status:crawled", "pay:ln", "guest:1", "btc:2"]
+}</pre>
+<h2>Author key</h2>
+<p>Trust official map events from the crawler: NIP-05 <code>bot@klickymart.com</code> via <a href="/.well-known/nostr.json">/.well-known/nostr.json</a>; npub in <a href="/.well-known/klickymart.json">/.well-known/klickymart.json</a> (<code>crawler.npub</code> only).</p>
+<h2>HTTP mirror</h2>
+<p>Same filters on <code>GET /q</code> (JSON or HTML). Example: <a href="/q?btc=2&amp;guest=1&amp;pay=lightning"><code>/q?btc=2&amp;guest=1&amp;pay=lightning</code></a></p>
+<p>Source markdown: repository <code>docs/RELAY-FILTERS.md</code>.</p>`;
+  return pageLayout({ title: "Relay filters", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/docs/relay-filters" }, shell);
+}
+
 export { renderTableRow };
