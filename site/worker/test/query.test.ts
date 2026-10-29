@@ -57,6 +57,13 @@ describe("/q filters", () => {
     const res = await SELF.fetch("https://example.com/q?limit=5");
     expect(res.headers.get("X-KM-Filter-Ms")).toBeTruthy();
   });
+
+  it("includes license metadata", async () => {
+    const res = await SELF.fetch("https://example.com/q?limit=1");
+    const j = (await res.json()) as { license?: { data?: string } };
+    expect(j.license?.data).toBe("CC0-1.0");
+    expect(res.headers.get("X-KM-Data-License")).toBe("CC0-1.0");
+  });
 });
 
 describe("ingest ArrayRecordSource", () => {
