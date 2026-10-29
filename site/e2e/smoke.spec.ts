@@ -102,8 +102,28 @@ for (const theme of ["dark", "light"] as const) {
         await page.goto(`${base}/${qs}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
         await page.waitForSelector("#km-landscape");
-        await page.waitForTimeout(600);
-        await page.screenshot({ path: `e2e/artifacts/home-${stage}-${theme}-desktop.png`, fullPage: false });
+        await page.waitForTimeout(900);
+        await page.screenshot({
+          path: `e2e/artifacts/home-${stage}-${theme}-desktop.png`,
+          fullPage: false,
+          clip: { x: 0, y: 0, width: 1280, height: 720 },
+        });
+      }
+      for (const [stage, qs] of [
+        ["landscape-low", "?reach=0.12&btc=0.08"],
+        ["landscape-mid", "?reach=0.52&btc=0.45"],
+        ["landscape-high", "?reach=0.88&btc=0.92"],
+      ] as const) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(`${base}/${qs}`);
+        await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+        await page.waitForSelector("#km-landscape");
+        await page.waitForTimeout(900);
+        await page.screenshot({
+          path: `e2e/artifacts/home-${stage}-${theme}-mobile.png`,
+          fullPage: false,
+          clip: { x: 0, y: 0, width: 390, height: 844 },
+        });
       }
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${base}/`);

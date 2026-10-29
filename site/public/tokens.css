@@ -19,8 +19,10 @@
   --km-ok:#3df29a; --km-tos:#ff6b8a; --km-anw:#f0b84a; --km-err:#8a93a6;
   --km-glow:0 0 0 1px color-mix(in srgb,var(--km-accent) 40%,transparent),0 0 24px color-mix(in srgb,var(--km-accent) 18%,transparent);
   --km-grid-line:color-mix(in srgb,var(--km-link) 10%,transparent);
-  --km-landscape-sky-top:#07080f;
-  --km-landscape-sky-bot:#151024;
+  --km-landscape-sky-top:#050510;
+  --km-landscape-sky-mid:#12082a;
+  --km-landscape-sky-bot:#2a1048;
+  --km-landscape-grid:#3df29a;
 }
 [data-theme="light"] {
   color-scheme: light;
@@ -32,6 +34,10 @@
   --km-ok:#055c37; --km-tos:#a01d3d; --km-anw:#7a5200; --km-err:#4a5162;
   --km-glow:0 1px 0 var(--km-border), 0 8px 24px rgb(0 0 0 / .06);
   --km-grid-line:rgb(0 0 0 / .06);
+  --km-landscape-sky-top:#87ceeb;
+  --km-landscape-sky-mid:#f9d5b8;
+  --km-landscape-sky-bot:#e8a090;
+  --km-landscape-grid:#055c37;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
@@ -44,6 +50,10 @@
     --km-ok:#055c37; --km-tos:#a01d3d; --km-anw:#7a5200; --km-err:#4a5162;
     --km-glow:0 1px 0 var(--km-border), 0 8px 24px rgb(0 0 0 / .06);
     --km-grid-line:rgb(0 0 0 / .06);
+    --km-landscape-sky-top:#87ceeb;
+    --km-landscape-sky-mid:#f9d5b8;
+    --km-landscape-sky-bot:#e8a090;
+    --km-landscape-grid:#055c37;
   }
 }
 :root {
