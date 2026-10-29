@@ -13,7 +13,7 @@
     "e2e": "playwright test",
     "lint:css": "node scripts/lint-css-dark.js",
     "lint:openapi": "redocly lint openapi/openapi.json 2>/dev/null || node scripts/openapi-check.js",
-    "predev": "node scripts/embed-fixtures.js"
+    "predev": "node scripts/embed-fixtures.js && node scripts/copy-vendor.js"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
-    "@noble/secp256k1": "^3.2.0"
+    "@noble/secp256k1": "^3.2.0",
+    "three": "^0.180.0"
   }
 }

@@ -18,6 +18,7 @@ export interface LayoutOpts {
   previewData?: boolean;
   landscapeReach?: number;
   landscapeBtc?: number;
+  landscapeTier?: number;
 }
 
 export function layout(o: LayoutOpts): string {
@@ -26,6 +27,7 @@ export function layout(o: LayoutOpts): string {
     : "—";
   const reach = typeof o.landscapeReach === "number" ? o.landscapeReach.toFixed(4) : "0";
   const btc = typeof o.landscapeBtc === "number" ? o.landscapeBtc.toFixed(4) : "0";
+  const tierAttr = typeof o.landscapeTier === "number" ? ` data-tier="${o.landscapeTier}"` : "";
   const previewBadge = o.previewData
     ? `<span class="km-preview-badge" role="status">Preview data</span>`
     : "";
@@ -43,7 +45,8 @@ export function layout(o: LayoutOpts): string {
 <body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>
 <div class="km-landscape-wrap" aria-hidden="true">
-  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"></canvas>
+  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}></canvas>
+  <canvas id="km-landscape-gl" class="km-landscape-canvas km-landscape-gl" hidden aria-hidden="true"></canvas>
 </div>
 <header class="km-header" role="banner">
   <a class="km-wordmark" href="/">

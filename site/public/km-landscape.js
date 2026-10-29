@@ -1,9 +1,12 @@
 (function () {
-  var canvas = document.getElementById("km-landscape");
-  if (!canvas || !(canvas instanceof HTMLCanvasElement)) return;
+  var canvas2d = document.getElementById("km-landscape");
+  var canvasGl = document.getElementById("km-landscape-gl");
+  if (!canvas2d || !(canvas2d instanceof HTMLCanvasElement)) return;
 
-  var reach = clamp01(parseFloat(canvas.getAttribute("data-reach") || "0"));
-  var btc = clamp01(parseFloat(canvas.getAttribute("data-btc") || "0"));
+  var reach = clamp01(parseFloat(canvas2d.getAttribute("data-reach") || "0"));
+  var btc = clamp01(parseFloat(canvas2d.getAttribute("data-btc") || "0"));
+  var tierAttr = canvas2d.getAttribute("data-tier");
+  var tierOverride = tierAttr != null && tierAttr !== "" ? parseInt(tierAttr, 10) : null;
   var params = new URLSearchParams(window.location.search);
   if (params.has("reach")) {
     var r = parseFloat(params.get("reach") || "");
@@ -13,9 +16,13 @@
     var b = parseFloat(params.get("btc") || "");
     if (!Number.isNaN(b)) btc = clamp01(b);
   }
+  if (params.has("tier")) {
+    var t = parseInt(params.get("tier") || "", 10);
+    if (!Number.isNaN(t) && t >= 0 && t <= 3) tierOverride = t;
+  }
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var ctx = canvas.getContext("2d");
+  var ctx = canvas2d.getContext("2d");
   if (!ctx) return;
 
   function clamp01(n) {
@@ -38,10 +45,10 @@
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = window.innerWidth;
     var h = window.innerHeight;
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = w + "px";
-    canvas.style.height = h + "px";
+    canvas2d.width = Math.floor(w * dpr);
+    canvas2d.height = Math.floor(h * dpr);
+    canvas2d.style.width = w + "px";
+    canvas2d.style.height = h + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { w: w, h: h };
   }
@@ -122,14 +129,6 @@
       y += gap + stripe;
     }
     ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,220,140,0.45)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
   }
 
   function drawMountains(w, horizon, light) {
@@ -187,6 +186,62 @@
     ctx.restore();
   }
 
+  function drawHighway(w, h, horizon, scroll, green, light) {
+    var vanishX = w * 0.5;
+    var vanishY = horizon;
+    var floorH = h - horizon;
+    var roadW = 0.14 + reach * 0.04;
+
+    ctx.save();
+    ctx.fillStyle = light ? "rgba(12,18,16,0.55)" : "rgba(4,10,8,0.75)";
+    ctx.beginPath();
+    ctx.moveTo(vanishX, vanishY);
+    ctx.lineTo(w * (0.5 + roadW), h);
+    ctx.lineTo(w * (0.5 - roadW), h);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(vanishX, vanishY);
+    ctx.lineTo(w * (0.5 - roadW * 0.85), h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(vanishX, vanishY);
+    ctx.lineTo(w * (0.5 + roadW * 0.85), h);
+    ctx.stroke();
+
+    var dashes = 18 + Math.floor(reach * 12);
+    for (var i = 0; i <= dashes; i++) {
+      var z = (i / dashes + scroll) % 1;
+      var depth = z * z;
+      var y = vanishY + floorH * depth;
+      var half = roadW * depth * w * 0.9;
+      if (i % 2 === 0) {
+        ctx.strokeStyle = "rgba(255,220,120,0.85)";
+        ctx.lineWidth = 1 + (1 - depth) * 2;
+        ctx.beginPath();
+        ctx.moveTo(vanishX, y);
+        ctx.lineTo(vanishX, y + 4 + (1 - depth) * 10);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = green;
+      ctx.globalAlpha = 0.25 + (1 - depth) * 0.35;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(vanishX - half, y);
+      ctx.lineTo(vanishX - half * 0.98, y + 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(vanishX + half, y);
+      ctx.lineTo(vanishX + half * 0.98, y + 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
   function drawFloor(w, h, horizon, scroll, light) {
     var floorH = h - horizon;
     var fg = ctx.createLinearGradient(0, horizon, 0, h);
@@ -239,19 +294,16 @@
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
+    drawHighway(w, h, horizon, scroll, green, light);
     drawHorizonGlow(w, horizon, green, light);
-
-    if (reach > 0.65) {
-      ctx.fillStyle = light ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.025)";
-      for (var s = 0; s < 80; s++) {
-        var nx = (s * 97) % w;
-        var ny = horizon + ((s * 53) % Math.floor(floorH));
-        ctx.fillRect(nx, ny, 1, 1);
-      }
-    }
   }
 
+  var glActive = false;
+  var running2d = false;
+  var raf2d = 0;
+
   function drawFrame(t) {
+    if (glActive) return;
     var size = resize();
     var w = size.w;
     var h = size.h;
@@ -263,49 +315,80 @@
     drawSun(w, horizon, light);
     drawMountains(w, horizon, light);
     drawFloor(w, h, horizon, scroll, light);
+    window.__kmLandscapeReady = true;
   }
 
-  var running = false;
-  var raf = 0;
-
-  function startAnim() {
-    if (reduced || running) return;
-    running = true;
+  function startAnim2d() {
+    if (reduced || running2d || glActive) return;
+    running2d = true;
     function loop(ts) {
       drawFrame(ts);
-      raf = requestAnimationFrame(loop);
+      raf2d = requestAnimationFrame(loop);
     }
-    raf = requestAnimationFrame(loop);
+    raf2d = requestAnimationFrame(loop);
+  }
+
+  function boot2d() {
+    drawFrame(0);
+    if (!reduced) startAnim2d();
+  }
+
+  function tryWebGL() {
+    if (!canvasGl || reduced) return;
+    import("/km-landscape-webgl.js")
+      .then(function (mod) {
+        var mount = mod.mountLandscapeWebGL || mod.default;
+        if (!mount) return;
+        var res = mount({
+          glCanvas: canvasGl,
+          fallbackCanvas: canvas2d,
+          reach: reach,
+          btc: btc,
+          tierOverride: tierOverride,
+          reducedMotion: reduced,
+          isLightTheme: isLightTheme,
+        });
+        if (res && res.ok) {
+          glActive = true;
+          running2d = false;
+          cancelAnimationFrame(raf2d);
+        }
+      })
+      .catch(function () {
+        /* keep 2D fallback */
+      });
   }
 
   function boot() {
-    drawFrame(0);
-    if (!reduced) startAnim();
+    boot2d();
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(function () { tryWebGL(); }, { timeout: 1200 });
+    } else {
+      setTimeout(tryWebGL, 120);
+    }
   }
 
   if ("IntersectionObserver" in window) {
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting) {
-          if ("requestIdleCallback" in window) {
-            requestIdleCallback(function () { boot(); }, { timeout: 800 });
-          } else {
-            setTimeout(boot, 50);
-          }
+          boot();
           io.disconnect();
         }
       });
     }, { rootMargin: "0px" });
-    io.observe(canvas);
+    io.observe(canvas2d);
   } else {
     boot();
   }
 
   window.addEventListener("resize", function () {
-    drawFrame(reduced ? 0 : performance.now());
+    if (!glActive) drawFrame(reduced ? 0 : performance.now());
   });
 
   document.getElementById("km-theme-toggle")?.addEventListener("click", function () {
-    setTimeout(function () { drawFrame(reduced ? 0 : performance.now()); }, 50);
+    setTimeout(function () {
+      if (!glActive) drawFrame(reduced ? 0 : performance.now());
+    }, 50);
   });
 })();

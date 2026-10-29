@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeReachShare, computeBtcSunScore } from "../src/landscape-metrics";
+import { computeReachShare, computeBtcSunScore, reachToLandscapeFidelity } from "../src/landscape-metrics";
 import type { IndexRow } from "../src/index-mem";
 
 function row(partial: Partial<IndexRow> & { d: string }): IndexRow {
@@ -37,6 +37,12 @@ describe("landscape metrics", () => {
       row({ d: "b.com", ag: 0 }),
     ]);
     expect(share).toBe(0.5);
+  });
+
+  it("maps reach to fidelity 0-3", () => {
+    expect(reachToLandscapeFidelity(0)).toBe(0);
+    expect(reachToLandscapeFidelity(0.5)).toBe(1.5);
+    expect(reachToLandscapeFidelity(1)).toBe(3);
   });
 
   it("weights private btc methods", () => {

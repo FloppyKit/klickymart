@@ -105,11 +105,16 @@ export function landscapeFormulaInputs(rows: IndexRow[]): LandscapeFormulaInputs
   };
 }
 
+export function reachToLandscapeFidelity(reach: number): number {
+  return Math.max(0, Math.min(3, reach * 3));
+}
+
 export function parseLandscapeOverride(
   reachRaw: string | null,
   btcRaw: string | null,
-): { reach?: number; btc?: number } {
-  const out: { reach?: number; btc?: number } = {};
+  tierRaw: string | null = null,
+): { reach?: number; btc?: number; tier?: number } {
+  const out: { reach?: number; btc?: number; tier?: number } = {};
   if (reachRaw !== null && reachRaw !== "") {
     const n = Number(reachRaw);
     if (Number.isFinite(n) && n >= 0 && n <= 1) out.reach = n;
@@ -117,6 +122,10 @@ export function parseLandscapeOverride(
   if (btcRaw !== null && btcRaw !== "") {
     const n = Number(btcRaw);
     if (Number.isFinite(n) && n >= 0 && n <= 1) out.btc = n;
+  }
+  if (tierRaw !== null && tierRaw !== "") {
+    const t = parseInt(tierRaw, 10);
+    if (!Number.isNaN(t) && t >= 0 && t <= 3) out.tier = t;
   }
   return out;
 }

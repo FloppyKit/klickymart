@@ -36,6 +36,7 @@ function pageLayout(
     previewData: shell.previewData,
     landscapeReach: shell.landscapeReach,
     landscapeBtc: shell.landscapeBtc,
+    landscapeTier: shell.landscapeTier,
   });
 }
 
@@ -292,7 +293,8 @@ export function renderAbout(origin: string, snap: Snapshot, shell: PageShell): s
 <ul>
 <li><strong>Reach</strong> — share of indexed merchants with <code>status=crawled</code> and agent access <code>ag≥1</code>, in <code>[0,1]</code>. Grid line opacity scales with reach.</li>
 <li><strong>BTC sun</strong> — mean private-Bitcoin score across merchants that accept BTC, weighted toward Lightning, ecash (Cashu/Fedimint), self-hosted / no-account grades (<code>btc</code> grade and <code>btcpriv</code> hints). Sun height and glow scale with this score.</li>
-<li><strong>Preview</strong> — append <code>?reach=0.0–1.0&amp;btc=0.0–1.0</code> to any page to preview stages without changing data.</li>
+<li><strong>Preview</strong> — append <code>?reach=0.0–1.0&amp;btc=0.0–1.0</code> to any page to preview stages without changing data. Force fidelity tier <code>0–3</code> with <code>?tier=</code> (overrides reach-driven blending).</li>
+<li><strong>Fidelity tiers</strong> — reach maps to continuous fidelity <code>0–3</code> (wireframe → flat poly → textured PS2-ish → Switch-ish). WebGL loads after first paint; canvas 2D is the fallback.</li>
 <li><strong>Reduced motion</strong> — with <code>prefers-reduced-motion</code>, one static frame is drawn (no animation).</li>
 </ul></section>
 <section id="limits"><h2>Limits</h2><p>All requests come from one datacenter IP address. Sites often treat datacenter traffic differently from home connections, so a block here may not be a block for you.</p></section>

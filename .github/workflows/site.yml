@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci --legacy-peer-deps
       - run: node scripts/embed-fixtures.js
+      - run: node scripts/copy-vendor.js
       - run: npm run typecheck
       - run: npm test
       - run: npm run bench
