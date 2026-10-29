@@ -1,0 +1,2002 @@
+[
+ {
+  "name": "Google Store",
+  "url": "https://store.google.com",
+  "d": "store.google.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://microsoft.com",
+  "d": "microsoft.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://apple.com",
+  "d": "apple.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "Amazon.com. Spend less. Smile more.",
+  "url": "https://amazon.com",
+  "d": "amazon.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://netflix.com",
+  "d": "netflix.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://adobe.com",
+  "d": "adobe.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Spotify",
+  "url": "https://spotify.com",
+  "d": "spotify.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://epicgames.com",
+  "d": "epicgames.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Samsung",
+  "url": "https://samsung.com",
+  "d": "samsung.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "Dropbox",
+  "url": "https://dropbox.com",
+  "d": "dropbox.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://godaddy.com",
+  "d": "godaddy.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://shopify.com",
+  "d": "shopify.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://ebay.com",
+  "d": "ebay.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Namecheap",
+  "url": "https://namecheap.com",
+  "d": "namecheap.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://canva.com",
+  "d": "canva.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "HP\u00ae Official Site",
+  "url": "https://hp.com",
+  "d": "hp.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://booking.com",
+  "d": "booking.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Welcome to Steam",
+  "url": "https://steampowered.com",
+  "d": "steampowered.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Alibaba",
+  "url": "https://alibaba.com",
+  "d": "alibaba.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://etsy.com",
+  "d": "etsy.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Dell",
+  "url": "https://dell.com",
+  "d": "dell.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "temu",
+  "url": "https://temu.com",
+  "d": "temu.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Walmart.com",
+  "url": "https://walmart.com",
+  "d": "walmart.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "SHEIN",
+  "url": "https://shein.com",
+  "d": "shein.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "AliExpress",
+  "url": "https://aliexpress.com",
+  "d": "aliexpress.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Eventbrite",
+  "url": "https://eventbrite.com",
+  "d": "eventbrite.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://store.playstation.com",
+  "d": "store.playstation.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Squarespace",
+  "url": "https://squarespace.com",
+  "d": "squarespace.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://target.com",
+  "d": "target.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "wix.com",
+  "url": "https://wix.com",
+  "d": "wix.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "IKEA",
+  "url": "https://ikea.com",
+  "d": "ikea.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://nintendo.com",
+  "d": "nintendo.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Nike.com",
+  "url": "https://nike.com",
+  "d": "nike.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://ring.com",
+  "d": "ring.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "The Home Depot",
+  "url": "https://homedepot.com",
+  "d": "homedepot.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://craigslist.org",
+  "d": "craigslist.org",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://marriott.com",
+  "d": "marriott.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Airbnb",
+  "url": "https://airbnb.com",
+  "d": "airbnb.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://bestbuy.com",
+  "d": "bestbuy.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://lenovo.com",
+  "d": "lenovo.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://rakuten.com",
+  "d": "rakuten.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://disneyplus.com",
+  "d": "disneyplus.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://discogs.com",
+  "d": "discogs.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "porkbun.com",
+  "url": "https://porkbun.com",
+  "d": "porkbun.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Agoda.com",
+  "url": "https://agoda.com",
+  "d": "agoda.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://lg.com",
+  "d": "lg.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hm.com",
+  "d": "hm.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://lowes.com",
+  "d": "lowes.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": "Welcome to Costco Wholesale",
+  "url": "https://costco.com",
+  "d": "costco.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hilton.com",
+  "d": "hilton.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://t-mobile.com",
+  "d": "t-mobile.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "Garmin",
+  "url": "https://garmin.com",
+  "d": "garmin.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "AT&T",
+  "url": "https://att.com",
+  "d": "att.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://kohls.com",
+  "d": "kohls.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://tesla.com",
+  "d": "tesla.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://max.com",
+  "d": "max.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "xbox.com",
+  "url": "https://xbox.com",
+  "d": "xbox.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://paramountplus.com",
+  "d": "paramountplus.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "1Password",
+  "url": "https://1password.com",
+  "d": "1password.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hulu.com",
+  "d": "hulu.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Vinted",
+  "url": "https://vinted.com",
+  "d": "vinted.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "Ticketmaster US",
+  "url": "https://ticketmaster.com",
+  "d": "ticketmaster.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://logitech.com",
+  "d": "logitech.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "Trip.com-Verification",
+  "url": "https://trip.com",
+  "d": "trip.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://sony.com",
+  "d": "sony.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://barnesandnoble.com",
+  "d": "barnesandnoble.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "Home",
+  "url": "https://lego.com",
+  "d": "lego.com",
+  "cat": [
+   "toy"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://expedia.com",
+  "d": "expedia.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://ihg.com",
+  "d": "ihg.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Verizon",
+  "url": "https://verizon.com",
+  "d": "verizon.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://peacocktv.com",
+  "d": "peacocktv.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Fast Same Day Delivery",
+  "url": "https://doordash.com",
+  "d": "doordash.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://toasttab.com",
+  "d": "toasttab.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hyatt.com",
+  "d": "hyatt.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "NordVPN",
+  "url": "https://nordvpn.com",
+  "d": "nordvpn.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "Audible.com",
+  "url": "https://audible.com",
+  "d": "audible.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://instacart.com",
+  "d": "instacart.com",
+  "cat": [
+   "groc"
+  ]
+ },
+ {
+  "name": "Wayfair",
+  "url": "https://wayfair.com",
+  "d": "wayfair.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": "Hotwire.com",
+  "url": "https://hotwire.com",
+  "d": "hotwire.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Sonos",
+  "url": "https://sonos.com",
+  "d": "sonos.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://proton.me",
+  "d": "proton.me",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://starbucks.com",
+  "d": "starbucks.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://blueapron.com",
+  "d": "blueapron.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": "Uber Eats",
+  "url": "https://ubereats.com",
+  "d": "ubereats.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": "Redbubble",
+  "url": "https://redbubble.com",
+  "d": "redbubble.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://vrbo.com",
+  "d": "vrbo.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://united.com",
+  "d": "united.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://adidas.com",
+  "d": "adidas.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "GOG.COM",
+  "url": "https://gog.com",
+  "d": "gog.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://walgreens.com",
+  "d": "walgreens.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://zara.com",
+  "d": "zara.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://delta.com",
+  "d": "delta.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://samsclub.com",
+  "d": "samsclub.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://aa.com",
+  "d": "aa.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://mcdonalds.com",
+  "d": "mcdonalds.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://macys.com",
+  "d": "macys.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hotels.com",
+  "d": "hotels.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "TeePublic",
+  "url": "https://teepublic.com",
+  "d": "teepublic.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": "AbeBooks",
+  "url": "https://abebooks.com",
+  "d": "abebooks.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://bitwarden.com",
+  "d": "bitwarden.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://tcgplayer.com",
+  "d": "tcgplayer.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "Your Go-to Marketplace for Deals on Used & Secondhand Items",
+  "url": "https://mercari.com",
+  "d": "mercari.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://gap.com",
+  "d": "gap.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://uniqlo.com",
+  "d": "uniqlo.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "CVS",
+  "url": "https://cvs.com",
+  "d": "cvs.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": "Razer",
+  "url": "https://razer.com",
+  "d": "razer.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://poshmark.com",
+  "d": "poshmark.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://chewy.com",
+  "d": "chewy.com",
+  "cat": [
+   "pet"
+  ]
+ },
+ {
+  "name": "iHerb",
+  "url": "https://iherb.com",
+  "d": "iherb.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": "ExpressVPN",
+  "url": "https://expressvpn.com",
+  "d": "expressvpn.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://cargurus.com",
+  "d": "cargurus.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": "Southwest Airlines",
+  "url": "https://southwest.com",
+  "d": "southwest.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Shutterfly",
+  "url": "https://shutterfly.com",
+  "d": "shutterfly.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://revolve.com",
+  "d": "revolve.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://victoriassecret.com",
+  "d": "victoriassecret.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://farfetch.com",
+  "d": "farfetch.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://cars.com",
+  "d": "cars.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://gamestop.com",
+  "d": "gamestop.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://kayak.com",
+  "d": "kayak.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Cruises",
+  "url": "https://carnival.com",
+  "d": "carnival.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Priceline.com",
+  "url": "https://priceline.com",
+  "d": "priceline.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "DJI Official",
+  "url": "https://dji.com",
+  "d": "dji.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://dickssportinggoods.com",
+  "d": "dickssportinggoods.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://rei.com",
+  "d": "rei.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://depop.com",
+  "d": "depop.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "Ulta Beauty",
+  "url": "https://ulta.com",
+  "d": "ulta.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://kroger.com",
+  "d": "kroger.com",
+  "cat": [
+   "groc"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://gopuff.com",
+  "d": "gopuff.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://dhgate.com",
+  "d": "dhgate.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://qvc.com",
+  "d": "qvc.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Zappos.com",
+  "url": "https://zappos.com",
+  "d": "zappos.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://jcpenney.com",
+  "d": "jcpenney.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": "Zazzle",
+  "url": "https://zazzle.com",
+  "d": "zazzle.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://michaels.com",
+  "d": "michaels.com",
+  "cat": [
+   "craft"
+  ]
+ },
+ {
+  "name": "Newegg.com",
+  "url": "https://newegg.com",
+  "d": "newegg.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://dominos.com",
+  "d": "dominos.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://sephora.com",
+  "d": "sephora.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://vistaprint.com",
+  "d": "vistaprint.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": "Autotrader",
+  "url": "https://autotrader.com",
+  "d": "autotrader.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": "Nordstrom",
+  "url": "https://nordstrom.com",
+  "d": "nordstrom.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://menards.com",
+  "d": "menards.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://g2a.com",
+  "d": "g2a.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://bookshop.org",
+  "d": "bookshop.org",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "Canon Global",
+  "url": "https://canon.com",
+  "d": "canon.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://lululemon.com",
+  "d": "lululemon.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://swarovski.com",
+  "d": "swarovski.com",
+  "cat": [
+   "jewel"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://stubhub.com",
+  "d": "stubhub.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": "Royal Caribbean Cruises",
+  "url": "https://royalcaribbean.com",
+  "d": "royalcaribbean.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Harbor Freight",
+  "url": "https://harborfreight.com",
+  "d": "harborfreight.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://carmax.com",
+  "d": "carmax.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://tractorsupply.com",
+  "d": "tractorsupply.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": "SKECHERS US",
+  "url": "https://skechers.com",
+  "d": "skechers.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://thriftbooks.com",
+  "d": "thriftbooks.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "GoodRx",
+  "url": "https://goodrx.com",
+  "d": "goodrx.com",
+  "cat": [
+   "beau"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://axs.com",
+  "d": "axs.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://fanatics.com",
+  "d": "fanatics.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://puma.com",
+  "d": "puma.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "Fandango",
+  "url": "https://fandango.com",
+  "d": "fandango.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://torrid.com",
+  "d": "torrid.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://oreillyauto.com",
+  "d": "oreillyauto.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": "Scholastic",
+  "url": "https://scholastic.com",
+  "d": "scholastic.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "Mullvad VPN",
+  "url": "https://mullvad.net",
+  "d": "mullvad.net",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://academy.com",
+  "d": "academy.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://tacobell.com",
+  "d": "tacobell.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": "Hobby Lobby Arts & Crafts Store",
+  "url": "https://hobbylobby.com",
+  "d": "hobbylobby.com",
+  "cat": [
+   "craft"
+  ]
+ },
+ {
+  "name": "Wyndham Hotels & Resorts",
+  "url": "https://wyndhamhotels.com",
+  "d": "wyndhamhotels.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://bhphotovideo.com",
+  "d": "bhphotovideo.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://acehardware.com",
+  "d": "acehardware.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://cafepress.com",
+  "d": "cafepress.com",
+  "cat": [
+   "gift"
+  ]
+ },
+ {
+  "name": "Whoops, we couldn't find that.",
+  "url": "https://grainger.com",
+  "d": "grainger.com",
+  "cat": [
+   "office"
+  ]
+ },
+ {
+  "name": "ULINE",
+  "url": "https://uline.com",
+  "d": "uline.com",
+  "cat": [
+   "office"
+  ]
+ },
+ {
+  "name": "Carvana",
+  "url": "https://carvana.com",
+  "d": "carvana.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://gopro.com",
+  "d": "gopro.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": "ThredUp",
+  "url": "https://thredup.com",
+  "d": "thredup.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "Whatnot",
+  "url": "https://whatnot.com",
+  "d": "whatnot.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://stockx.com",
+  "d": "stockx.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "The RealReal",
+  "url": "https://therealreal.com",
+  "d": "therealreal.com",
+  "cat": [
+   "mkt"
+  ]
+ },
+ {
+  "name": "Bed Bath & Beyond",
+  "url": "https://bedbathandbeyond.com",
+  "d": "bedbathandbeyond.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": "Anker",
+  "url": "https://anker.com",
+  "d": "anker.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://mattel.com",
+  "d": "mattel.com",
+  "cat": [
+   "toy"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://humblebundle.com",
+  "d": "humblebundle.com",
+  "cat": [
+   "sw"
+  ]
+ },
+ {
+  "name": "JetBlue",
+  "url": "https://jetblue.com",
+  "d": "jetblue.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Client Challenge",
+  "url": "https://hollisterco.com",
+  "d": "hollisterco.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://autozone.com",
+  "d": "autozone.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": "Patagonia Outdoor Clothing & Gear",
+  "url": "https://patagonia.com",
+  "d": "patagonia.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://staples.com",
+  "d": "staples.com",
+  "cat": [
+   "office"
+  ]
+ },
+ {
+  "name": "eufy",
+  "url": "https://eufy.com",
+  "d": "eufy.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://corsair.com",
+  "d": "corsair.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://alaskaair.com",
+  "d": "alaskaair.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Whole Foods Market",
+  "url": "https://wholefoodsmarket.com",
+  "d": "wholefoodsmarket.com",
+  "cat": [
+   "groc"
+  ]
+ },
+ {
+  "name": "PetSmart",
+  "url": "https://petsmart.com",
+  "d": "petsmart.com",
+  "cat": [
+   "pet"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://choicehotels.com",
+  "d": "choicehotels.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "Under Armour",
+  "url": "https://underarmour.com",
+  "d": "underarmour.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://officedepot.com",
+  "d": "officedepot.com",
+  "cat": [
+   "office"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://booksamillion.com",
+  "d": "booksamillion.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "Bose",
+  "url": "https://bose.com",
+  "d": "bose.com",
+  "cat": [
+   "elec"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://coach.com",
+  "d": "coach.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "Grubhub",
+  "url": "https://grubhub.com",
+  "d": "grubhub.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hsn.com",
+  "d": "hsn.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hottopic.com",
+  "d": "hottopic.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://subway.com",
+  "d": "subway.com",
+  "cat": [
+   "food"
+  ]
+ },
+ {
+  "name": "AMC Theatres",
+  "url": "https://amctheatres.com",
+  "d": "amctheatres.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": "Wish",
+  "url": "https://wish.com",
+  "d": "wish.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://petco.com",
+  "d": "petco.com",
+  "cat": [
+   "pet"
+  ]
+ },
+ {
+  "name": "Chegg",
+  "url": "https://chegg.com",
+  "d": "chegg.com",
+  "cat": [
+   "book"
+  ]
+ },
+ {
+  "name": "Official Dyson\u00ae Website",
+  "url": "https://dyson.com",
+  "d": "dyson.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://seatgeek.com",
+  "d": "seatgeek.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": "Client Challenge",
+  "url": "https://abercrombie.com",
+  "d": "abercrombie.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://amtrak.com",
+  "d": "amtrak.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://potterybarn.com",
+  "d": "potterybarn.com",
+  "cat": [
+   "home"
+  ]
+ },
+ {
+  "name": "Nordstrom Rack",
+  "url": "https://nordstromrack.com",
+  "d": "nordstromrack.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://travelocity.com",
+  "d": "travelocity.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": "https://www.hertz.com",
+  "url": "https://hertz.com",
+  "d": "hertz.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://neimanmarcus.com",
+  "d": "neimanmarcus.com",
+  "cat": [
+   "gen"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://basspro.com",
+  "d": "basspro.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://levi.com",
+  "d": "levi.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "L.L.Bean",
+  "url": "https://llbean.com",
+  "d": "llbean.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://cabelas.com",
+  "d": "cabelas.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": "NCL",
+  "url": "https://ncl.com",
+  "d": "ncl.com",
+  "cat": [
+   "trav"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://anthropologie.com",
+  "d": "anthropologie.com",
+  "cat": [
+   "appr"
+  ]
+ },
+ {
+  "name": "Trek Bikes",
+  "url": "https://trekbikes.com",
+  "d": "trekbikes.com",
+  "cat": [
+   "sport"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://cricut.com",
+  "d": "cricut.com",
+  "cat": [
+   "craft"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://summitracing.com",
+  "d": "summitracing.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://partsgeek.com",
+  "d": "partsgeek.com",
+  "cat": [
+   "auto"
+  ]
+ },
+ {
+  "name": "Live Nation",
+  "url": "https://livenation.com",
+  "d": "livenation.com",
+  "cat": [
+   "tix"
+  ]
+ },
+ {
+  "name": "Ledger",
+  "url": "https://shop.ledger.com",
+  "d": "shop.ledger.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Trezor",
+  "url": "https://shop.trezor.io",
+  "d": "shop.trezor.io",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Bitcoin Magazine",
+  "url": "https://bitcoinmagazine.com",
+  "d": "bitcoinmagazine.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Bitrefill",
+  "url": "https://bitrefill.com",
+  "d": "bitrefill.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Primal",
+  "url": "https://primal.net",
+  "d": "primal.net",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://store.blockstream.com",
+  "d": "store.blockstream.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "The Bitcoin Company",
+  "url": "https://thebitcoincompany.com",
+  "d": "thebitcoincompany.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://swanbitcoin.com",
+  "d": "swanbitcoin.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://river.com",
+  "d": "river.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Coincards.com",
+  "url": "https://coincards.com",
+  "d": "coincards.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Fountain: Podcasts & Music",
+  "url": "https://fountain.fm",
+  "d": "fountain.fm",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Strike",
+  "url": "https://strike.me",
+  "d": "strike.me",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://coinkite.com",
+  "d": "coinkite.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://store.coinkite.com",
+  "d": "store.coinkite.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Bisq - A decentralized bitcoin exchange network",
+  "url": "https://bisq.network",
+  "d": "bisq.network",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://hodlhodl.com",
+  "d": "hodlhodl.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "CryptoCloaks",
+  "url": "https://cryptocloaks.com",
+  "d": "cryptocloaks.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Foundation",
+  "url": "https://foundation.xyz",
+  "d": "foundation.xyz",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Start9",
+  "url": "https://start9.com",
+  "d": "start9.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://opennode.com",
+  "d": "opennode.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "Bitkey",
+  "url": "https://bitkey.world",
+  "d": "bitkey.world",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://satoshistore.io",
+  "d": "satoshistore.io",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://bitcoinstore.com",
+  "d": "bitcoinstore.com",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": "nodl",
+  "url": "https://nodl.it",
+  "d": "nodl.it",
+  "cat": [
+   "btcnative"
+  ]
+ },
+ {
+  "name": null,
+  "url": "https://fold.me",
+  "d": "fold.me",
+  "cat": [
+   "btcnative"
+  ]
+ }
+]
