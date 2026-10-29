@@ -32,6 +32,9 @@ export async function waitForWebGLLandscape(page: Page, expectedTier: number): P
     { timeout: 25_000 },
   );
   await page.waitForTimeout(600);
+  await page.waitForFunction(() => (window as unknown as { __kmLandscapeFrameCount?: number }).__kmLandscapeFrameCount! >= 8, {
+    timeout: 15_000,
+  });
 }
 
 export async function assertWebGLLandscape(page: Page, expectedTier: number): Promise<void> {
@@ -72,4 +75,34 @@ export function pixelDiffRatio(pathA: string, pathB: string): number {
 export function expectMeaningfulPixelDiff(pathA: string, pathB: string, minRatio = 0.015): void {
   const ratio = pixelDiffRatio(pathA, pathB);
   expect(ratio, `expected pixel diff >= ${minRatio}, got ${ratio}`).toBeGreaterThanOrEqual(minRatio);
+}
+
+/** Sample a horizontal band for neon grid / road (green channel). */
+export function expectRoadPixelsInBand(
+  path: string,
+  yStartRatio: number,
+  yEndRatio: number,
+  minAvgGreen = 28,
+): void {
+  const p = PNG.sync.read(fs.readFileSync(path));
+  const w = p.width;
+  const h = p.height;
+  let g = 0;
+  let n = 0;
+  const y0 = Math.floor(h * yStartRatio);
+  const y1 = Math.floor(h * yEndRatio);
+  for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
+    for (let y = y0; y < y1; y += 2) {
+      g += p.data[(y * w + x) * 4 + 1];
+      n++;
+    }
+  }
+  const avg = g / n;
+  expect(avg, `expected road/grid green avg >= ${minAvgGreen}, got ${avg.toFixed(1)}`).toBeGreaterThanOrEqual(
+    minAvgGreen,
+  );
+}
+
+export function expectRoadPixelsInLowerBand(path: string, minAvgGreen = 28): void {
+  expectRoadPixelsInBand(path, 0.55, 0.98, minAvgGreen);
 }

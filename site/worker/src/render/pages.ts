@@ -37,6 +37,7 @@ function pageLayout(
     landscapeReach: shell.landscapeReach,
     landscapeBtc: shell.landscapeBtc,
     landscapeTier: shell.landscapeTier,
+    sceneOnly: shell.sceneOnly,
   });
 }
 
@@ -60,6 +61,7 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
   }).join("");
 
   const body = `
+<div class="km-home-scene-gap" aria-hidden="true"></div>
 <section class="km-hero km-hero-panel km-home-hero">
   ${eyebrow("OPEN DATA · SIGNED RECORDS · NO LOGIN")}
   <h1>Where agents shop.</h1>

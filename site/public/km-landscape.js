@@ -20,6 +20,9 @@
     var t = parseInt(params.get("tier") || "", 10);
     if (!Number.isNaN(t) && t >= 0 && t <= 3) tierOverride = t;
   }
+  if (params.get("scene") === "1") {
+    document.body.classList.add("km-scene-only");
+  }
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var ctx = canvas2d.getContext("2d");
@@ -59,7 +62,7 @@
   }
 
   function drawSky(w, h, light) {
-    var horizon = h * (0.44 + reach * 0.06);
+    var horizon = h * (0.52 + reach * 0.04);
     var g = ctx.createLinearGradient(0, 0, 0, horizon);
     if (light) {
       g.addColorStop(0, css("--km-landscape-sky-top", "#8ec5f0"));
@@ -349,7 +352,7 @@
 
   function tryWebGL() {
     if (!canvasGl || reduced) return;
-    import("/km-landscape-webgl.js")
+    import("/km-landscape-webgl.js?v=4")
       .then(function (mod) {
         var mount = mod.mountLandscapeWebGL || mod.default;
         if (!mount) return;

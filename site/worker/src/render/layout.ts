@@ -19,6 +19,7 @@ export interface LayoutOpts {
   landscapeReach?: number;
   landscapeBtc?: number;
   landscapeTier?: number;
+  sceneOnly?: boolean;
 }
 
 export function layout(o: LayoutOpts): string {
@@ -42,7 +43,7 @@ export function layout(o: LayoutOpts): string {
 <link rel="stylesheet" href="/km.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
-<body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}">
+<body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}${o.sceneOnly ? " km-scene-only" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>
 <div class="km-landscape-wrap" aria-hidden="true">
   <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}></canvas>

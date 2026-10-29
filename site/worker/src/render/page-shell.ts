@@ -6,6 +6,7 @@ export interface PageShell {
   landscapeReach: number;
   landscapeBtc: number;
   landscapeTier?: number;
+  sceneOnly?: boolean;
 }
 
 export function isPreviewDataMode(env: { PREVIEW_DATA?: string }): boolean {
@@ -18,10 +19,12 @@ export function buildPageShell(snap: Snapshot, env: { PREVIEW_DATA?: string }, u
   const override = url
     ? parseLandscapeOverride(url.searchParams.get("reach"), url.searchParams.get("btc"), url.searchParams.get("tier"))
     : {};
+  const sceneOnly = url?.searchParams.get("scene") === "1";
   return {
     previewData: isPreviewDataMode(env),
     landscapeReach: override.reach ?? metrics.reach,
     landscapeBtc: override.btc ?? metrics.btc,
     landscapeTier: override.tier,
+    sceneOnly,
   };
 }

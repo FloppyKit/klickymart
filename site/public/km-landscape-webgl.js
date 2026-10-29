@@ -17,23 +17,30 @@ uniform vec3 uTop;
 uniform vec3 uMid;
 uniform vec3 uBot;
 uniform float uFidelity;
+uniform float uTime;
 varying vec3 vWorld;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 void main() {
   float h = normalize(vWorld).y * 0.5 + 0.5;
-  vec3 col = mix(uBot, uMid, smoothstep(0.0, 0.55, h));
-  col = mix(col, uTop, smoothstep(0.45, 1.0, h));
-  float stars = step(2.1, uFidelity) * step(0.92, h) * fract(sin(dot(vWorld.xz, vec2(12.9898,78.233))) * 43758.5453);
-  col += vec3(stars * 0.35);
-  col += vec3(0.12, 0.06, 0.18) * smoothstep(2.4, 3.0, uFidelity) * (1.0 - h);
+  vec3 col = mix(uBot, uMid, smoothstep(0.0, 0.52, h));
+  col = mix(col, uTop, smoothstep(0.42, 1.0, h));
+  float starGate = smoothstep(1.6, 2.2, uFidelity);
+  float twinkle = 0.85 + 0.15 * sin(uTime * 0.002 + hash(vWorld.xz) * 40.0);
+  float stars = starGate * step(0.88, h) * step(0.92, hash(floor(vWorld.xz * 120.0)));
+  col += vec3(0.9, 0.95, 1.0) * stars * twinkle * (0.25 + smoothstep(2.5, 3.0, uFidelity) * 0.45);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
 const ROAD_VERT = /* glsl */ `
+uniform float uCamZ;
 varying vec2 vUv;
 varying float vDist;
+varying vec3 vWorld;
 void main() {
   vUv = uv;
-  vDist = -position.y;
+  vDist = uCamZ - position.z;
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorld = wp.xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -42,9 +49,7 @@ uniform float uScroll;
 uniform float uFidelity;
 uniform float uBtc;
 uniform vec3 uGrid;
-uniform vec3 uMid;
 uniform vec3 uSunDir;
-uniform float uLight;
 varying vec2 vUv;
 varying float vDist;
 
@@ -52,44 +57,38 @@ float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 
 void main() {
   float z = vDist + uScroll;
-  float depth = clamp(z / 120.0, 0.0, 1.0);
   float center = abs(vUv.x - 0.5);
-  float onRoad = 1.0 - smoothstep(0.22, 0.28, center);
+  float onRoad = 1.0 - smoothstep(0.07, 0.11, center);
+  float onFloor = 1.0 - onRoad;
 
   float wire = 1.0 - smoothstep(0.0, 0.35, uFidelity);
-  float flat = smoothstep(0.2, 0.9, uFidelity) * (1.0 - smoothstep(1.8, 2.4, uFidelity));
-  float ps2 = smoothstep(1.4, 2.2, uFidelity) * (1.0 - smoothstep(2.6, 3.0, uFidelity));
-  float sw = smoothstep(2.3, 2.95, uFidelity);
+  float flat = smoothstep(0.25, 0.95, uFidelity) * (1.0 - smoothstep(1.85, 2.35, uFidelity));
+  float tex = smoothstep(1.55, 2.15, uFidelity) * (1.0 - smoothstep(2.45, 3.0, uFidelity));
+  float ps2 = smoothstep(2.35, 2.95, uFidelity);
 
-  vec3 base = vec3(0.02, 0.06, 0.05);
-  base = mix(base, vec3(0.05, 0.08, 0.07), flat + ps2 + sw);
-  base = mix(base, uGrid * 0.08, onRoad * (flat + ps2 + sw));
+  vec3 base = mix(vec3(0.04, 0.12, 0.1), vec3(0.09, 0.1, 0.12), onRoad);
 
-  float gridX = abs(fract(vUv.x * 24.0) - 0.5);
-  float gridZ = abs(fract(z * 0.35) - 0.5);
-  float lineX = smoothstep(0.48, 0.5, gridX) * step(0.28, center);
-  float lineZ = smoothstep(0.46, 0.5, gridZ);
-  float grid = max(lineX, lineZ) * (wire + flat * 0.6);
+  float gridX = abs(fract(vUv.x * 26.0) - 0.5);
+  float gridZ = abs(fract(vDist * 0.38) - 0.5);
+  float grid = max(smoothstep(0.46, 0.5, gridX), smoothstep(0.44, 0.5, gridZ));
+  base += uGrid * grid * (0.55 + wire * 0.65 + flat * 0.35 + tex * 0.25 + ps2 * 0.15);
 
-  float lane = step(0.02, center) * step(center, 0.06);
-  float dash = step(0.5, fract(z * 0.8));
-  float centerLine = lane * dash * onRoad;
+  float edgeW = smoothstep(0.095, 0.102, center) * (1.0 - smoothstep(0.102, 0.108, center));
+  edgeW += smoothstep(0.092, 0.098, center) * (1.0 - smoothstep(0.098, 0.104, center));
+  base += vec3(0.9, 0.92, 0.96) * edgeW * onRoad * (0.4 + flat + tex + ps2);
 
-  float noise = hash(vUv * 40.0 + z * 0.1) * ps2 * 0.15;
-  base += uGrid * grid * (0.35 + wire * 0.65);
-  base += vec3(1.0, 0.85, 0.35) * centerLine * (0.5 + flat);
-  base += noise;
+  float lane = step(0.015, center) * step(center, 0.045);
+  float dash = step(0.48, fract(z * 0.95));
+  base += vec3(1.0, 0.82, 0.35) * lane * dash * onRoad * (0.5 + wire * 0.5 + flat + tex + ps2);
 
-  float sheen = pow(max(0.0, 1.0 - abs(dot(normalize(vec3(0.0, 1.0, 0.3)), uSunDir))), 8.0);
-  base += uGrid * sheen * onRoad * (ps2 * 0.25 + sw * 0.55);
+  float n = hash(vUv * 80.0 + z * 0.08);
+  base += (n - 0.5) * 0.08 * (tex + ps2) * onRoad;
 
-  float wet = pow(max(0.0, 1.0 - length(vUv - vec2(0.5, fract(uScroll * 0.02 + uBtc * 0.1)))), 3.0);
-  base += vec3(1.0, 0.6, 0.2) * wet * onRoad * sw * uBtc * 0.8;
+  float sheen = pow(max(0.0, dot(vec3(0.0, 1.0, 0.0), normalize(uSunDir))), 5.0);
+  base += uGrid * sheen * onRoad * (tex * 0.25 + ps2 * 0.5);
 
-  base += vec3(0.12, 0.06, 0.18) * smoothstep(2.4, 3.0, uFidelity) * depth * 0.8;
-
-  float fog = depth * depth * (0.15 + ps2 * 0.35 + sw * 0.45);
-  base = mix(base, uMid * 0.3, fog);
+  float wet = pow(max(0.0, 1.0 - length(vUv - vec2(0.5, fract(uScroll * 0.015 + uBtc * 0.12)))), 4.0);
+  base += vec3(1.0, 0.55, 0.25) * wet * onRoad * ps2 * uBtc * 0.65;
 
   gl_FragColor = vec4(base, 1.0);
 }`;
@@ -97,8 +96,10 @@ void main() {
 const MOUNT_VERT = /* glsl */ `
 varying vec3 vPos;
 varying vec3 vWorld;
+varying vec3 vNormal;
 void main() {
   vPos = position;
+  vNormal = normalize(normalMatrix * normal);
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -108,30 +109,55 @@ const MOUNT_FRAG = /* glsl */ `
 uniform float uFidelity;
 uniform vec3 uGrid;
 uniform vec3 uMid;
+uniform vec3 uSunDir;
 varying vec3 vPos;
 varying vec3 vWorld;
+varying vec3 vNormal;
 
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 
 void main() {
-  float wire = 1.0 - smoothstep(0.0, 0.45, uFidelity);
-  float flat = smoothstep(0.35, 1.0, uFidelity) * (1.0 - smoothstep(1.9, 2.5, uFidelity));
-  float ps2 = smoothstep(1.5, 2.3, uFidelity);
-  float sw = smoothstep(2.4, 3.0, uFidelity);
+  float wire = 1.0 - smoothstep(0.0, 0.55, uFidelity);
+  float flat = smoothstep(0.45, 1.05, uFidelity) * (1.0 - smoothstep(1.85, 2.35, uFidelity));
+  float tex = smoothstep(1.55, 2.2, uFidelity) * (1.0 - smoothstep(2.45, 3.0, uFidelity));
+  float ps2 = smoothstep(2.35, 3.0, uFidelity);
 
-  float h = clamp(vPos.y / 8.0, 0.0, 1.0);
-  float n = hash(vWorld.xz * 0.15) * ps2 + hash(vWorld.xz * 0.4) * sw * 0.5;
-  vec3 fill = mix(vec3(0.08, 0.02, 0.14), uGrid * 0.25, flat);
-  fill = mix(fill, vec3(0.12, 0.1, 0.14), ps2 * h);
-  fill = mix(fill, vec3(0.18, 0.16, 0.22), sw * h);
-  fill += n * 0.08;
+  float h = clamp(vPos.y / 10.0, 0.0, 1.0);
+  float n = hash(vWorld.xz * 0.2) * tex + hash(vWorld.xz * 0.5) * ps2 * 0.6;
 
-  float edge = smoothstep(0.85, 1.0, h);
-  vec3 col = mix(fill, uGrid * 0.9, edge * wire);
-  float fog = smoothstep(5.0, 80.0, -vWorld.z);
-  col = mix(col, uMid * 0.25, fog * (0.3 + ps2 * 0.5));
+  vec3 dark = vec3(0.06, 0.02, 0.12);
+  vec3 fill = mix(dark, uGrid * 0.22, flat);
+  fill = mix(fill, vec3(0.14, 0.11, 0.16), tex * h);
+  fill = mix(fill, vec3(0.22, 0.19, 0.24), ps2 * h);
+  fill += n * 0.12;
 
-  gl_FragColor = vec4(col, flat + ps2 + sw + wire * 0.5);
+  float ndl = max(0.15, dot(vNormal, normalize(uSunDir)));
+  fill *= 0.55 + ndl * (flat * 0.35 + tex * 0.45 + ps2 * 0.55);
+
+  if (wire > 0.45) {
+    float rim = smoothstep(0.75, 1.0, h);
+    vec3 wcol = uGrid * (0.65 + rim * 0.35);
+    gl_FragColor = vec4(wcol, wire * (0.35 + rim * 0.45));
+    return;
+  }
+
+  float fog = smoothstep(8.0, 70.0, -vWorld.z);
+  fill = mix(fill, uMid * 0.3, fog * (0.25 + tex * 0.45 + ps2 * 0.65));
+
+  gl_FragColor = vec4(fill, flat + tex + ps2);
+}`;
+
+const SUN_GLOW_FRAG = /* glsl */ `
+varying vec2 vUv;
+uniform float uStrength;
+void main() {
+  vec2 p = vUv - 0.5;
+  float d = length(p);
+  if (d > 0.5) discard;
+  float a = smoothstep(0.5, 0.06, d);
+  a = a * a * a * uStrength;
+  vec3 col = mix(vec3(1.0, 0.35, 0.55), vec3(1.0, 0.65, 0.25), smoothstep(0.0, 0.5, d));
+  gl_FragColor = vec4(col, a);
 }`;
 
 function css(name, fallback) {
@@ -140,9 +166,7 @@ function css(name, fallback) {
 }
 
 function hexToVec3(hex) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
-  return new THREE.Color((n >> 16) & 255, (n >> 8) & 255, n & 255).multiplyScalar(1 / 255);
+  return new THREE.Color(hex);
 }
 
 function clamp01(n) {
@@ -200,48 +224,55 @@ export function mountLandscapeWebGL(opts) {
       antialias: true,
       alpha: false,
       powerPreference: "low-power",
+      preserveDrawingBuffer: true,
     });
   } catch {
     return { ok: false };
   }
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 250);
-  camera.position.set(0, 1.35, 2.2);
-  camera.lookAt(0, 0.8, -40);
+  const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 220);
+  const camZ = 3.15;
+  camera.position.set(0, 0.58, camZ);
+  camera.lookAt(0, 0.35, -74);
 
   const skyGeo = new THREE.SphereGeometry(120, 32, 16);
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: SKY_VERT,
     fragmentShader: SKY_FRAG,
     side: THREE.BackSide,
+    depthWrite: false,
     uniforms: {
       uTop: { value: new THREE.Color() },
       uMid: { value: new THREE.Color() },
       uBot: { value: new THREE.Color() },
       uFidelity: { value: 0 },
+      uTime: { value: 0 },
     },
   });
   scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-  const roadGeo = new THREE.PlaneGeometry(40, 140, 1, 40);
+  const roadGeo = new THREE.PlaneGeometry(48, 160, 1, 48);
   roadGeo.rotateX(-Math.PI / 2);
-  roadGeo.translate(0, 0, -60);
+  roadGeo.translate(0, 0, -72);
   const gridColor = hexToVec3(css("--km-landscape-grid", "#3df29a"));
+  const sunDir = new THREE.Vector3(0, 0.25, -1).normalize();
   const roadMat = new THREE.ShaderMaterial({
     vertexShader: ROAD_VERT,
     fragmentShader: ROAD_FRAG,
+    side: THREE.DoubleSide,
     uniforms: {
       uScroll: { value: 0 },
       uFidelity: { value: 0 },
       uBtc: { value: btc },
       uGrid: { value: gridColor },
-      uSunDir: { value: new THREE.Vector3(0, 0.3, -1).normalize() },
-      uLight: { value: 1 },
-      uMid: { value: new THREE.Color() },
+      uSunDir: { value: sunDir.clone() },
+      uCamZ: { value: camZ },
     },
   });
   const road = new THREE.Mesh(roadGeo, roadMat);
+  road.name = "km-road";
+  road.renderOrder = 1;
   scene.add(road);
 
   const mountMat = new THREE.ShaderMaterial({
@@ -252,52 +283,87 @@ export function mountLandscapeWebGL(opts) {
       uFidelity: { value: 0 },
       uGrid: { value: gridColor },
       uMid: { value: new THREE.Color() },
+      uSunDir: { value: sunDir.clone() },
     },
   });
 
   const mountains = new THREE.Group();
   const peaks = [
-    [-18, 0, -35, 7],
-    [-12, 0, -55, 10],
-    [14, 0, -42, 8],
-    [20, 0, -68, 12],
-    [-22, 0, -80, 9],
-    [8, 0, -95, 11],
+    [-16, -28, 8],
+    [-22, -42, 11],
+    [-10, -58, 9],
+    [12, -32, 10],
+    [20, -48, 13],
+    [8, -72, 12],
+    [-18, -88, 10],
+    [16, -96, 11],
   ];
-  peaks.forEach(([x, y, z, h]) => {
-    const geo = new THREE.ConeGeometry(6 + h * 0.2, h, 4, 1);
+  peaks.forEach(([x, z, h]) => {
+    const geo = new THREE.ConeGeometry(5.5 + h * 0.15, h, 4, 1);
     const mesh = new THREE.Mesh(geo, mountMat);
-    mesh.position.set(x, h * 0.5, z);
+    mesh.position.set(x, h * 0.5 - 0.2, z);
     mountains.add(mesh);
-    if (true) {
-      const wire = new THREE.LineSegments(
-        new THREE.WireframeGeometry(geo),
-        new THREE.LineBasicMaterial({ color: gridColor, transparent: true, opacity: 0.35 }),
-      );
-      wire.position.copy(mesh.position);
-      wire.userData.wire = true;
-      mountains.add(wire);
-    }
+    const wire = new THREE.LineSegments(
+      new THREE.WireframeGeometry(geo),
+      new THREE.LineBasicMaterial({ color: gridColor, transparent: true, opacity: 0.55 }),
+    );
+    wire.position.copy(mesh.position);
+    wire.userData.wire = true;
+    mountains.add(wire);
   });
   scene.add(mountains);
 
+  const starCount = 400;
+  const starPos = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(0.15 + Math.random() * 0.75);
+    const r = 95;
+    starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    starPos[i * 3 + 1] = r * Math.cos(phi);
+    starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(
+    starGeo,
+    new THREE.PointsMaterial({ color: 0xe8f0ff, size: 0.22, transparent: true, opacity: 0, sizeAttenuation: true }),
+  );
+  scene.add(stars);
+
   const posts = new THREE.Group();
-  for (let i = 0; i < 24; i++) {
-    const z = -8 - i * 6;
-    const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2, 6);
+  for (let i = 0; i < 28; i++) {
+    const z = -6 - i * 5.5;
+    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6);
     const poleMat = new THREE.MeshBasicMaterial({ color: gridColor });
-    [-3.8, 3.8].forEach((x) => {
+    [-3.6, 3.6].forEach((x) => {
       const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(x, 0.6, z);
+      pole.position.set(x, 0.55, z);
+      pole.userData.pole = true;
       posts.add(pole);
     });
+    if (i % 2 === 0) {
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.4, 0.9),
+        new THREE.MeshBasicMaterial({
+          color: i % 4 === 0 ? 0xff4080 : 0x40c0ff,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+        }),
+      );
+      sign.position.set(i % 4 === 0 ? -4.2 : 4.2, 1.1, z);
+      sign.userData.billboard = true;
+      posts.add(sign);
+    }
     if (i % 3 === 0) {
       const palm = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.2, 2.4),
-        new THREE.MeshBasicMaterial({ color: 0x2a5a3a, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+        new THREE.PlaneGeometry(1.1, 2.2),
+        new THREE.MeshBasicMaterial({ color: 0x2a6a4a, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
       );
-      palm.position.set(-4.5, 1.5, z);
+      palm.position.set(-4.8, 1.4, z - 1);
       palm.userData.billboard = true;
+      palm.userData.palm = true;
       posts.add(palm);
     }
   }
@@ -325,33 +391,40 @@ export function mountLandscapeWebGL(opts) {
     depthWrite: false,
   });
   const sun = new THREE.Mesh(sunGeo, sunMat);
-  sun.position.set(0, 4, -55);
+  sun.position.set(0, 1.15, -52);
+  sun.renderOrder = 3;
   scene.add(sun);
 
-  const sunGlow = new THREE.Mesh(
-    new THREE.CircleGeometry(1, 32),
-    new THREE.MeshBasicMaterial({ color: 0xff4080, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending }),
-  );
+  const sunGlowMat = new THREE.ShaderMaterial({
+    uniforms: { uStrength: { value: 0.55 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: SUN_GLOW_FRAG,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const sunGlow = new THREE.Mesh(new THREE.CircleGeometry(1, 32), sunGlowMat);
   sunGlow.position.copy(sun.position);
-  sunGlow.scale.setScalar(2.5);
+  sunGlow.scale.setScalar(6);
+  sunGlow.renderOrder = 2;
   scene.add(sunGlow);
 
   const shafts = new THREE.Group();
   for (let i = 0; i < 5; i++) {
     const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(8, 40),
+      new THREE.PlaneGeometry(10, 48),
       new THREE.MeshBasicMaterial({
         color: 0xffc080,
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.07,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
     );
-    plane.rotation.x = -0.4;
-    plane.rotation.z = (i - 2) * 0.08;
-    plane.position.set((i - 2) * 2, 8, -50);
+    plane.rotation.x = -0.38;
+    plane.rotation.z = (i - 2) * 0.07;
+    plane.position.set((i - 2) * 2.2, 7.5, -44);
     shafts.add(plane);
   }
   scene.add(shafts);
@@ -361,9 +434,8 @@ export function mountLandscapeWebGL(opts) {
     skyMat.uniforms.uTop.value = hexToVec3(css("--km-landscape-sky-top", light ? "#8ec5f0" : "#050510"));
     skyMat.uniforms.uMid.value = hexToVec3(css("--km-landscape-sky-mid", light ? "#f5c4a8" : "#12082a"));
     skyMat.uniforms.uBot.value = hexToVec3(css("--km-landscape-sky-bot", light ? "#e8a090" : "#2a1048"));
-    roadMat.uniforms.uMid.value.copy(skyMat.uniforms.uMid.value);
     mountMat.uniforms.uMid.value.copy(skyMat.uniforms.uMid.value);
-    scene.fog = new THREE.FogExp2(skyMat.uniforms.uMid.value.getHex(), 0.012);
+    scene.fog = new THREE.FogExp2(skyMat.uniforms.uMid.value.getHex(), 0.009);
   }
   applyTheme();
 
@@ -397,42 +469,61 @@ export function mountLandscapeWebGL(opts) {
 
   function updateScene(fidelity, t) {
     skyMat.uniforms.uFidelity.value = fidelity;
+    skyMat.uniforms.uTime.value = t;
     roadMat.uniforms.uFidelity.value = fidelity;
     roadMat.uniforms.uBtc.value = btc;
     mountMat.uniforms.uFidelity.value = fidelity;
 
-    const radius = 3 + btc * 8;
-    const sunY = 2.5 + btc * 4;
+    const radius = 2.4 + btc * 6;
+    const sunY = 1.05 + btc * 2.8;
     sun.scale.setScalar(radius);
-    sunGlow.scale.setScalar(radius * (2 + btc * 2));
-    sun.position.y = sunY;
     sunGlow.position.y = sunY;
-    roadMat.uniforms.uSunDir.value.set(0, sunY * 0.08, -1).normalize();
-
+    sun.position.y = sunY;
+    sunGlow.scale.setScalar(radius * (3.5 + btc * 1.5));
+    sunGlowMat.uniforms.uStrength.value = 0.14 + btc * 0.2;
+    const sd = new THREE.Vector3(0, sunY * 0.12 + 0.08, -1).normalize();
+    roadMat.uniforms.uSunDir.value.copy(sd);
+    mountMat.uniforms.uSunDir.value.copy(sd);
     sunMat.uniforms.uBtc.value = btc;
 
     mountains.children.forEach((c) => {
       if (c.userData.wire) {
-        c.visible = fidelity < 1.2;
-        c.material.opacity = 0.2 + (1.2 - fidelity) * 0.5;
+        c.visible = fidelity < 1.05;
+        c.material.opacity = 0.35 + Math.max(0, 1.05 - fidelity) * 0.45;
+      } else if (c.isMesh) {
+        c.visible = fidelity >= 1.0;
       }
-    });
-    posts.children.forEach((c) => {
-      if (c.userData.billboard) {
-        c.visible = fidelity > 1.3;
-        c.material.opacity = Math.min(1, (fidelity - 1.3) * 0.8);
-      }
-    });
-    shafts.visible = fidelity > 2.2;
-    shafts.children.forEach((p, i) => {
-      p.material.opacity = 0.04 + (fidelity - 2.2) * 0.06 + Math.sin(t * 0.001 + i) * 0.01;
     });
 
+    stars.material.opacity = Math.min(1, Math.max(0, (fidelity - 1.7) * 0.55));
+    stars.visible = fidelity > 1.5;
+
+    posts.children.forEach((c) => {
+      if (c.userData.pole) {
+        c.visible = fidelity > 0.75;
+        c.material.opacity = Math.min(1, (fidelity - 0.75) * 1.2);
+      }
+      if (c.userData.billboard) {
+        const palm = c.userData.palm;
+        const gate = palm ? 1.65 : 1.35;
+        c.visible = fidelity > gate;
+        c.material.opacity = Math.min(1, (fidelity - gate) * 0.85);
+      }
+    });
+
+    shafts.visible = fidelity > 2.15;
+    shafts.children.forEach((p, i) => {
+      p.material.opacity = 0.03 + (fidelity - 2.15) * 0.05 + Math.sin(t * 0.001 + i) * 0.012;
+    });
+
+    if (scene.fog) {
+      scene.fog.density = 0.007 + Math.max(0, fidelity - 1) * 0.004 + Math.max(0, fidelity - 2.2) * 0.006;
+    }
+
     if (!reduced) {
-      scroll = (t * 0.035) % 140;
+      scroll = (t * 0.04) % 160;
       roadMat.uniforms.uScroll.value = scroll;
-      posts.position.z = (scroll * 0.15) % 6;
-      posts.position.z -= 6;
+      posts.position.z = ((scroll * 0.12) % 5.5) - 5.5;
     }
   }
 
@@ -447,6 +538,7 @@ export function mountLandscapeWebGL(opts) {
     window.__kmLandscapeReady = true;
     window.__kmLandscapeFidelity = fidelity;
     window.__kmLandscapeWebGL = true;
+    window.__kmLandscapeFrameCount = (window.__kmLandscapeFrameCount || 0) + 1;
   }
 
   function loop(t) {
@@ -488,6 +580,11 @@ export function mountLandscapeWebGL(opts) {
       renderFrame(performance.now());
     }, 40);
   });
+
+  new MutationObserver(() => {
+    applyTheme();
+    renderFrame(performance.now());
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
   start();
 

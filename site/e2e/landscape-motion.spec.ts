@@ -3,6 +3,8 @@ import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { assertWebGLLandscape } from "./landscape-helpers";
 
+test.describe.configure({ mode: "serial" });
+
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
 const art = path.join("e2e", "artifacts");
 
@@ -12,8 +14,10 @@ test.use({
 
 async function recordTierMotion(tier: number, filename: string, page: import("@playwright/test").Page): Promise<void> {
   mkdirSync(art, { recursive: true });
+  await page.addInitScript(() => {
+    document.documentElement.setAttribute("data-theme", "dark");
+  });
   await page.goto(`${base}/?tier=${tier}&btc=0.72&reach=0.55`);
-  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   await assertWebGLLandscape(page, tier);
   await page.waitForTimeout(5000);
   const video = page.video();
