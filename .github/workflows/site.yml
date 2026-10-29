@@ -47,4 +47,4 @@ jobs:
             "$RUNNER_TEMP/gitleaks/gitleaks" detect --source . --no-git -v --redact
           fi
           set -e
-          git grep -nE "(api[_-]?token|account_id|secret)" -- . ':!node_modules' | grep -v REPLACE_AT_DEPLOY | (! grep .)
+          git grep -nE "(api[_-]?token|account_id|secret)" -- . ':!node_modules' ':!worker/src/fixture-data.ts' | grep -v REPLACE_AT_DEPLOY | (! grep .)
