@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
 from extract import extract_payments, scope_split
 
-UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot)"   # bot info + opt-out page (site/bot/index.html)
+UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)"   # bot info + opt-out page (site/bot/index.html)
 UA_TOKEN = "FloppyKitMapBot"
 AI_UAS = ["GPTBot","ChatGPT-User","OAI-SearchBot","ClaudeBot","Claude-User","anthropic-ai","PerplexityBot",
           "Google-Extended","CCBot","Grok","Grok-User","Applebot-Extended","Bytespider","Amazonbot"]
