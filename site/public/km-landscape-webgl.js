@@ -24,6 +24,7 @@ void main() {
   col = mix(col, uTop, smoothstep(0.45, 1.0, h));
   float stars = step(2.1, uFidelity) * step(0.92, h) * fract(sin(dot(vWorld.xz, vec2(12.9898,78.233))) * 43758.5453);
   col += vec3(stars * 0.35);
+  col += vec3(0.12, 0.06, 0.18) * smoothstep(2.4, 3.0, uFidelity) * (1.0 - h);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -85,7 +86,9 @@ void main() {
   float wet = pow(max(0.0, 1.0 - length(vUv - vec2(0.5, fract(uScroll * 0.02 + uBtc * 0.1)))), 3.0);
   base += vec3(1.0, 0.6, 0.2) * wet * onRoad * sw * uBtc * 0.8;
 
-  float fog = depth * depth * (0.15 + ps2 * 0.35 + sw * 0.25);
+  base += vec3(0.12, 0.06, 0.18) * smoothstep(2.4, 3.0, uFidelity) * depth * 0.8;
+
+  float fog = depth * depth * (0.15 + ps2 * 0.35 + sw * 0.45);
   base = mix(base, uMid * 0.3, fog);
 
   gl_FragColor = vec4(base, 1.0);
@@ -301,7 +304,26 @@ export function mountLandscapeWebGL(opts) {
   scene.add(posts);
 
   const sunGeo = new THREE.CircleGeometry(1, 48);
-  const sunMat = new THREE.MeshBasicMaterial({ color: 0xff9030, transparent: true, opacity: 0.95 });
+  const sunMat = new THREE.ShaderMaterial({
+    uniforms: { uBtc: { value: btc } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform float uBtc;
+      void main(){
+        vec2 p = vUv - 0.5;
+        if(length(p) > 0.5) discard;
+        vec3 col = mix(vec3(1.0,0.55,0.15), vec3(0.9,0.15,0.35), p.y + 0.5);
+        if(uBtc >= 0.15){
+          float v = p.y + 0.5;
+          float stripe = mod(v * (8.0 + uBtc * 10.0), 1.0);
+          if(stripe < 0.35) discard;
+        }
+        gl_FragColor = vec4(col, 0.98);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
   const sun = new THREE.Mesh(sunGeo, sunMat);
   sun.position.set(0, 4, -55);
   scene.add(sun);
@@ -356,6 +378,12 @@ export function mountLandscapeWebGL(opts) {
   }
   resize();
 
+  window.__kmLandscapeWebGL = true;
+  window.__kmLandscapeGlContext = renderer.getContext();
+  glCanvas.dataset.webglActive = "1";
+  fallback.classList.add("km-landscape-fallback-hidden");
+  fallback.dataset.fallbackHidden = "1";
+
   glCanvas.hidden = false;
   glCanvas.removeAttribute("hidden");
   fallback.style.opacity = "0";
@@ -380,6 +408,8 @@ export function mountLandscapeWebGL(opts) {
     sun.position.y = sunY;
     sunGlow.position.y = sunY;
     roadMat.uniforms.uSunDir.value.set(0, sunY * 0.08, -1).normalize();
+
+    sunMat.uniforms.uBtc.value = btc;
 
     mountains.children.forEach((c) => {
       if (c.userData.wire) {
@@ -408,10 +438,15 @@ export function mountLandscapeWebGL(opts) {
 
   function renderFrame(t) {
     const fidelity = fidelityFromReach(reach, tierOverride);
+    glCanvas.dataset.tier = String(Math.round(fidelity));
     updateScene(fidelity, t);
+    posts.children.forEach((c) => {
+      if (c.userData.billboard) c.lookAt(camera.position);
+    });
     renderer.render(scene, camera);
     window.__kmLandscapeReady = true;
     window.__kmLandscapeFidelity = fidelity;
+    window.__kmLandscapeWebGL = true;
   }
 
   function loop(t) {

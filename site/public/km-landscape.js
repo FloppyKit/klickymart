@@ -41,6 +41,11 @@
     return window.matchMedia("(prefers-color-scheme: light)").matches;
   }
 
+  function fidelity2d() {
+    if (tierOverride != null && !Number.isNaN(tierOverride)) return tierOverride;
+    return reach * 3;
+  }
+
   function resize() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = window.innerWidth;
@@ -132,6 +137,7 @@
   }
 
   function drawMountains(w, horizon, light) {
+    var fid = fidelity2d();
     function hPx(frac) {
       return window.innerHeight * frac * (0.7 + reach * 0.3);
     }
@@ -142,7 +148,8 @@
       [w * 0.65, horizon, w * 0.82, horizon - hPx(0.16), w, horizon],
     ];
 
-    var fillA = reach * (light ? 0.25 : 0.45);
+    var fillA = Math.min(1, (fid / 3) * (light ? 0.35 : 0.55));
+    if (fid < 0.8) fillA *= 0.15;
     var stroke = light ? "rgba(90,67,180,0.55)" : "rgba(180,120,255,0.7)";
 
     peaks.forEach(function (p) {
@@ -190,10 +197,10 @@
     var vanishX = w * 0.5;
     var vanishY = horizon;
     var floorH = h - horizon;
-    var roadW = 0.14 + reach * 0.04;
+    var roadW = 0.2 + reach * 0.05;
 
     ctx.save();
-    ctx.fillStyle = light ? "rgba(12,18,16,0.55)" : "rgba(4,10,8,0.75)";
+    ctx.fillStyle = light ? "rgba(18,22,28,0.82)" : "rgba(6,10,14,0.92)";
     ctx.beginPath();
     ctx.moveTo(vanishX, vanishY);
     ctx.lineTo(w * (0.5 + roadW), h);
@@ -201,41 +208,38 @@
     ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(240,240,255,0.75)";
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(vanishX, vanishY);
-    ctx.lineTo(w * (0.5 - roadW * 0.85), h);
+    ctx.lineTo(w * (0.5 - roadW * 0.92), h);
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(vanishX, vanishY);
-    ctx.lineTo(w * (0.5 + roadW * 0.85), h);
+    ctx.lineTo(w * (0.5 + roadW * 0.92), h);
     ctx.stroke();
 
-    var dashes = 18 + Math.floor(reach * 12);
+    var dashes = 22 + Math.floor(reach * 14);
     for (var i = 0; i <= dashes; i++) {
       var z = (i / dashes + scroll) % 1;
       var depth = z * z;
       var y = vanishY + floorH * depth;
-      var half = roadW * depth * w * 0.9;
+      var half = roadW * depth * w * 0.95;
       if (i % 2 === 0) {
-        ctx.strokeStyle = "rgba(255,220,120,0.85)";
-        ctx.lineWidth = 1 + (1 - depth) * 2;
-        ctx.beginPath();
-        ctx.moveTo(vanishX, y);
-        ctx.lineTo(vanishX, y + 4 + (1 - depth) * 10);
-        ctx.stroke();
+        var dashLen = 6 + (1 - depth) * 22;
+        ctx.fillStyle = "rgba(255,220,100,0.95)";
+        ctx.fillRect(vanishX - 1.5, y, 3, dashLen);
       }
       ctx.strokeStyle = green;
-      ctx.globalAlpha = 0.25 + (1 - depth) * 0.35;
-      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.35 + (1 - depth) * 0.45;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(vanishX - half, y);
-      ctx.lineTo(vanishX - half * 0.98, y + 2);
+      ctx.lineTo(vanishX - half * 0.96, y + 3);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(vanishX + half, y);
-      ctx.lineTo(vanishX + half * 0.98, y + 2);
+      ctx.lineTo(vanishX + half * 0.96, y + 3);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -296,6 +300,12 @@
 
     drawHighway(w, h, horizon, scroll, green, light);
     drawHorizonGlow(w, horizon, green, light);
+
+    var fid = fidelity2d();
+    if (fid > 2.2) {
+      ctx.fillStyle = light ? "rgba(120,140,180,0.08)" : "rgba(80,60,120,0.12)";
+      ctx.fillRect(0, horizon, w, floorH * 0.55);
+    }
   }
 
   var glActive = false;
@@ -315,7 +325,11 @@
     drawSun(w, horizon, light);
     drawMountains(w, horizon, light);
     drawFloor(w, h, horizon, scroll, light);
+    canvas2d.dataset.tier = String(Math.round(fidelity2d()));
+    canvas2d.dataset.landscapeMode = glActive ? "hidden" : "2d";
     window.__kmLandscapeReady = true;
+    window.__kmLandscape2dActive = !glActive;
+    if (!glActive) window.__kmLandscapeWebGL = false;
   }
 
   function startAnim2d() {
@@ -352,6 +366,9 @@
           glActive = true;
           running2d = false;
           cancelAnimationFrame(raf2d);
+          canvas2d.classList.add("km-landscape-fallback-hidden");
+          canvas2d.dataset.fallbackHidden = "1";
+          window.__kmLandscape2dActive = false;
         }
       })
       .catch(function () {

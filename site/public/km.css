@@ -9,6 +9,7 @@ body{margin:0;min-height:100vh;background:var(--km-bg)}
 .km-landscape-canvas{display:block;width:100%;height:100%;opacity:1}
 .km-landscape-gl{position:absolute;inset:0;opacity:1;transition:opacity .35s ease}
 .km-landscape-wrap .km-landscape-canvas:first-child{position:absolute;inset:0;transition:opacity .35s ease}
+.km-landscape-fallback-hidden{opacity:0!important;visibility:hidden!important}
 .km-has-landscape .km-header{
   width:100%;max-width:none;margin:0;
   background:color-mix(in srgb,var(--km-bg) 38%,transparent);

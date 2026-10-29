@@ -1,33 +1,25 @@
 import { test, expect } from "@playwright/test";
+import path from "node:path";
+import { assertWebGLLandscape, expectMeaningfulPixelDiff } from "./landscape-helpers";
 
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
-
-async function waitLandscape(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => (window as unknown as { __kmLandscapeReady?: boolean }).__kmLandscapeReady === true, {
-    timeout: 20_000,
-  });
-  await page.waitForTimeout(1000);
-}
+const art = path.join("e2e", "artifacts");
 
 for (const tier of [0, 1, 2, 3] as const) {
   for (const [suffix, viewport] of [
     ["desktop", { width: 1280, height: 720 }],
     ["mobile", { width: 390, height: 844 }],
   ] as const) {
-    test(`landscape tier ${tier} ${suffix}`, async ({ page }) => {
+    test(`landscape tier ${tier} ${suffix} (WebGL)`, async ({ page }) => {
       await page.setViewportSize(viewport);
-      await page.goto(`${base}/?tier=${tier}&btc=0.6&reach=0.5`);
+      await page.goto(`${base}/?tier=${tier}&btc=0.65&reach=0.5`);
       await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-      await waitLandscape(page);
+      await assertWebGLLandscape(page, tier);
       await page.screenshot({
-        path: `e2e/artifacts/landscape-tier${tier}-dark-${suffix}.png`,
+        path: path.join(art, `landscape-tier${tier}-dark-${suffix}.png`),
         fullPage: false,
         clip: { x: 0, y: 0, width: viewport.width, height: viewport.height },
       });
-      const fidelity = await page.evaluate(() => (window as unknown as { __kmLandscapeFidelity?: number }).__kmLandscapeFidelity);
-      if (typeof fidelity === "number") {
-        expect(fidelity).toBeCloseTo(tier, 0);
-      }
     });
   }
 }
@@ -36,15 +28,31 @@ for (const [suffix, viewport] of [
   ["desktop", { width: 1280, height: 720 }],
   ["mobile", { width: 390, height: 844 }],
 ] as const) {
-  test(`landscape tier 2 light ${suffix}`, async ({ page }) => {
+  test(`landscape tier 2 light ${suffix} (WebGL)`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await page.goto(`${base}/?tier=2&btc=0.5`);
+    await page.goto(`${base}/?tier=2&btc=0.55`);
     await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
-    await waitLandscape(page);
+    await assertWebGLLandscape(page, 2);
     await page.screenshot({
-      path: `e2e/artifacts/landscape-tier2-light-${suffix}.png`,
+      path: path.join(art, `landscape-tier2-light-${suffix}.png`),
       fullPage: false,
       clip: { x: 0, y: 0, width: viewport.width, height: viewport.height },
     });
   });
 }
+
+test("tier 0 vs tier 3 desktop pixels differ meaningfully", () => {
+  expectMeaningfulPixelDiff(
+    path.join(art, "landscape-tier0-dark-desktop.png"),
+    path.join(art, "landscape-tier3-dark-desktop.png"),
+    0.02,
+  );
+});
+
+test("tier 1 vs tier 3 desktop pixels differ meaningfully", () => {
+  expectMeaningfulPixelDiff(
+    path.join(art, "landscape-tier1-dark-desktop.png"),
+    path.join(art, "landscape-tier3-dark-desktop.png"),
+    0.015,
+  );
+});
