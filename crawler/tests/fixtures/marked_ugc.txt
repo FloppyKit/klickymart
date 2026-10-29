@@ -1,0 +1,7 @@
+Hardware wallet - in stock
+[ugc-start]
+## What customers say
+Paid with Lightning in seconds, fantastic payment experience overall.
+They accept Monero too which surprised me during checkout.
+[ugc-end]
+We accept Bitcoin on-chain payments at checkout via our own payment server.

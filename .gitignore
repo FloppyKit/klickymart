@@ -1,0 +1,5 @@
+secrets/
+*.nsec
+.venv/
+__pycache__/
+crawler/out/

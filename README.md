@@ -1,0 +1,34 @@
+# KlickyMart
+
+KlickyMart is a public, signed map of online stores for software agents: whether an agent can reach a store, how checkout works, and which payment methods the store accepts, with attention to Bitcoin and privacy-respecting Bitcoin options. Records are published as Nostr events (see `NIP-DRAFT.md`). A FloppyKit project.
+
+Status: draft. No crawl data is published in this repository yet.
+
+## Contents
+- `NIP-DRAFT.md`: draft event kinds for the directory and payment handshakes.
+- `CRAWL-RUBRIC.md`: record schema and grading rules (v0.3 draft changes at the end).
+- `CASCADE.md`: build plan.
+- `crawler/`: Playwright crawler (`crawl.py`), deterministic payment extractor (`extract.py`), terms-of-service checker (`tos.py`), signing helpers, tests.
+- `crawler/KNOWN-LIMITATIONS.md`: known limitations.
+- `site/bot/index.html`: the crawler info and opt-out page, served at https://klickymart.com/bot.
+
+## Crawler guardrails
+- Honest user agent: `FloppyKitMapBot/0.2 (+https://klickymart.com/bot)`. No stealth plugins or fingerprint changes, no proxies or IP rotation.
+- robots.txt is read first; an error, 401, 403 or timeout means the whole site is treated as disallowed.
+- If a site's terms ban automated access, the site is not crawled; only that finding is recorded, with a quote and URL.
+- Public pages only: no login, no accounts, no orders, no payment details, no form submits beyond add-to-cart, no captcha solving. Blocks are recorded as findings.
+- At least 2 s between requests, at most 10 pages per site.
+- Customer reviews, Q&A and comments are never used as evidence. Every payment method in a record carries a quote and a URL; unknowns stay null.
+
+Opt out: add `User-agent: FloppyKitMapBot` / `Disallow: /` to robots.txt. Details: https://klickymart.com/bot
+
+## Run the tests
+    cd crawler
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install -r requirements.txt && python -m playwright install chromium
+    python -m unittest discover -s tests -v
+
+The tests use synthetic fixtures and make no network requests.
+
+## License
+TO-CONFIRM (a FOSS license is planned; none is granted yet).
