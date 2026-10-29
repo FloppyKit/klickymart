@@ -23,8 +23,9 @@
   if (params.get("scene") === "1") {
     document.body.classList.add("km-scene-only");
   }
-
+  var enableWebGL = params.get("gl") === "1";
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var pauseMotion = params.get("nomotion") === "1" || reduced;
   var ctx = canvas2d.getContext("2d");
   if (!ctx) return;
 
@@ -41,7 +42,7 @@
     var t = document.documentElement.getAttribute("data-theme");
     if (t === "light") return true;
     if (t === "dark") return false;
-    return window.matchMedia("(prefers-color-scheme: light)").matches;
+    return false;
   }
 
   function fidelity2d() {
@@ -265,8 +266,8 @@
     var vanishX = w * 0.5;
     var vanishY = horizon;
     var green = css("--km-landscape-grid", css("--km-accent", "#3df29a"));
-    var lineA = 0.35 + reach * 0.65;
-    var blur = 6 + reach * 12;
+    var lineA = 0.55 + reach * 0.55;
+    var blur = 10 + reach * 14;
 
     ctx.lineCap = "round";
     ctx.strokeStyle = green;
@@ -336,7 +337,7 @@
   }
 
   function startAnim2d() {
-    if (reduced || running2d || glActive) return;
+    if (reduced || pauseMotion || running2d || glActive) return;
     running2d = true;
     function loop(ts) {
       drawFrame(ts);
@@ -352,7 +353,7 @@
 
   function tryWebGL() {
     if (!canvasGl || reduced) return;
-    import("/km-landscape-webgl.js?v=4")
+    import("/km-landscape-webgl.js?v=8")
       .then(function (mod) {
         var mount = mod.mountLandscapeWebGL || mod.default;
         if (!mount) return;
@@ -381,14 +382,22 @@
 
   function boot() {
     boot2d();
+    if (!enableWebGL) {
+      canvas2d.dataset.landscapeMode = "2d";
+      window.__kmLandscape2dActive = true;
+      window.__kmLandscapeWebGL = false;
+      return;
+    }
     if ("requestIdleCallback" in window) {
-      requestIdleCallback(function () { tryWebGL(); }, { timeout: 1200 });
+      requestIdleCallback(function () { tryWebGL(); }, { timeout: 400 });
     } else {
-      setTimeout(tryWebGL, 120);
+      setTimeout(tryWebGL, 50);
     }
   }
 
-  if ("IntersectionObserver" in window) {
+  if (!enableWebGL) {
+    boot();
+  } else if ("IntersectionObserver" in window) {
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting) {

@@ -70,16 +70,18 @@ void main() {
 
   float gridX = abs(fract(vUv.x * 26.0) - 0.5);
   float gridZ = abs(fract(vDist * 0.38) - 0.5);
-  float grid = max(smoothstep(0.46, 0.5, gridX), smoothstep(0.44, 0.5, gridZ));
-  base += uGrid * grid * (0.55 + wire * 0.65 + flat * 0.35 + tex * 0.25 + ps2 * 0.15);
+  float grid = max(smoothstep(0.44, 0.5, gridX), smoothstep(0.42, 0.5, gridZ));
+  float gridBoost = 0.85 + wire * 1.1 + flat * 0.55 + tex * 0.4 + ps2 * 0.25;
+  base += uGrid * grid * onFloor * gridBoost;
+  base += uGrid * grid * onRoad * gridBoost * 0.35;
 
-  float edgeW = smoothstep(0.095, 0.102, center) * (1.0 - smoothstep(0.102, 0.108, center));
-  edgeW += smoothstep(0.092, 0.098, center) * (1.0 - smoothstep(0.098, 0.104, center));
-  base += vec3(0.9, 0.92, 0.96) * edgeW * onRoad * (0.4 + flat + tex + ps2);
+  float edgeW = smoothstep(0.088, 0.095, center) * (1.0 - smoothstep(0.095, 0.102, center));
+  edgeW += smoothstep(0.102, 0.108, center) * (1.0 - smoothstep(0.108, 0.114, center));
+  base += vec3(0.92, 0.94, 0.98) * edgeW * onRoad * (0.55 + wire * 0.45 + flat + tex + ps2);
 
-  float lane = step(0.015, center) * step(center, 0.045);
-  float dash = step(0.48, fract(z * 0.95));
-  base += vec3(1.0, 0.82, 0.35) * lane * dash * onRoad * (0.5 + wire * 0.5 + flat + tex + ps2);
+  float lane = step(0.012, center) * step(center, 0.042);
+  float dash = step(0.45, fract(z * 0.85));
+  base += vec3(1.0, 0.82, 0.35) * lane * dash * onRoad * (0.65 + wire * 0.55 + flat + tex + ps2);
 
   float n = hash(vUv * 80.0 + z * 0.08);
   base += (n - 0.5) * 0.08 * (tex + ps2) * onRoad;
@@ -231,10 +233,11 @@ export function mountLandscapeWebGL(opts) {
   }
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 220);
-  const camZ = 3.15;
-  camera.position.set(0, 0.58, camZ);
-  camera.lookAt(0, 0.35, -74);
+  const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 220);
+  const camZ = 2.35;
+  const camY = 0.52;
+  camera.position.set(0, camY, camZ);
+  camera.lookAt(0, 0.02, -48);
 
   const skyGeo = new THREE.SphereGeometry(120, 32, 16);
   const skyMat = new THREE.ShaderMaterial({
@@ -252,10 +255,11 @@ export function mountLandscapeWebGL(opts) {
   });
   scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-  const roadGeo = new THREE.PlaneGeometry(48, 160, 1, 48);
+  const roadGeo = new THREE.PlaneGeometry(56, 176, 1, 56);
   roadGeo.rotateX(-Math.PI / 2);
-  roadGeo.translate(0, 0, -72);
+  roadGeo.translate(0, 0.015, -68);
   const gridColor = hexToVec3(css("--km-landscape-grid", "#3df29a"));
+  gridColor.multiplyScalar(1.15);
   const sunDir = new THREE.Vector3(0, 0.25, -1).normalize();
   const roadMat = new THREE.ShaderMaterial({
     vertexShader: ROAD_VERT,
@@ -275,6 +279,50 @@ export function mountLandscapeWebGL(opts) {
   road.renderOrder = 1;
   scene.add(road);
 
+  const floorGrid = new THREE.GridHelper(140, 70, 0x5bffaa, 0x3df29a);
+  floorGrid.position.set(0, 0.02, -62);
+  floorGrid.material.transparent = true;
+  floorGrid.material.opacity = 0.95;
+  floorGrid.name = "km-floor-grid";
+  scene.add(floorGrid);
+
+  const roadDeck = new THREE.Mesh(
+    new THREE.PlaneGeometry(7.2, 150),
+    new THREE.MeshBasicMaterial({ color: 0x06080c }),
+  );
+  roadDeck.rotation.x = -Math.PI / 2;
+  roadDeck.position.set(0, 0.025, -62);
+  roadDeck.name = "km-road-deck";
+  scene.add(roadDeck);
+
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xe8ecff, transparent: true, opacity: 0.85 });
+  const edgeGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-3.5, 0.04, 8),
+    new THREE.Vector3(-0.35, 0.04, -132),
+    new THREE.Vector3(3.5, 0.04, 8),
+    new THREE.Vector3(0.35, 0.04, -132),
+  ]);
+  const roadEdges = new THREE.LineSegments(
+    edgeGeo,
+    edgeMat,
+  );
+  roadEdges.name = "km-road-edges";
+  scene.add(roadEdges);
+
+  const dashes = new THREE.Group();
+  for (let i = 0; i < 44; i++) {
+    const z = 10 - i * 3.2;
+    const dash = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.22, 1.1),
+      new THREE.MeshBasicMaterial({ color: 0xffd060 }),
+    );
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(0, 0.05, z);
+    dashes.add(dash);
+  }
+  dashes.name = "km-road-dashes";
+  scene.add(dashes);
+
   const mountMat = new THREE.ShaderMaterial({
     vertexShader: MOUNT_VERT,
     fragmentShader: MOUNT_FRAG,
@@ -289,14 +337,14 @@ export function mountLandscapeWebGL(opts) {
 
   const mountains = new THREE.Group();
   const peaks = [
-    [-16, -28, 8],
-    [-22, -42, 11],
-    [-10, -58, 9],
-    [12, -32, 10],
-    [20, -48, 13],
-    [8, -72, 12],
-    [-18, -88, 10],
-    [16, -96, 11],
+    [-14, -22, 7.5],
+    [-20, -36, 10.5],
+    [-8, -50, 9],
+    [10, -26, 9.5],
+    [18, -40, 12],
+    [6, -62, 11],
+    [-16, -74, 10],
+    [14, -82, 11.5],
   ];
   peaks.forEach(([x, z, h]) => {
     const geo = new THREE.ConeGeometry(5.5 + h * 0.15, h, 4, 1);
@@ -391,7 +439,7 @@ export function mountLandscapeWebGL(opts) {
     depthWrite: false,
   });
   const sun = new THREE.Mesh(sunGeo, sunMat);
-  sun.position.set(0, 1.15, -52);
+  sun.position.set(0, 1.05, -50);
   sun.renderOrder = 3;
   scene.add(sun);
 
@@ -410,32 +458,37 @@ export function mountLandscapeWebGL(opts) {
   scene.add(sunGlow);
 
   const shafts = new THREE.Group();
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 48),
+      new THREE.PlaneGeometry(8, 36),
       new THREE.MeshBasicMaterial({
-        color: 0xffc080,
+        color: 0xff9040,
         transparent: true,
-        opacity: 0.07,
+        opacity: 0.04,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
     );
-    plane.rotation.x = -0.38;
-    plane.rotation.z = (i - 2) * 0.07;
-    plane.position.set((i - 2) * 2.2, 7.5, -44);
+    plane.rotation.x = -0.42;
+    plane.rotation.z = (i - 1.5) * 0.06;
+    plane.position.set((i - 1.5) * 2.4, 6.8, -46);
     shafts.add(plane);
   }
   scene.add(shafts);
 
   function applyTheme() {
-    const light = isLight();
-    skyMat.uniforms.uTop.value = hexToVec3(css("--km-landscape-sky-top", light ? "#8ec5f0" : "#050510"));
-    skyMat.uniforms.uMid.value = hexToVec3(css("--km-landscape-sky-mid", light ? "#f5c4a8" : "#12082a"));
-    skyMat.uniforms.uBot.value = hexToVec3(css("--km-landscape-sky-bot", light ? "#e8a090" : "#2a1048"));
-    mountMat.uniforms.uMid.value.copy(skyMat.uniforms.uMid.value);
-    scene.fog = new THREE.FogExp2(skyMat.uniforms.uMid.value.getHex(), 0.009);
+    const t = document.documentElement.getAttribute("data-theme");
+    const light = t === "light";
+    const darkSky = { top: "#050510", mid: "#12082a", bot: "#2a1048" };
+    const lightSky = { top: "#87ceeb", mid: "#f9d5b8", bot: "#e8a090" };
+    const pal = light ? lightSky : darkSky;
+    skyMat.uniforms.uTop.value.set(pal.top);
+    skyMat.uniforms.uMid.value.set(pal.mid);
+    skyMat.uniforms.uBot.value.set(pal.bot);
+    mountMat.uniforms.uMid.value.set(pal.mid);
+    scene.fog = new THREE.FogExp2(skyMat.uniforms.uMid.value.getHex(), light ? 0.006 : 0.0075);
+    renderer.setClearColor(skyMat.uniforms.uBot.value, 1);
   }
   applyTheme();
 
@@ -480,7 +533,7 @@ export function mountLandscapeWebGL(opts) {
     sunGlow.position.y = sunY;
     sun.position.y = sunY;
     sunGlow.scale.setScalar(radius * (3.5 + btc * 1.5));
-    sunGlowMat.uniforms.uStrength.value = 0.14 + btc * 0.2;
+    sunGlowMat.uniforms.uStrength.value = 0.1 + btc * 0.16;
     const sd = new THREE.Vector3(0, sunY * 0.12 + 0.08, -1).normalize();
     roadMat.uniforms.uSunDir.value.copy(sd);
     mountMat.uniforms.uSunDir.value.copy(sd);
@@ -488,10 +541,10 @@ export function mountLandscapeWebGL(opts) {
 
     mountains.children.forEach((c) => {
       if (c.userData.wire) {
-        c.visible = fidelity < 1.05;
-        c.material.opacity = 0.35 + Math.max(0, 1.05 - fidelity) * 0.45;
+        c.visible = fidelity < 1.35 || fidelity >= 2.3;
+        c.material.opacity = fidelity >= 2.3 ? 0.28 : 0.4 + Math.max(0, 1.35 - fidelity) * 0.45;
       } else if (c.isMesh) {
-        c.visible = fidelity >= 1.0;
+        c.visible = fidelity >= 0.65;
       }
     });
 
@@ -505,19 +558,19 @@ export function mountLandscapeWebGL(opts) {
       }
       if (c.userData.billboard) {
         const palm = c.userData.palm;
-        const gate = palm ? 1.65 : 1.35;
-        c.visible = fidelity > gate;
-        c.material.opacity = Math.min(1, (fidelity - gate) * 0.85);
+        const gate = palm ? 2.05 : 1.85;
+        c.visible = fidelity > gate && fidelity < 2.85;
+        c.material.opacity = Math.min(0.72, (fidelity - gate) * 0.55);
       }
     });
 
-    shafts.visible = fidelity > 2.15;
+    shafts.visible = fidelity > 2.65;
     shafts.children.forEach((p, i) => {
-      p.material.opacity = 0.03 + (fidelity - 2.15) * 0.05 + Math.sin(t * 0.001 + i) * 0.012;
+      p.material.opacity = 0.012 + (fidelity - 2.65) * 0.022 + Math.sin(t * 0.001 + i) * 0.006;
     });
 
     if (scene.fog) {
-      scene.fog.density = 0.007 + Math.max(0, fidelity - 1) * 0.004 + Math.max(0, fidelity - 2.2) * 0.006;
+      scene.fog.density = 0.0065 + Math.max(0, fidelity - 1) * 0.0025 + Math.max(0, fidelity - 2.4) * 0.002;
     }
 
     if (!reduced) {

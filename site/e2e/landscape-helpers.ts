@@ -3,6 +3,40 @@ import fs from "node:fs";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
 
+export async function waitFor2dLandscape(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as {
+        __kmLandscapeWebGL?: boolean;
+        __kmLandscapeReady?: boolean;
+      };
+      const canvas = document.getElementById("km-landscape") as HTMLCanvasElement | null;
+      if (!canvas || canvas.classList.contains("km-landscape-fallback-hidden")) return false;
+      if (w.__kmLandscapeWebGL) return false;
+      return w.__kmLandscapeReady === true;
+    },
+    { timeout: 20_000 },
+  );
+  await page.waitForTimeout(350);
+}
+
+export async function assert2dLandscape(page: Page): Promise<void> {
+  await waitFor2dLandscape(page);
+  const state = await page.evaluate(() => {
+    const canvas = document.getElementById("km-landscape") as HTMLCanvasElement;
+    return {
+      mode: canvas?.dataset.landscapeMode,
+      webgl: (window as unknown as { __kmLandscapeWebGL?: boolean }).__kmLandscapeWebGL,
+      active2d: (window as unknown as { __kmLandscape2dActive?: boolean }).__kmLandscape2dActive,
+      hidden: canvas?.classList.contains("km-landscape-fallback-hidden"),
+    };
+  });
+  expect(state.webgl).toBeFalsy();
+  expect(state.active2d).toBe(true);
+  expect(state.hidden).toBe(false);
+  expect(state.mode).toBe("2d");
+}
+
 export async function waitForWebGLLandscape(page: Page, expectedTier: number): Promise<void> {
   await page.waitForFunction(
     (tier) => {

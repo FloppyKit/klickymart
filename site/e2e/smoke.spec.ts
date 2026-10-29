@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { waitFor2dLandscape } from "./landscape-helpers";
 
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
 
@@ -95,6 +96,7 @@ for (const theme of ["dark", "light"] as const) {
     }
 
     test("screenshots", async ({ page }) => {
+      test.setTimeout(240_000);
       await page.setViewportSize({ width: 1280, height: 720 });
       for (const [name, path] of [
         ["home", "/"],
@@ -105,41 +107,53 @@ for (const theme of ["dark", "light"] as const) {
         ["merchant-blocked-tos", "/merchant/booking.com"],
         ["claim", "/claim"],
       ] as const) {
-        await page.goto(`${base}${path}`);
+        await page.goto(`${base}${path === "/" ? "/?nomotion=1" : path}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        if (path === "/") await page.waitForSelector(".km-copy");
+        if (path === "/") {
+          await page.waitForSelector(".km-copy");
+          await waitFor2dLandscape(page);
+        }
         await page.waitForTimeout(path === "/" ? 400 : 200);
-        await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-desktop.png`, fullPage: true });
+        await page.screenshot({
+          path: `e2e/artifacts/${name}-${theme}-desktop.png`,
+          fullPage: true,
+          timeout: 30_000,
+          animations: "disabled",
+        });
       }
       for (const [stage, qs] of [
-        ["landscape-live", ""],
-        ["landscape-low", "?reach=0.12&btc=0.04"],
-        ["landscape-mid", "?reach=0.52&btc=0.45"],
-        ["landscape-high", "?reach=0.88&btc=0.92"],
+        ["landscape-live", "?nomotion=1"],
+        ["landscape-low", "?reach=0.12&btc=0.04&nomotion=1"],
+        ["landscape-mid", "?reach=0.52&btc=0.45&nomotion=1"],
+        ["landscape-high", "?reach=0.88&btc=0.92&nomotion=1"],
       ] as const) {
         await page.goto(`${base}/${qs}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        await page.waitForSelector("#km-landscape", { state: "attached" });
+        await waitFor2dLandscape(page);
         await page.waitForTimeout(900);
         await page.screenshot({
           path: `e2e/artifacts/home-${stage}-${theme}-desktop.png`,
           fullPage: false,
           clip: { x: 0, y: 0, width: 1280, height: 720 },
+          timeout: 30_000,
+          animations: "disabled",
         });
       }
       for (const [stage, qs] of [
-        ["landscape-live", ""],
-        ["landscape-low", "?reach=0.12&btc=0.04"],
+        ["landscape-live", "?nomotion=1"],
+        ["landscape-low", "?reach=0.12&btc=0.04&nomotion=1"],
       ] as const) {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${base}/${qs}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        await page.waitForSelector("#km-landscape", { state: "attached" });
+        await waitFor2dLandscape(page);
         await page.waitForTimeout(900);
         await page.screenshot({
           path: `e2e/artifacts/home-${stage}-${theme}-mobile.png`,
           fullPage: false,
           clip: { x: 0, y: 0, width: 390, height: 844 },
+          timeout: 30_000,
+          animations: "disabled",
         });
       }
       await page.setViewportSize({ width: 390, height: 844 });
@@ -148,10 +162,18 @@ for (const theme of ["dark", "light"] as const) {
         ["dashboard", "/dashboard"],
         ["merchant-start9", "/merchant/start9.com"],
       ] as const) {
-        await page.goto(`${base}${path}`);
+        await page.goto(`${base}${path === "/" ? "/?nomotion=1" : path}`);
         await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
-        if (path === "/") await page.waitForSelector(".km-copy");
-        await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-mobile.png`, fullPage: true });
+        if (path === "/") {
+          await page.waitForSelector(".km-copy");
+          await waitFor2dLandscape(page);
+        }
+        await page.screenshot({
+          path: `e2e/artifacts/${name}-${theme}-mobile.png`,
+          fullPage: true,
+          timeout: 30_000,
+          animations: "disabled",
+        });
       }
     });
   });

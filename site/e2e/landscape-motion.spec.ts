@@ -17,7 +17,7 @@ async function recordTierMotion(tier: number, filename: string, page: import("@p
   await page.addInitScript(() => {
     document.documentElement.setAttribute("data-theme", "dark");
   });
-  await page.goto(`${base}/?tier=${tier}&btc=0.72&reach=0.55`);
+  await page.goto(`${base}/?gl=1&tier=${tier}&btc=0.72&reach=0.55`);
   await assertWebGLLandscape(page, tier);
   await page.waitForTimeout(5000);
   const video = page.video();

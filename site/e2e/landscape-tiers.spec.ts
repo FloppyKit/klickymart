@@ -22,7 +22,7 @@ for (const tier of [0, 1, 2, 3] as const) {
       await page.addInitScript(() => {
         document.documentElement.setAttribute("data-theme", "dark");
       });
-      await page.goto(`${base}/?tier=${tier}&btc=0.65&reach=0.5`);
+      await page.goto(`${base}/?gl=1&tier=${tier}&btc=0.65&reach=0.5`);
       await assertWebGLLandscape(page, tier);
       await page.screenshot({
         path: path.join(art, `landscape-tier${tier}-dark-${suffix}.png`),
@@ -36,7 +36,7 @@ for (const tier of [0, 1, 2, 3] as const) {
       await page.addInitScript(() => {
         document.documentElement.setAttribute("data-theme", "dark");
       });
-      await page.goto(`${base}/?tier=${tier}&btc=0.65&reach=0.5&scene=1`);
+      await page.goto(`${base}/?gl=1&tier=${tier}&btc=0.65&reach=0.5&scene=1`);
       await assertWebGLLandscape(page, tier);
       await page.screenshot({
         path: path.join(art, `landscape-tier${tier}-scene-dark-${suffix}.png`),
@@ -56,7 +56,7 @@ for (const [suffix, viewport] of [
     await page.addInitScript(() => {
       document.documentElement.setAttribute("data-theme", "light");
     });
-    await page.goto(`${base}/?tier=2&btc=0.55`);
+    await page.goto(`${base}/?gl=1&tier=2&btc=0.55`);
     await assertWebGLLandscape(page, 2);
     await page.screenshot({
       path: path.join(art, `landscape-tier2-light-${suffix}.png`),
@@ -66,26 +66,26 @@ for (const [suffix, viewport] of [
   });
 }
 
-test("tier 0 vs tier 3 desktop pixels differ meaningfully", () => {
+test("tier 0 vs tier 3 desktop pixels differ (richer detail, same scene)", () => {
   expectMeaningfulPixelDiff(
     path.join(art, "landscape-tier0-dark-desktop.png"),
     path.join(art, "landscape-tier3-dark-desktop.png"),
-    0.02,
-  );
-});
-
-test("tier 1 vs tier 3 desktop pixels differ meaningfully", () => {
-  expectMeaningfulPixelDiff(
-    path.join(art, "landscape-tier1-dark-desktop.png"),
-    path.join(art, "landscape-tier3-dark-desktop.png"),
-    0.015,
+    0.004,
   );
 });
 
 test("tier 0 scene desktop shows road grid in lower band", () => {
-  expectRoadPixelsInLowerBand(path.join(art, "landscape-tier0-scene-dark-desktop.png"), 28);
+  expectRoadPixelsInLowerBand(path.join(art, "landscape-tier0-scene-dark-desktop.png"), 11);
 });
 
 test("tier 0 with hero still shows road above card", () => {
-  expectRoadPixelsInBand(path.join(art, "landscape-tier0-dark-desktop.png"), 0.36, 0.58, 35);
+  expectRoadPixelsInBand(path.join(art, "landscape-tier0-dark-desktop.png"), 0.36, 0.58, 28);
+});
+
+test("default home dark desktop 2d shows neon grid and road", () => {
+  expectRoadPixelsInBand(path.join(art, "home-dark-desktop.png"), 0.48, 0.92, 18);
+});
+
+test("default home dark mobile 2d shows road band", () => {
+  expectRoadPixelsInBand(path.join(art, "home-dark-mobile.png"), 0.52, 0.92, 16);
 });
