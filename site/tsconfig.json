@@ -11,5 +11,5 @@
     "isolatedModules": true,
     "paths": { "cloudflare:test": ["./node_modules/@cloudflare/vitest-pool-workers/dist/cloudflare-test.d.ts"] }
   },
-  "include": ["worker/**/*.ts", "scripts/**/*.ts", "worker/env.d.ts"]
+  "include": ["worker/**/*.ts", "scripts/**/*.ts", "worker/env.d.ts", "types/**/*.d.ts"]
 }

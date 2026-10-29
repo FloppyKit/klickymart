@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 import { readFileSync } from "node:fs";
-import { NdjsonFileSource, persistIngest, ingestFromLines } from "../worker/src/ingest.ts";
+import { NdjsonFileSource, persistIngest, ingestFromLines } from "../worker/src/ingest";
 
 const args = process.argv.slice(2);
 let file = "fixtures/records.sample.ndjson";

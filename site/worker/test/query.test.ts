@@ -69,5 +69,5 @@ describe("ingest ArrayRecordSource", () => {
 });
 
 function sampleLine() {
-  return sampleNdjson.split("\n").find((l) => l.trim())!;
+  return sampleNdjson.split("\n").find((l: string) => l.trim())!;
 }

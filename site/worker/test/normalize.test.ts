@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { normalize, rejectExampleUnlessAllowed } from "../src/normalize";
 import sampleNdjson from "../../fixtures/records.sample.ndjson?raw";
 
-const sampleLine = sampleNdjson.split("\n").find((l) => l.trim())!;
+const sampleLine = sampleNdjson.split("\n").find((l: string) => l.trim())!;
 
 describe("normalize", () => {
   it("accepts fixture line", () => {
