@@ -17,7 +17,8 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
           parameters: [
             { name: "q", in: "query", schema: { type: "string" } },
             { name: "status", in: "query", schema: { type: "string" } },
-            { name: "btc_min", in: "query", schema: { type: "integer", minimum: 0, maximum: 4 } },
+            { name: "category", in: "query", schema: { type: "string", enum: ["shopping"] } },
+            { name: "cat", in: "query", schema: { type: "string" } },
             { name: "pay", in: "query", schema: { type: "string" } },
             { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 500 } },
           ],
@@ -82,6 +83,8 @@ export function mcpToolsList(): unknown {
           properties: {
             q: { type: "string" },
             status: { type: "array", items: { type: "string" } },
+            category: { type: "string", enum: ["shopping"], description: "Vertical filter (v1: shopping)" },
+            cat: { type: "array", items: { type: "string" }, description: "Subcategory codes (elec, groc, …)" },
             btc_min: { type: "integer" },
             pay: { type: "array", items: { type: "string" } },
             pay_group: { type: "string", enum: ["bitcoin", "lightning", "ecash"] },

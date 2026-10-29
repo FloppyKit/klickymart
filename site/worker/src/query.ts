@@ -1,3 +1,4 @@
+import type { IndexRow, Snapshot } from "./index-mem";
 import {
   AR_CODES,
   CAT_CODES,
@@ -8,7 +9,7 @@ import {
   arCodeToBit,
   catCodeToBit,
 } from "./codes";
-import type { IndexRow, Snapshot } from "./index-mem";
+import { V1_CATEGORIES, categoryMatchesRow } from "./category";
 
 export interface QueryParams {
   q?: string;
@@ -30,6 +31,7 @@ export interface QueryParams {
   tos?: string;
   kyc?: string;
   cat?: string[];
+  category?: string;
   sort?: string[];
   limit?: number;
   cursor?: string;
@@ -46,7 +48,7 @@ export interface QueryResult {
 const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
-  "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat",
+  "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
   "sort", "limit", "cursor", "fields", "format",
 ]);
 
@@ -205,6 +207,14 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     params.cat = list;
   }
 
+  const category = searchParams.get("category");
+  if (category) {
+    if (!V1_CATEGORIES.includes(category as (typeof V1_CATEGORIES)[number])) {
+      return { ok: false, param: "category", message: `category must be one of: ${V1_CATEGORIES.join(", ")}` };
+    }
+    params.category = category;
+  }
+
   const sort = searchParams.get("sort");
   params.sort = sort ? sort.split(",").map((s) => s.trim()) : DEFAULT_SORT;
 
@@ -338,6 +348,10 @@ function matches(row: IndexRow, p: QueryParams): boolean {
       }
     }
     if (!any) return false;
+  }
+
+  if (p.category) {
+    if (!categoryMatchesRow(p.category as (typeof V1_CATEGORIES)[number], row)) return false;
   }
 
   return true;

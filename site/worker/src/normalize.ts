@@ -200,9 +200,9 @@ export function normalize(raw: RawRecord, source: string, ingestedAt: number): N
     search,
     raw_json: JSON.stringify(raw),
     source,
-    event_id: null,
-    pubkey: null,
-    sig: null,
+    event_id: typeof raw.event_id === "string" ? raw.event_id : null,
+    pubkey: typeof raw.pubkey === "string" ? raw.pubkey : null,
+    sig: typeof raw.sig === "string" ? raw.sig : null,
     ingested_at: ingestedAt,
   };
 

@@ -19,6 +19,8 @@
   --km-ok:#3df29a; --km-tos:#ff6b8a; --km-anw:#f0b84a; --km-err:#8a93a6;
   --km-glow:0 0 0 1px color-mix(in srgb,var(--km-accent) 40%,transparent),0 0 24px color-mix(in srgb,var(--km-accent) 18%,transparent);
   --km-grid-line:color-mix(in srgb,var(--km-link) 10%,transparent);
+  --km-landscape-sky-top:#07080f;
+  --km-landscape-sky-bot:#151024;
 }
 [data-theme="light"] {
   color-scheme: light;

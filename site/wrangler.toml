@@ -22,3 +22,5 @@ id = "REPLACE_AT_DEPLOY"
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
+# Set PREVIEW_DATA = "1" in a preview deployment to load synthetic *.example records only.
+# PREVIEW_DATA = "0"

@@ -1,6 +1,7 @@
 import type { RecordRow, RawRecord } from "./normalize";
 import { normalize, rejectExampleUnlessAllowed } from "./normalize";
 import { rowsToSnapshot, snapshotToJson, type Snapshot } from "./index-mem";
+import { parseRecordLine } from "./nostr-record-source";
 
 export interface RecordSource {
   name: string;
@@ -15,10 +16,13 @@ export class NdjsonFileSource implements RecordSource {
     for (const line of this.text.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      yield JSON.parse(trimmed) as RawRecord;
+      const rec = parseRecordLine(trimmed);
+      if (rec) yield rec;
     }
   }
 }
+
+export { Nostr31420NdjsonSource } from "./nostr-record-source";
 
 /** In-memory source for tests (swap-ability) */
 export class ArrayRecordSource implements RecordSource {

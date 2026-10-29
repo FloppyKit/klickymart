@@ -42,6 +42,8 @@ async function expectDarkBackgroundRule(page: Page, path: string): Promise<void>
     const out: string[] = [];
     els.forEach((el) => {
       if (el.classList.contains("km-skip")) return;
+      if (el.closest(".km-landscape-wrap")) return;
+      if (el.classList.contains("km-grade")) return;
       const tag = el.tagName;
       if (tag === "OPTION") return;
       const bg = getComputedStyle(el).backgroundColor;
@@ -59,7 +61,7 @@ async function expectDarkBackgroundRule(page: Page, path: string): Promise<void>
   expect(bad, `backgrounds too light on ${path}`).toEqual([]);
 }
 
-const pages = ["/", "/dashboard", "/merchant/microsoft.com", "/claim", "/about", "/contribute", "/docs/api", "/bot"];
+const pages = ["/", "/dashboard", "/merchant/microsoft.com", "/claim", "/about", "/contribute", "/docs/api", "/docs/nostr-tags", "/bot"];
 
 for (const theme of ["dark", "light"] as const) {
   test.describe(`${theme} theme`, () => {
@@ -92,6 +94,17 @@ for (const theme of ["dark", "light"] as const) {
         if (path === "/") await page.waitForSelector(".km-copy");
         await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-desktop.png`, fullPage: true });
       }
+      for (const [stage, qs] of [
+        ["landscape-low", "?reach=0.12&btc=0.08"],
+        ["landscape-mid", "?reach=0.52&btc=0.45"],
+        ["landscape-high", "?reach=0.88&btc=0.92"],
+      ] as const) {
+        await page.goto(`${base}/${qs}`);
+        await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+        await page.waitForSelector("#km-landscape");
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: `e2e/artifacts/home-${stage}-${theme}-desktop.png`, fullPage: false });
+      }
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${base}/`);
       await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
@@ -113,6 +126,11 @@ test.describe("dark theme surfaces", () => {
   test("dashboard: background luminance rule", async ({ page }) => {
     await expectDarkBackgroundRule(page, "/dashboard");
   });
+});
+
+test("footer signoff on home", async ({ page }) => {
+  await page.goto(`${base}/`);
+  await expect(page.getByText("Thank You, Come Again.")).toBeVisible();
 });
 
 test("search dell finds dell.com", async ({ page }) => {

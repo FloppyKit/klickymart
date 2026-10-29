@@ -7,6 +7,9 @@ import { rowToCompact, computeStats, parseRaw, suggestDomains } from "./records-
 import { buildOpenApi, createMcpHandler, parseMcpRequest } from "./mcp";
 import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
 import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
+import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
+import { landscapeFromSnapshot } from "./landscape-metrics";
+import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
 import {
   renderHome,
   renderDashboard,
@@ -16,6 +19,7 @@ import {
   renderClaim,
   renderContribute,
   renderDocsApi,
+  renderDocsNostrTags,
 } from "./render/pages";
 
 export interface Env {
@@ -27,6 +31,7 @@ export interface Env {
   CONTACT: string;
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
+  PREVIEW_DATA?: string;
 }
 
 let cachedSnap: Snapshot | null = null;
@@ -77,6 +82,19 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
     return cachedSnap;
   }
 
+  if (isPreviewDataMode(env)) {
+    const { EMBEDDED_SYNTHETIC_NDJSON } = await import("./fixture-data");
+    if (EMBEDDED_SYNTHETIC_NDJSON) {
+      const src = new NdjsonFileSource(EMBEDDED_SYNTHETIC_NDJSON);
+      const { rows, report } = await ingestFromLines(src.read(), {
+        allowSynthetic: true,
+        sourceLabel: "preview-synthetic",
+      });
+      cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
+      return cachedSnap;
+    }
+  }
+
   const { EMBEDDED_FIXTURE_NDJSON } = await import("./fixture-data");
   if (EMBEDDED_FIXTURE_NDJSON) {
     const src = new NdjsonFileSource(EMBEDDED_FIXTURE_NDJSON);
@@ -120,6 +138,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   const snap = await loadSnapshot(env);
+  const shell = buildPageShell(snap, env, url);
 
   if (path === "/q" && request.method === "GET") {
     const validated = validateQueryParams(url.searchParams);
@@ -164,7 +183,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         ...licenseMetaBlock(),
         record: raw,
         derived: rowToCompact(row, origin),
-        nostr: { kind: 31420, d: domain, event_id: null },
+        nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null },
       },
       { headers: apiHeaders(snap.version, 0) },
     );
@@ -173,9 +192,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path.startsWith("/merchant/") && request.method === "GET") {
     const domain = decodeURIComponent(path.slice("/merchant/".length)).toLowerCase();
     const row = snap.rows.find((r) => r.d === domain);
-    if (!row) return new Response(render404(origin), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
-      return new Response(renderMerchant(row, origin), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -210,8 +229,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === "/stats" && request.method === "GET") {
     const stats = computeStats(snap.rows);
+    const landscape = landscapeFromSnapshot(snap);
     return Response.json(
-      { ...licenseMetaBlock(), ...stats, version: snap.version, generated_at: new Date().toISOString() },
+      {
+        ...licenseMetaBlock(),
+        ...stats,
+        landscape,
+        preview_data: shell.previewData,
+        version: snap.version,
+        generated_at: new Date().toISOString(),
+      },
       { headers: apiHeaders(snap.version, 0) },
     );
   }
@@ -307,7 +334,7 @@ Contact: ${env.CONTACT}
         }
       }
     }
-    return new Response(renderClaim(origin, domain, resultHtml), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(renderClaim(origin, domain, resultHtml, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
   if (path === "/_ingest" && request.method === "POST") {
@@ -329,20 +356,21 @@ Contact: ${env.CONTACT}
       const params = validated.ok ? validated.params : {};
       if (q) params.q = q.toLowerCase();
       const result = querySnapshot(snap, { ...params, limit: 20 });
-      return new Response(renderHome(snap, origin, q, result.items), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderHome(snap, origin, q, result.items, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     if (path === "/dashboard") {
       const validated = validateQueryParams(url.searchParams);
-      if (!validated.ok) return new Response(render404(origin), { status: 400 });
+      if (!validated.ok) return new Response(render404(origin, shell), { status: 400 });
       const result = querySnapshot(snap, validated.params);
-      return new Response(renderDashboard(snap, origin, url.searchParams, result.items, result.total), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      return new Response(renderDashboard(snap, origin, url.searchParams, result.items, result.total, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
-    if (path === "/about") return new Response(renderAbout(origin, snap), { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    if (path === "/contribute") return new Response(renderContribute(origin), { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    if (path === "/docs/api") return new Response(renderDocsApi(origin), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (path === "/about") return new Response(renderAbout(origin, snap, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (path === "/contribute") return new Response(renderContribute(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (path === "/docs/api") return new Response(renderDocsApi(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (path === "/docs/nostr-tags") return new Response(renderDocsNostrTags(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
-  return new Response(render404(origin), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 function escHtml(s: string): string {

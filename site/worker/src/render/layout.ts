@@ -15,12 +15,20 @@ export interface LayoutOpts {
   tsMax: number;
   body: string;
   path: string;
+  previewData?: boolean;
+  landscapeReach?: number;
+  landscapeBtc?: number;
 }
 
 export function layout(o: LayoutOpts): string {
   const tsRange = o.tsMin && o.tsMax
     ? `${new Date(o.tsMin * 1000).toISOString().slice(0, 10)} – ${new Date(o.tsMax * 1000).toISOString().slice(0, 10)}`
     : "—";
+  const reach = typeof o.landscapeReach === "number" ? o.landscapeReach.toFixed(4) : "0";
+  const btc = typeof o.landscapeBtc === "number" ? o.landscapeBtc.toFixed(4) : "0";
+  const previewBadge = o.previewData
+    ? `<span class="km-preview-badge" role="status">Preview data</span>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,13 +40,17 @@ export function layout(o: LayoutOpts): string {
 <link rel="stylesheet" href="/km.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
-<body>
+<body class="km-has-landscape">
 <a class="km-skip" href="#main">Skip to content</a>
+<div class="km-landscape-wrap" aria-hidden="true">
+  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"></canvas>
+</div>
 <header class="km-header" role="banner">
   <a class="km-wordmark" href="/">
     <svg class="km-glyph" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="currentColor" d="M3 3h5v5H3V3zm7 0h5v5h-5V3zM3 10h5v5H3v-5zm7 2h5v3h-5v-3z"/></svg>
     KlickyMart
   </a>
+  ${previewBadge}
   <nav class="km-nav" aria-label="Primary">
     <a href="/"${o.path === "/" ? ' aria-current="page"' : ""}>Search</a>
     <a href="/dashboard"${o.path.startsWith("/dashboard") ? ' aria-current="page"' : ""}>Dashboard</a>
@@ -52,10 +64,12 @@ export function layout(o: LayoutOpts): string {
 ${o.body}
 </main>
 <footer class="km-footer" role="contentinfo">
+  <p class="km-footer-signoff">Thank You, Come Again.</p>
   <p class="km-footer-tag">KlickyMart by FloppyKit. Records published as Nostr events (kind 31420). Code and data: <a href="https://github.com/FloppyKit/klickymart">GitHub</a>. Crawler: <a href="/bot">/bot</a>. Contact: <a href="mailto:bot@klickymart.com">bot@klickymart.com</a></p>
   <p class="km-footer-meta">A signed map of where agents can shop. Records published as Nostr events. · Data version ${esc(o.version)} · Crawls ${esc(tsRange)}</p>
 </footer>
 <script src="/km.js" defer></script>
+<script src="/km-landscape.js" defer></script>
 </body>
 </html>`;
 }

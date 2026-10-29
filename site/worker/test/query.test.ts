@@ -64,6 +64,18 @@ describe("/q filters", () => {
     expect(j.license?.data).toBe("CC0-1.0");
     expect(res.headers.get("X-KM-Data-License")).toBe("CC0-1.0");
   });
+
+  it("accepts category=shopping", async () => {
+    const res = await SELF.fetch("https://example.com/q?category=shopping&limit=5");
+    expect(res.status).toBe(200);
+    const j = (await res.json()) as { count: number };
+    expect(j.count).toBeGreaterThan(0);
+  });
+
+  it("rejects unknown category", async () => {
+    const res = await SELF.fetch("https://example.com/q?category=travel");
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("ingest ArrayRecordSource", () => {

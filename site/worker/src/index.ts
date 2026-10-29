@@ -11,6 +11,7 @@ export default {
       || path === "/km.css"
       || path === "/tokens.css"
       || path === "/km.js"
+      || path === "/km-landscape.js"
       || path === "/favicon.svg"
       || path === "/og.png"
       || path === "/DATA-LICENSE"
@@ -33,4 +34,5 @@ interface Env {
   CONTACT: string;
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
+  PREVIEW_DATA?: string;
 }
