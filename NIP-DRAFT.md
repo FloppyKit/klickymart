@@ -1,24 +1,115 @@
 NIP-XX
 ======
 
-Need / Fulfillment / Acceptance Handshake
------------------------------------------
+Commerce Site Directory and Need / Fulfillment / Acceptance Handshake
+---------------------------------------------------------------------
 
 `draft` `optional`
 
-> Number: **NIP-XX** (unassigned). See "Numbering and kind checks" at the end. Kinds requested: `420`, `421`, `422` (regular), `31420` (addressable, companion crawl records, see CRAWL-RUBRIC.md).
+This NIP defines one kind family:
 
-This NIP defines a three-event handshake that any party, human or agent, can use to post a need, claim fulfillment with proof, and close the loop with acceptance and payment. Higher-level protocols (commerce search, task markets, agent services) layer on top of it. A party's reputation is derived from completed, paid loops.
+| kind    | type        | name             | meaning                                                         |
+|---------|-------------|------------------|-----------------------------------------------------------------|
+| `31420` | addressable | Site record      | one signed observation of one commerce site, keyed by domain     |
+| `420`   | regular     | Need             | "I have a need", with an optional offered payment               |
+| `421`   | regular     | Fulfillment      | "I met your need; here is proof", with an optional amount owed |
+| `422`   | regular     | Acceptance       | "Yes, you met my need", with payment and/or an optional tip    |
 
-## Kinds
+`31420` lets any client or agent find sites it can reach and pay (with special attention to privacy-respecting bitcoin) by filtering on tags alone. `420–422` is a generic handshake for posting a need, claiming it was met, and closing the loop with payment; the directory is one thing it can point at.
 
-| kind  | name        | meaning                                                         |
-|-------|-------------|-----------------------------------------------------------------|
-| `420` | Need        | "I have a need", with an optional offered payment               |
-| `421` | Fulfillment | "I met your need; here is proof", with an optional amount owed |
-| `422` | Acceptance  | "Yes, you met my need", with payment and/or an optional tip    |
+**Kind numbers are provisional.** Implementations MUST define each kind number in a single constant (e.g. `KIND_SITE = 31420`) so the numbers can be changed if NIP review asks. See "Numbering and kind checks".
 
-All three are regular (non-replaceable) events. A loop is the chain `420 → 421 → 422`.
+## Why 31420 is addressable and 420–422 are regular
+
+A site record is a current-state observation: a re-crawl of `example.com` supersedes the previous one. As an addressable event (`30000 ≤ kind < 40000`), relays keep only the newest event per `(pubkey, kind, d)`, so re-crawls replace older records without deletions and each publisher has exactly one record per domain. History, if wanted, is kept off-relay by the publisher.
+
+Needs, fulfillments and acceptances are facts in a sequence. Each must stay addressable by `id` so later events can reference it with `e` tags, and a later event must never erase an earlier one (a 422 that replaced its 421 would destroy the proof). They are therefore regular events.
+
+## Kind 31420: Site record
+
+One event per site per publisher. `d` is the canonical domain: lowercase, IDNA/punycode, no scheme, no path, no leading `www.` (e.g. `example.com`, `shop.example.org`). Newest `created_at` replaces older per `pubkey + d`.
+
+`.content` is the canonical JSON record (the full observation, including evidence quotes and URLs), serialized compactly. Its schema is the crawl rubric (`CRAWL-RUBRIC.md`, versioned by `v`). Tags duplicate the filterable fields so a client never needs to parse content to filter. If tags and content disagree, content wins and the event SHOULD be treated as malformed.
+
+### Tag conventions
+
+Relays index only single-letter tags (NIP-01). Filterable facts are therefore NIP-32 labels in one namespace:
+
+```
+["L", "nip-xx"]
+["l", "<key>:<value>", "nip-xx"]
+```
+
+so a filter like `{"kinds":[31420],"#l":["pay:lightning"]}` works on any relay. Category uses `t`. Non-filterable metadata uses multi-letter tags. Unknown `l` keys MUST be ignored, so the vocabulary can grow.
+
+### Required tags
+
+| tag | example | meaning |
+|---|---|---|
+| `d` | `["d","example.com"]` | canonical domain |
+| `r` | `["r","example.com"]` | same domain, for generic `#r` lookups across kinds |
+| `L` | `["L","nip-xx"]` | label namespace |
+| `t` | `["t","shopping"]` | top-level category (open vocabulary; v1 uses `shopping` = consumer goods; later e.g. `services`, `food`, `travel`) |
+| `l status:` | `["l","status:crawled","nip-xx"]` | `crawled`, `blocked-tos` (terms ban automation; not crawled; bare record: name, URL, status, ToS quote, and no other labels), `agents-not-welcome` (site affirmatively refused: robots disallow, 403, 429 or block page), `error` (network/timeout/5xx; could not tell, not counted as a refusal) |
+| `l tos:` | `["l","tos:ok","nip-xx"]` | terms of service on automation: `ok` (read, no ban found), `bans-automation`, `unknown` |
+| `crawled_at` | `["crawled_at","1793291247"]` | unix time of observation (may differ from `created_at` if signed later) |
+| `v` | `["v","0.3-draft"]` | record schema / rubric version |
+| `license` | `["license","CC0-1.0"]` | data license of the record (SPDX id) |
+
+### Optional tags
+
+| tag | example | meaning |
+|---|---|---|
+| `t` (more) | `["t","elec"]` | subcategory codes (`gen`, `elec`, `appr`, `home`, `groc`, `mkt`, `sw`, …; open vocabulary) |
+| `name` | `["name","Example Store"]` | display name the site shows for itself |
+| `l pay:` | `["l","pay:lightning","nip-xx"]` | payment method observed, any scope (union of the three below). Values: see Payment tag values |
+| `l pay_online:` | `["l","pay_online:btc-onchain","nip-xx"]` | method stated for online checkout |
+| `l pay_instore:` | `["l","pay_instore:card","nip-xx"]` | method stated for physical stores only |
+| `l pay_unscoped:` | `["l","pay_unscoped:paypal","nip-xx"]` | method mentioned without a clear scope |
+| `l no:` | `["l","no:btc-onchain","nip-xx"]` | method the site explicitly says it does not accept |
+| `l btc:` | `["l","btc:3","nip-xx"]` | bitcoin grade 0–4 (below). Omitted when ungraded |
+| `l btc_any` | `["l","btc_any","nip-xx"]` | some bitcoin option was quoted, grade not yet set |
+| `l btcpriv:` | `["l","btcpriv:noacct","nip-xx"]` | privacy flags: `noacct` (no buyer account needed), `selfhosted` (merchant's own BTCPay/node), `ecash`, `sp` (silent payments), `ark`, `nokyc` (no buyer identity beyond shipping) |
+| `l ag:` | `["l","ag:2","nip-xx"]` | agent reachability 0–3: 0 blocked at landing, 1 browse only, 2 product/cart readable, 3 payment screen reached |
+| `l ar:` | `["l","ar:rb_ai","nip-xx"]` | agent restriction found: `rb_ai` (robots disallows AI agents), `rb_ck` (robots disallows cart/checkout), `403`, `429`, `cap` (captcha), `cf`/`ak`/`px` (Cloudflare/Akamai/PerimeterX block), `js`, `tarpit`, `net`, `acct` (forced account), `tos` |
+| `l anw:` | `["l","anw:robots-403","nip-xx"]` | why the site was not crawled. With status `agents-not-welcome` (affirmative refusal only): `robots-disallow`, `robots-403`, `robots-429`, `robots-block-page`, `http-403`, `http-429`, `http-503`, `block-page`. With status `error` (no signal either way): `robots-unreachable`, `home-unreachable` |
+| `l cause:` | `["l","cause:timeout","nip-xx"]` | with status `error`: `dns`, `timeout`, `tls`, `connect`, `5xx`, `4xx`, `redirect-loop`, `decode`, `unknown` |
+| `l co:` | `["l","co:2","nip-xx"]` | checkout ease 0–3 (rubric) |
+| `l guest:` | `["l","guest:yes","nip-xx"]` | guest checkout `yes` / `no` |
+| `l kyc:` | `["l","kyc:none-stated","nip-xx"]` | buyer identity: `none-stated`, `conditional`, `required` |
+| `vantage` | `["vantage","single-datacenter"]` | where the crawl ran from (`single-datacenter`, `residential`, `multi-region`, `human`). Blocks may reflect IP reputation; readers SHOULD weigh `ag`/`ar` by vantage |
+| `crawler` | `["crawler","FloppyKitMapBot/0.2","https://example.org/bot"]` | software and version that produced the record, optional info URL |
+| `e`/`a` | `["a","31420:<pubkey>:example.com"]` | in third-party records: the record being corrected |
+
+Payment tag values (readable; publishers keep any internal codes they like and map them to these): fiat `card`, `apple-pay`, `google-pay`, `shop-pay`, `paypal`, `venmo`, `cashapp`, `zelle`, `ach`, `check`, `cod`, `gift-card`, `ebt`, `hsa-fsa`, `bnpl` or `bnpl:<provider>`; bitcoin `btc-onchain`, `lightning`, `lnurl`, `bolt12`, `silent-payments`, `ark`, `cashu`, `fedimint`, `liquid`; other crypto `usdc`, `usdt`, `ethereum`, `monero`, `litecoin`, `crypto` (unspecified); anything else `other:<label>`.
+
+Bitcoin grade: 0 none; 1 only via a third-party fiat converter or buyer-KYC custodian; 2 via a custodial processor with no buyer account; 3 on-chain or Lightning, no buyer account, self-hosted processor or merchant's own node; 4 grade 3 plus privacy features (ecash, silent payments, Ark) and no buyer identity beyond shipping.
+
+Unknown is expressed by omitting the tag, never by a placeholder value (except `tos:unknown`, which is required).
+
+### Querying
+
+- Sites accepting Lightning: `{"kinds":[31420],"#l":["pay:lightning"]}`
+- Grade 3+ bitcoin: `{"kinds":[31420],"#l":["btc:3","btc:4"]}`
+- Shopping sites from a trusted publisher: `{"kinds":[31420],"authors":["<pk>"],"#t":["shopping"]}`
+
+NIP-01 filters OR values within one tag key and cannot AND two values of the same key (`pay:lightning` AND `ag:2`); clients intersect locally. Publishers MAY also offer a bulk NDJSON export of all their events.
+
+### Publishers, corrections, trust
+
+Any pubkey may publish 31420 records. Because addressability is per pubkey, a third party's record for `example.com` never overwrites another publisher's; it sits beside it.
+
+- **Corrections.** A human or agent who disagrees publishes their own 31420 for the same `d` and adds `["a","31420:<original-pubkey>:<domain>"]` plus the specific fields they observed, with evidence URLs in content. A narrow correction MAY include only the tags it asserts plus the required ones.
+- **Trust is by pubkey.** Clients choose which publishers to read (a follow list, a NIP-51 list of directory publishers, or NIP-85 trusted assertions). There is no global record; when publishers disagree, clients show the disagreement or prefer the newest `crawled_at` from a trusted key.
+- **Precedence.** A 31420 from the domain's NIP-05-verified merchant key outranks third-party records and corrections for that domain. For every other publisher, trust is the client's choice; the protocol sets no rate limits on corrections.
+- **Merchant claim (NIP-05).** A business claims its domain by serving `https://<domain>/.well-known/nostr.json` with `{"names":{"_":"<hex pubkey>"}}`. A 31420 whose author matches that `_` entry for its `d` is the merchant's self-description; clients SHOULD label it as such and rank it above third-party records (see Precedence), while still letting users see the third-party observations. Merchant records are claims, not verified observations. Clients SHOULD record when they last checked the NIP-05 mapping; if it changes, earlier events stay signed by the old key.
+- Publishers MUST NOT create or hold keys on behalf of a business that has not consented.
+
+## Kinds 420 / 421 / 422: Handshake
+
+A loop is the chain `420 → 421 → 422`. Each references the earlier events with `e` tags (markers `need`, `fulfillment`). Any of them MAY reference a directory record with `["a","31420:<pubkey>:<domain>"]` (the record consulted) and the domain with `["r","<domain>"]`.
+
+Layering: higher-level features are tag conventions on top of this loop, not new kinds. Examples: a shopping agent posts a 420 with `["t","shopping"]` and `r`/`a` pointing at a site it found in the directory; a 421 proves purchase with `["proof","order",…]`; a correction bounty is a 420 asking for a fresh 31420 of a domain, met by a 421 with `["proof","event","<31420-id>"]`; reputation indexes count accepted, paid loops.
 
 ## Kind 420: Need
 
@@ -102,13 +193,9 @@ Indexers SHOULD publish, per pubkey (and per `r` domain): `loops_paid` (count), 
 
 **Count everything, weight by source.** Indexers MUST count every verifiable paid loop, including cheap zap-receipt tips, and MUST record for each loop the requester (tipper) pubkey and the proof type (`zap`, `preimage`, `nutzap`). Raw counts stay public. Each loop and each review is then weighted by the credibility of the account it came from: established, web-of-trust-connected or NIP-05-verified accounts weigh more, and new or anonymous keys weigh less but are never dropped. Stronger proof types MAY add weight. Credibility is itself derived from an account's own loop history, so the weighting sharpens over time. The same source weighting applies to crawl-record disputes and domain reviews.
 
-## Businesses and domain-tagged reviews
+## Businesses
 
-No party publishes as a business without that business's key. Specifically, a site, crawler or agent MUST NOT generate or hold keys on behalf of a business that has not consented.
-
-- **Reviews about a business** are events signed by the reviewer and tagged with the business domain: `["r","example.com"]` plus `["L","nip-xx"]`/`["l","review","nip-xx"]` (NIP-32 labels). The crawler's per-domain records (kind `31420`, see CRAWL-RUBRIC.md) are one such source. Reviews are statements by their author, not by the business.
-- **Claiming a domain.** A business proves control of a pubkey for its domain with NIP-05: `https://example.com/.well-known/nostr.json` contains `{"names":{"_":"<hex pubkey>"}}`. Clients then treat that pubkey as the domain's voice: it may reply to reviews, publish 421s with `["r","example.com"]`, and accumulate loop reputation under that domain. Reputation earned before a claim stays attributed to the individual fulfiller pubkeys; indexers MAY show it alongside the domain.
-- **Revocation.** If the NIP-05 record changes, prior events stay signed by the old key; clients SHOULD show the current mapping and the date it was observed.
+Domain identity for handshake events uses the same NIP-05 claim as site records (see "Publishers, corrections, trust"). A pubkey that holds the domain's `_` NIP-05 entry may publish 421s with `["r","<domain>"]` and accumulate loop reputation under that domain. Reputation earned before a claim stays with the individual fulfiller pubkeys. An `r` tag alone never means the business is speaking.
 
 ## Private needs
 
@@ -141,6 +228,85 @@ Related work worth reading before submission: NIP-15 (marketplace, bids `1021/10
 - **Privacy.** Public loops reveal who paid whom and roughly how much. Use private needs or off-protocol rails where that matters.
 - **Impersonation.** Domain attribution relies solely on NIP-05; clients MUST NOT treat an `r` tag alone as the business speaking.
 
+## Examples
+
+Unsigned; `id`, `pubkey`, `sig` are placeholders.
+
+Site record from a crawler:
+
+```json
+{
+  "kind": 31420,
+  "pubkey": "<crawler-pubkey-hex>",
+  "created_at": 1793291300,
+  "tags": [
+    ["d", "example-store.com"], ["r", "example-store.com"], ["L", "nip-xx"],
+    ["t", "shopping"], ["t", "elec"], ["name", "Example Store"],
+    ["l", "status:crawled", "nip-xx"], ["l", "tos:ok", "nip-xx"],
+    ["l", "ag:3", "nip-xx"], ["l", "co:2", "nip-xx"], ["l", "guest:yes", "nip-xx"],
+    ["l", "ar:cap", "nip-xx"],
+    ["l", "pay:card", "nip-xx"], ["l", "pay:lightning", "nip-xx"], ["l", "pay:btc-onchain", "nip-xx"],
+    ["l", "pay_online:card", "nip-xx"], ["l", "pay_online:ln", "nip-xx"], ["l", "pay_online:btc-onchain", "nip-xx"],
+    ["l", "btc:3", "nip-xx"], ["l", "btcpriv:noacct", "nip-xx"], ["l", "btcpriv:selfhosted", "nip-xx"],
+    ["l", "kyc:none-stated", "nip-xx"],
+    ["crawled_at", "1793291247"], ["v", "0.3-draft"], ["license", "CC0-1.0"],
+    ["vantage", "single-datacenter"], ["crawler", "ExampleMapBot/0.2", "https://example.org/bot"]
+  ],
+  "content": "{\"d\":\"example-store.com\",\"cat\":[\"elec\"],\"v\":\"0.3-draft\",\"ts\":1793291247,\"status\":\"crawled\",\"tos\":\"ok\",\"ag\":3,\"co\":2,\"guest\":true,\"pay\":[\"card\",\"ln\",\"btc\"],\"pay_online\":[\"card\",\"ln\",\"btc\"],\"pay_instore\":[],\"pay_unscoped\":[],\"btc\":3,\"btc_conf\":\"med\",\"evu\":[\"https://example-store.com/help/payments\"]}",
+  "id": "<id>", "sig": "<sig>"
+}
+```
+
+Site that refused agents (tags only; content follows the same schema):
+
+```json
+{
+  "kind": 31420,
+  "pubkey": "<crawler-pubkey-hex>",
+  "created_at": 1793291400,
+  "tags": [
+    ["d", "bigshop.example"], ["r", "bigshop.example"], ["L", "nip-xx"], ["t", "shopping"], ["t", "gen"],
+    ["l", "status:agents-not-welcome", "nip-xx"], ["l", "tos:unknown", "nip-xx"],
+    ["l", "anw:http-403", "nip-xx"], ["l", "ar:403", "nip-xx"], ["l", "ar:rb_ai", "nip-xx"], ["l", "ag:0", "nip-xx"],
+    ["crawled_at", "1793291390"], ["v", "0.3-draft"], ["license", "CC0-1.0"], ["vantage", "single-datacenter"]
+  ],
+  "content": "{...}", "id": "<id>", "sig": "<sig>"
+}
+```
+
+A need that points at a directory record, and its acceptance:
+
+```json
+{
+  "kind": 420,
+  "pubkey": "<buyer-pubkey-hex>",
+  "created_at": 1793300000,
+  "tags": [
+    ["t", "shopping"], ["r", "example-store.com"],
+    ["a", "31420:<crawler-pubkey-hex>:example-store.com", "wss://relay.example"],
+    ["amount", "40000000", "msat"], ["payment", "zap"], ["expiration", "1793836800"]
+  ],
+  "content": "Buy 2x USB-C 100W cables from example-store.com, pay merchant in Lightning, ship to my locker.",
+  "id": "<need-id>", "sig": "<sig>"
+}
+```
+
+```json
+{
+  "kind": 422,
+  "pubkey": "<buyer-pubkey-hex>",
+  "created_at": 1793400000,
+  "tags": [
+    ["e", "<fulfillment-id>", "wss://relay.example", "fulfillment"],
+    ["e", "<need-id>", "wss://relay.example", "need"],
+    ["p", "<agent-pubkey-hex>"], ["amount", "42000000"], ["tip", "2000000"],
+    ["zap", "<9735-receipt-id>"], ["status", "accepted"]
+  ],
+  "content": "Arrived, thanks.",
+  "id": "<id>", "sig": "<sig>"
+}
+```
+
 ## Numbering and kind checks (checked 2026-10-29)
 
 Checked against `https://raw.githubusercontent.com/nostr-protocol/nips/master/README.md` and open PRs (GitHub API, ~400 open PRs, titles; GitHub issue search for kind strings).
@@ -148,3 +314,11 @@ Checked against `https://raw.githubusercontent.com/nostr-protocol/nips/master/RE
 - **NIP number.** Numbering is no longer sequential. Merged NIPs include `01…99` (with gaps) and hex-style IDs `5A, 7D, A0, A3, A4, B0, B7, C0, C7, CC, CD, F4`. Open PR titles already claim many others (e.g. `100, 101, 102, 113, 116, 122, …, 800`, `A1, A5, A7, AA–AE, B9, BB, BC, C1, C4, CF, D8, DA–DC, EE, F5–F7, FB, FC, FE`). Maintainers assign numbers at merge and new proposals are customarily submitted as "NIP-XX". There is therefore no well-defined "next" number. Recommendation: submit as **NIP-XX**; if a number must be suggested, `A6` appears unused in both the README and open PR titles (TO-CONFIRM at submission time). No decimal number after 99 is free of open PR claims at the low end (100–102 are claimed).
 - **Kinds 420/421/422.** Not in the README kinds table (nearest registered: `443–445` Marmot, `818`). GitHub issue/PR search for "kind 420/421/422" returned only unrelated items (issue/PR numbers 420, 421, 422). **No collision found.** Limitation: PR *diff* contents could not be code-searched without authentication; TO-CONFIRM by grepping open PR branches before submission.
 - **Kind 31420.** Not in the README; search returned 0 hits. No collision found (same limitation).
+
+## Open questions
+
+1. Label namespace string: `nip-xx` until a number is assigned; does every publisher re-sign on assignment?
+2. Should `pay:` be the union of all scopes (current) or online only, since agents mostly care about online checkout?
+3. Payment proof for invoice + preimage and Fedimint (see TO-CONFIRM items in Payments).
+
+Resolved (2026-10-29): payment tags use readable names; a merchant's NIP-05-verified record outranks third-party corrections, with no protocol-level rate limits; ToS-banned sites get a bare record (name, URL, status, ToS quote).
