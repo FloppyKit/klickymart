@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers", "node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "paths": { "cloudflare:test": ["./node_modules/@cloudflare/vitest-pool-workers/dist/cloudflare-test.d.ts"] }
+  },
+  "include": ["worker/**/*.ts", "scripts/**/*.ts", "worker/env.d.ts"]
+}

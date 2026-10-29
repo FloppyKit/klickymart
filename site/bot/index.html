@@ -4,20 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FloppyKitMapBot: the KlickyMart crawler</title>
-<style>
-body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.55;color:#111;background:#fff}
-code,pre{font-family:ui-monospace,monospace;background:#f3f3f3;padding:.1rem .3rem}
-pre{padding:.75rem;overflow-x:auto}
-a{color:#0645ad}
-</style>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/km.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
-<main>
+<a class="km-skip" href="#main">Skip to content</a>
+<header class="km-header" role="banner">
+  <a class="km-wordmark" href="/"><svg class="km-glyph" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="currentColor" d="M3 3h5v5H3V3zm7 0h5v5h-5V3zM3 10h5v5H3v-5zm7 2h5v3h-5v-3z"/></svg>KlickyMart</a>
+  <nav class="km-nav" aria-label="Primary"><a href="/">Search</a><a href="/bot" aria-current="page">Crawler</a><a href="/about">About</a></nav>
+</header>
+<main id="main" class="km-main km-prose">
 <h1>FloppyKitMapBot</h1>
 <p>FloppyKitMapBot is the crawler behind KlickyMart, a public directory of how online stores work for software agents: whether an agent can reach the store, how checkout works, and which payment methods (including Bitcoin) the store accepts. KlickyMart is a FloppyKit project.</p>
 
 <h2>User agent</h2>
-<pre>FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)</pre>
+<pre class="km-codeblock"><code>FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)</code></pre>
 <p>Robots.txt token: <code>FloppyKitMapBot</code>. It runs a standard headless Chromium browser without stealth plugins or fingerprint changes. It currently runs from a single cloud server.</p>
 
 <h2>What it does</h2>
@@ -39,13 +41,15 @@ a{color:#0645ad}
 
 <h2>How to opt out</h2>
 <p>Add this to your robots.txt; the crawler will stop visiting on its next run:</p>
-<pre>User-agent: FloppyKitMapBot
-Disallow: /</pre>
+<pre class="km-codeblock"><code>User-agent: FloppyKitMapBot
+Disallow: /</code></pre>
 <p>You can also disallow only certain paths. The opt-out and any blocks are noted in the site's record, so the directory shows that the site is not available to agents.</p>
 <p>To ask for a correction, a re-check or removal, open an issue at <a href="https://github.com/FloppyKit/klickymart/issues">github.com/FloppyKit/klickymart/issues</a>. Or email <a href="mailto:bot@klickymart.com">bot@klickymart.com</a>.</p>
 
 <h2>Source and data</h2>
 <p>Code, crawl rules and record format: <a href="https://github.com/FloppyKit/klickymart">github.com/FloppyKit/klickymart</a>.</p>
 </main>
+<footer class="km-footer"><p class="km-footer-tag">KlickyMart by FloppyKit. Records published as Nostr events (kind 31420).</p></footer>
+<script src="/km.js" defer></script>
 </body>
 </html>

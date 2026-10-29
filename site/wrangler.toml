@@ -1,0 +1,24 @@
+name = "klickymart"
+main = "worker/src/index.ts"
+compatibility_date = "2026-08-22"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "klickymart"
+database_id = "REPLACE_AT_DEPLOY"
+migrations_dir = "worker/migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_AT_DEPLOY"
+
+[vars]
+SITE_ORIGIN = "https://klickymart.com"
+SNAPSHOT_TTL_S = "60"
+CONTACT = "bot@klickymart.com"

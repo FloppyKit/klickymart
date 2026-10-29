@@ -11,6 +11,7 @@ Status: draft. No crawl data is published in this repository yet.
 - `crawler/`: Playwright crawler (`crawl.py`), deterministic payment extractor (`extract.py`), terms-of-service checker (`tos.py`), signing helpers, tests.
 - `crawler/KNOWN-LIMITATIONS.md`: known limitations.
 - `site/bot/index.html`: the crawler info and opt-out page, served at https://klickymart.com/bot.
+- `site/`: KlickyMart web app (Worker, API, dashboard). See [site/README.md](site/README.md).
 
 ## Crawler guardrails
 - Honest user agent: `FloppyKitMapBot/0.2 (+https://klickymart.com/bot)`. No stealth plugins or fingerprint changes, no proxies or IP rotation.

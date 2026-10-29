@@ -1,0 +1,17 @@
+name: Correction
+description: Report inaccurate data with evidence URL
+labels: ["correction"]
+body:
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+      placeholder: example.com
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence URL and quote
+    validations:
+      required: true

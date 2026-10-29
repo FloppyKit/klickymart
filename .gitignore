@@ -3,3 +3,7 @@ secrets/
 .venv/
 __pycache__/
 crawler/out/
+site/node_modules/
+site/.wrangler/
+site/e2e/test-results/
+site/playwright-report/

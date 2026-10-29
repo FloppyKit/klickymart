@@ -1,0 +1,10 @@
+name: Suggest a site
+description: Request a new domain for the crawl list
+labels: ["suggestion"]
+body:
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+    validations:
+      required: true

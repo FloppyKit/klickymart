@@ -1,0 +1,62 @@
+/* KlickyMart design tokens v1. Original palette; inspired by (not copied from) openclaw.ai, paradox.you, berd.xyz.
+   Rule: dark theme contains NO light surfaces (no white cards/inputs/badges). Light theme may contain dark elements. */
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  /* ink scale (neutral, slight blue cast) */
+  --km-ink-1000:#07080b; --km-ink-950:#0c0e13; --km-ink-900:#12151c; --km-ink-850:#191d26;
+  --km-ink-800:#222734; --km-ink-700:#2f3545; --km-ink-500:#6b7386; --km-ink-300:#a9b0c0; --km-ink-100:#e6e9ef;
+  --km-bg:var(--km-ink-950); --km-bg-recessed:var(--km-ink-1000); --km-surface:var(--km-ink-900);
+  --km-surface-2:var(--km-ink-850); --km-border:var(--km-ink-800); --km-border-strong:var(--km-ink-700);
+  --km-text:var(--km-ink-100); --km-text-muted:var(--km-ink-300); --km-text-faint:var(--km-ink-300);
+  /* accents: signal green = reachable/go, bitcoin amber = btc, ultraviolet = links/focus */
+  --km-accent:#3df29a;        /* primary action, "agents welcome" */
+  --km-accent-ink:#04140c;    /* text on accent */
+  --km-btc:#f7a128;           /* bitcoin highlights only */
+  --km-link:#9b8cff; --km-focus:#9b8cff;
+  /* grade scale btc 0..4 + null (AA contrast on --km-surface) */
+  --km-g0:#6b7386; --km-g1:#e8755c; --km-g2:#ecb454; --km-g3:#9de066; --km-g4:#3df29a; --km-gnull:#8a93a6;
+  /* status */
+  --km-ok:#3df29a; --km-tos:#ff6b8a; --km-anw:#f0b84a; --km-err:#8a93a6;
+  --km-glow:0 0 0 1px color-mix(in srgb,var(--km-accent) 40%,transparent),0 0 24px color-mix(in srgb,var(--km-accent) 18%,transparent);
+  --km-grid-line:color-mix(in srgb,var(--km-link) 10%,transparent);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --km-bg:#f3f2ee; --km-bg-recessed:#e9e7e1; --km-surface:#ffffff; --km-surface-2:#f8f7f4;
+  --km-border:#dcd9d1; --km-border-strong:#bfbbb1;
+  --km-text:#0b0c0f; --km-text-muted:#3a4050; --km-text-faint:#4a4f5c;
+  --km-accent:#055c37; --km-accent-ink:#ffffff; --km-btc:#b5650a; --km-link:#5a43e0; --km-focus:#5a43e0;
+  --km-g0:#8a90a0; --km-g1:#b0472f; --km-g2:#a87410; --km-g3:#4f8f1f; --km-g4:#0b8f55; --km-gnull:#c9c6be;
+  --km-ok:#055c37; --km-tos:#a01d3d; --km-anw:#7a5200; --km-err:#4a5162;
+  --km-glow:0 1px 0 var(--km-border), 0 8px 24px rgb(0 0 0 / .06);
+  --km-grid-line:rgb(0 0 0 / .06);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --km-bg:#f3f2ee; --km-bg-recessed:#e9e7e1; --km-surface:#ffffff; --km-surface-2:#f8f7f4;
+    --km-border:#dcd9d1; --km-border-strong:#bfbbb1;
+    --km-text:#0b0c0f; --km-text-muted:#3a4050; --km-text-faint:#4a4f5c;
+    --km-accent:#055c37; --km-accent-ink:#ffffff; --km-btc:#b5650a; --km-link:#5a43e0; --km-focus:#5a43e0;
+    --km-g0:#8a90a0; --km-g1:#b0472f; --km-g2:#a87410; --km-g3:#4f8f1f; --km-g4:#0b8f55; --km-gnull:#c9c6be;
+    --km-ok:#055c37; --km-tos:#a01d3d; --km-anw:#7a5200; --km-err:#4a5162;
+    --km-glow:0 1px 0 var(--km-border), 0 8px 24px rgb(0 0 0 / .06);
+    --km-grid-line:rgb(0 0 0 / .06);
+  }
+}
+:root {
+  /* type: system stacks only, zero webfont bytes */
+  --km-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --km-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --km-fs-xs:.75rem; --km-fs-sm:.8125rem; --km-fs-base:.9375rem; --km-fs-md:1.0625rem;
+  --km-fs-lg:1.25rem; --km-fs-xl:1.625rem; --km-fs-2xl:2.25rem; --km-fs-3xl:clamp(2.25rem,6vw,3.75rem);
+  --km-lh-tight:1.1; --km-lh-body:1.55; --km-tracking-eyebrow:.14em; --km-tracking-display:-.025em;
+  --km-fw-regular:400; --km-fw-medium:550; --km-fw-bold:700;
+  /* 4px spacing scale */
+  --km-s-1:4px; --km-s-2:8px; --km-s-3:12px; --km-s-4:16px; --km-s-5:24px; --km-s-6:32px; --km-s-7:48px; --km-s-8:64px; --km-s-9:96px;
+  --km-radius-sm:6px; --km-radius:10px; --km-radius-lg:16px; --km-radius-pill:999px;
+  --km-maxw:1200px; --km-maxw-prose:68ch; --km-row-h:40px;
+  /* motion: short, opacity/transform only, disabled under reduced motion */
+  --km-ease:cubic-bezier(.2,.7,.2,1); --km-dur-1:120ms; --km-dur-2:200ms; --km-dur-3:360ms;
+}
+@media (prefers-reduced-motion: reduce) { :root { --km-dur-1:0ms; --km-dur-2:0ms; --km-dur-3:0ms; } }
