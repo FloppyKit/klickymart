@@ -36,7 +36,10 @@ jobs:
           exit 1
       - run: npm run e2e
       - run: kill "$(cat /tmp/wrangler.pid)" 2>/dev/null || true
-      - name: gitleaks
+      - name: Secret scan
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_8.21.2_linux_x64.tar.gz | tar xz
-          ./gitleaks detect --source . --no-git -v || git grep -nE "(api[_-]?token|account_id|secret)" . | grep -v REPLACE_AT_DEPLOY | (! grep .)
+          set +e
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz" | tar xz
+          if [ -x ./gitleaks ]; then ./gitleaks detect --source . --no-git -v; fi
+          set -e
+          git grep -nE "(api[_-]?token|account_id|secret)" . | grep -v REPLACE_AT_DEPLOY | grep -v node_modules | (! grep .)
