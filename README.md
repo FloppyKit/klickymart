@@ -32,4 +32,8 @@ Opt out: add `User-agent: FloppyKitMapBot` / `Disallow: /` to robots.txt. Detail
 The tests use synthetic fixtures and make no network requests.
 
 ## License
-TO-CONFIRM (a FOSS license is planned; none is granted yet).
+
+- **Software** (this repository, including the crawler and site Worker): [MIT License](LICENSE).
+- **Crawl records** (API JSON, NDJSON export, published directory data): [CC0 1.0 Universal](DATA-LICENSE) (public domain).
+
+See also [site/README.md](site/README.md).

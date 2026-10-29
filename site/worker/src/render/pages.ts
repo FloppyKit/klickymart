@@ -167,7 +167,9 @@ export function renderAbout(origin: string, snap: Snapshot): string {
 <section id="limits"><h2>Limits</h2><p>All requests come from one datacenter IP address. Sites often treat datacenter traffic differently from home connections, so a block here may not be a block for you.</p></section>
 <section id="unknowns"><h2>Unknowns</h2><p>Fields we could not observe stay null and display as unknown. We do not infer.</p></section>
 <section id="ease"><h2>Checkout ease</h2><p>Derived: when status is crawled, ease equals co when set; else 0 when ag is 0; else null.</p></section>
-<p>Data licence: CC0 for records (pending confirmation). Code: repo licence.</p>`;
+<section id="license"><h2>Licenses</h2>
+<p>Software in the <a href="https://github.com/FloppyKit/klickymart">GitHub repository</a> is under the <a href="https://opensource.org/licenses/MIT">MIT License</a> (<code>LICENSE</code>).</p>
+<p>Crawl records (JSON, API, and NDJSON export) are dedicated to the public domain under <a href="/DATA-LICENSE">CC0 1.0 Universal</a> (SPDX <code>CC0-1.0</code>).</p></section>`;
   return layout({ title: "About", origin, version: snap.version, tsMin: snap.meta.ts_min, tsMax: snap.meta.ts_max, body, path: "/about" });
 }
 
@@ -198,6 +200,8 @@ export function renderDocsApi(origin: string): string {
 <h1>API.</h1>
 <p class="km-lead">Plain HTTP, JSON out, no key. Base URL ${esc(origin)}.</p>
 <p><a href="/openapi.json">OpenAPI</a> · <a href="/llms.txt">llms.txt</a></p>
+<h2 id="license">Licenses</h2>
+<p>JSON and NDJSON responses include a <code>license</code> object (<code>code</code>: MIT, <code>data</code>: CC0-1.0) plus headers <code>X-KM-Code-License</code> and <code>X-KM-Data-License</code>. Full text: <a href="/DATA-LICENSE">DATA-LICENSE</a> (records), MIT in repo <code>LICENSE</code> (software).</p>
 <h2 id="codes">Codes</h2>
 <p>Payment, restriction, and category codes are append-only. See repository CRAWL-RUBRIC.md.</p>`;
   return layout({ title: "API", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/docs/api" });

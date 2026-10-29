@@ -13,6 +13,7 @@ export default {
       || path === "/km.js"
       || path === "/favicon.svg"
       || path === "/og.png"
+      || path === "/DATA-LICENSE"
     ) {
       return env.ASSETS.fetch(request);
     }

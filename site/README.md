@@ -39,6 +39,10 @@ CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… RECORDS=fixtures/records.samp
 
 Replace `REPLACE_AT_DEPLOY` in `wrangler.toml` with real D1 and KV IDs from the create commands.
 
+## License
+
+Site and Worker source: MIT (`LICENSE` at repo root). Published crawl records: CC0 1.0 (`DATA-LICENSE`).
+
 ## Swapping file ingest for relay
 
 Implement `RelaySource` in `worker/src/ingest.ts` and call `ingest(new RelaySource(...), env)` from deploy or cron. The `RecordSource` interface is shared with `NdjsonFileSource` and `ArrayRecordSource` (tests).

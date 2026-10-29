@@ -6,6 +6,7 @@ import { querySnapshot, validateQueryParams } from "./query";
 import { rowToCompact, computeStats, parseRaw, suggestDomains } from "./records-api";
 import { buildOpenApi, createMcpHandler, parseMcpRequest } from "./mcp";
 import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
+import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
 import {
   renderHome,
   renderDashboard,
@@ -100,8 +101,8 @@ function apiHeaders(version: string, filterMs: number): Record<string, string> {
     "Access-Control-Allow-Origin": "*",
     "X-KM-Snapshot": version,
     "X-KM-Filter-Ms": filterMs.toFixed(3),
-    Link: '</openapi.json>; rel="describedby"',
     "Cache-Control": "public, max-age=60, stale-while-revalidate=600",
+    ...licenseResponseHeaders(),
   };
 }
 
@@ -126,6 +127,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const result = querySnapshot(snap, validated.params);
     const items = result.items.map((r) => rowToCompact(r, origin));
     const body = {
+      ...licenseMetaBlock(),
       version: snap.version,
       total: result.total,
       count: result.count,
@@ -159,6 +161,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const raw = parseRaw(row.raw_json);
     return Response.json(
       {
+        ...licenseMetaBlock(),
         record: raw,
         derived: rowToCompact(row, origin),
         nostr: { kind: 31420, d: domain, event_id: null },
@@ -208,7 +211,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/stats" && request.method === "GET") {
     const stats = computeStats(snap.rows);
     return Response.json(
-      { ...stats, version: snap.version, generated_at: new Date().toISOString() },
+      { ...licenseMetaBlock(), ...stats, version: snap.version, generated_at: new Date().toISOString() },
       { headers: apiHeaders(snap.version, 0) },
     );
   }
@@ -218,7 +221,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/llms.txt") {
-    const text = `KlickyMart: a signed map of where software agents can shop.\nEndpoints: GET ${origin}/q, GET ${origin}/export.ndjson, POST ${origin}/mcp\nCodes: ${origin}/docs/api#codes · Licence: CC0 data · Contact: ${env.CONTACT}\n`;
+    const text = `KlickyMart: a signed map of where software agents can shop.
+Endpoints: GET ${origin}/q, GET ${origin}/export.ndjson, POST ${origin}/mcp
+Codes: ${origin}/docs/api#codes
+Licenses: code MIT (see ${origin}/LICENSE via GitHub); data CC0-1.0 (${origin}/DATA-LICENSE)
+Contact: ${env.CONTACT}
+`;
     return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
@@ -236,6 +244,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       schema_version: "0.3-draft",
       nostr: { kind: 31420, relays: [] },
       contact: env.CONTACT,
+      ...licenseMetaBlock(),
+      data_license_file: "/DATA-LICENSE",
     }, { headers: apiHeaders(snap.version, 0) });
   }
 
