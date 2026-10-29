@@ -47,14 +47,14 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     <button type="submit">Search</button>
   </form>
 </section>
-<section class="km-section km-home-below">
+<section class="km-section km-home-quick">
   <h2 class="km-h2">Start with</h2>
   <ul class="km-quick">${quick.map((l) => `<li><a class="km-btn km-btn-ghost" href="${esc(l.href)}">${esc(l.label)}</a></li>`).join("")}</ul>
 </section>
-<section class="km-section km-home-below">
+<section class="km-section km-home-scrim">
   <ul class="km-results">${rows || `<li class="km-empty">No sites match. Try fewer filters.</li>`}</ul>
 </section>
-<section class="km-section km-agents km-home-below">
+<section class="km-section km-agents km-home-scrim">
   <h2 class="km-h2">For agents</h2>
   <p>Query the map over HTTP, MCP, or a plain NDJSON file. No key needed.</p>
   <div class="km-codeblock"><pre><code>curl '${origin}/q?reachable=1&amp;limit=5'</code></pre></div>

@@ -95,7 +95,7 @@ for (const theme of ["dark", "light"] as const) {
         await page.screenshot({ path: `e2e/artifacts/${name}-${theme}-desktop.png`, fullPage: true });
       }
       for (const [stage, qs] of [
-        ["landscape-low", "?reach=0.12&btc=0.08"],
+        ["landscape-low", "?reach=0.12&btc=0.04"],
         ["landscape-mid", "?reach=0.52&btc=0.45"],
         ["landscape-high", "?reach=0.88&btc=0.92"],
       ] as const) {
@@ -110,7 +110,7 @@ for (const theme of ["dark", "light"] as const) {
         });
       }
       for (const [stage, qs] of [
-        ["landscape-low", "?reach=0.12&btc=0.08"],
+        ["landscape-low", "?reach=0.12&btc=0.04"],
         ["landscape-mid", "?reach=0.52&btc=0.45"],
         ["landscape-high", "?reach=0.88&btc=0.92"],
       ] as const) {
