@@ -11,6 +11,7 @@ import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilit
 import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
+import { findAlternatives } from "./alternatives";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
@@ -31,6 +32,7 @@ import {
   renderDocsRelayFilters,
   renderQueryResults,
   renderCheckResult,
+  renderAlternatives,
 } from "./render/pages";
 
 export interface Env {
@@ -229,12 +231,31 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json({ ...licenseMetaBlock(), domain: d, a: aTagFor(d), reviews: await getReviews(env.DB, d) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=30" } });
   }
 
+  const altParams = (sp: URLSearchParams | Record<string, unknown>) => {
+    const g = (k: string) => (sp instanceof URLSearchParams ? sp.get(k) : (sp[k] as string | undefined)) ?? undefined;
+    const guest = g("guest");
+    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true, limit: g("limit") ? Number(g("limit")) : undefined };
+  };
+
+  if (path === "/alternatives" && request.method === "GET") {
+    const r = findAlternatives(snap, origin, altParams(url.searchParams));
+    if (!r.ok) return err400("domain", r.message);
+    if (url.searchParams.get("format") === "html") {
+      return new Response(renderAlternatives(origin, r.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: apiHeaders(snap.version, 0) });
+  }
+
   if (path === "/check" && request.method === "GET") {
     const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
     if (!res0.ok) return err400("domain", res0.message);
     const res = res0;
     if (res.body.verdict !== "not-in-index") {
       const rv = await getReviews(env.DB, String(res.body.domain), 0);
+      if (res.body.verdict !== "reachable") {
+        const alt = findAlternatives(snap, origin, { domain: String(res.body.domain), limit: 5 });
+        if (alt.ok) res.body.alternatives = { categories: alt.body.categories, items: alt.body.items, more: `${origin}/alternatives?domain=${res.body.domain}` };
+      }
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
     }
     if (url.searchParams.get("format") === "html") {
@@ -396,7 +417,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "find_alternatives", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -431,6 +452,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
       checkDomain: async (domain) => checkDomain(snap, domain, origin),
+      findAlternatives: async (args) => findAlternatives(snap, origin, altParams(args)),
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()) }),
       getRecord: async (domain) => {

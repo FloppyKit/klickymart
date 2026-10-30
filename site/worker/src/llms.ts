@@ -46,6 +46,7 @@ The crawler respects robots.txt and site terms, uses an honest user agent (Flopp
 
 ## HTTP endpoints (GET, JSON unless noted)
 - ${origin}/check?domain=example.com : "Can my agent shop here?" verdict for one domain: reachable | agents-not-welcome | blocked-tos | error | not-in-index, plus checkout depth, pay methods, BTC grade (0-4), record timestamp and an evidence URL. Index lookup only; it never starts a live crawl.
+- ${origin}/alternatives?domain=amazon.com&category=headphones[&pay=lightning|btc|cashu&guest=1] : "Where else can my agent buy this?" In-map stores in the same coarse category (electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other; product words like headphones map to a category) that an agent can reach, ranked by checkout reached, agent access, BTC grade, checkout ease, each with an evidence URL. /check adds these for blocked sites. Categories are a draft map, not yet signed.
 - ${origin}/q?q=&status=&pay=&pay_group=lightning&btc_min=3&reachable=1&limit=50 : search records (format=ndjson for NDJSON).
 - ${origin}/records/{domain} : one full record.
 - ${origin}/summary.json : counts and headline numbers.
@@ -60,6 +61,7 @@ Tools:
 - search_merchants {q?, status?, cat?, pay?, pay_group?, btc_min?, scope?, limit?<=100}
 - get_record {domain}
 - check_domain {domain} : same verdict as GET /check
+- find_alternatives {domain?, category?, pay?, guest?, limit?} : same as GET /alternatives
 - get_reviews {domain} : kind 422 reviews for a merchant
 - submit_review {event, dry_run?} : submit a kind 422 review you signed locally
 Install snippets: ${origin}/about#mcp

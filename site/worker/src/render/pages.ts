@@ -85,6 +85,14 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     <button type="submit">Check</button>
   </form>
   <output id="check-result" class="km-check-result" data-testid="check-result" aria-live="polite"></output>
+  <form class="km-search km-check" method="get" action="/alternatives" data-testid="alt-form">
+    <label for="alt-q">Where else can my agent buy this?</label>
+    <input id="alt-q" name="category" placeholder="headphones, gift card, groceries…" autocomplete="off" required>
+    <select name="pay" aria-label="Pays with"><option value="">any payment</option><option value="lightning">Lightning</option><option value="btc">Bitcoin</option><option value="cashu">Cashu</option></select>
+    <label class="km-inline"><input type="checkbox" name="guest" value="1"> no account</label>
+    <input type="hidden" name="format" value="html">
+    <button type="submit">Find</button>
+  </form>
 </section>
 <div class="km-store">
 ${awning("On the shelves", "Which stores a software agent can reach, how checkout works, and every way they let you pay. Bitcoin graded 0–4 for privacy; every record links to the page it came from.")}
@@ -518,6 +526,8 @@ export function checkSummaryHtml(b: Record<string, unknown>): string {
     error: "Unknown: our crawler could not load it",
     "not-in-index": "Not in index yet",
   };
+  const alts = (b.alternatives as { items: AltItem[] } | undefined)?.items;
+  const altBlock = alts && alts.length ? `<div class="km-alt" data-testid="check-alternatives"><strong>Blocked here? Try these:</strong>${altListHtml(alts)}<a href="/alternatives?format=html&amp;domain=${esc(String(b.domain))}">more</a></div>` : "";
   if (verdict === "not-in-index") {
     return `<div class="km-check-card" data-verdict="not-in-index"><strong>${esc(String(b.domain))}</strong>: not in index yet. We don't crawl on request; <a href="${esc(String(b.suggest))}">suggest it</a>.</div>`;
   }
@@ -529,7 +539,7 @@ export function checkSummaryHtml(b: Record<string, unknown>): string {
 <ul><li>Checkout ease: ${cd.co ?? "unknown"}${cd.guest === null ? "" : cd.guest ? " · guest checkout" : " · account needed"}</li>
 <li>Pay: ${labels.length ? labels.map(esc).join(", ") : "not observed"}</li>
 <li>BTC grade: ${b.btc_grade ?? "ungraded"}</li>
-<li>Recorded ${esc(String(b.record_time).slice(0, 10))} · ${ev} · <a href="${esc(String(b.record))}">record</a></li></ul></div>`;
+<li>Recorded ${esc(String(b.record_time).slice(0, 10))} · ${ev} · <a href="${esc(String(b.record))}">record</a></li></ul>${altBlock}</div>`;
 }
 
 export function renderCheckResult(origin: string, b: Record<string, unknown>, shell: PageShell): string {
@@ -548,4 +558,19 @@ export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, a
   return `<section id="reviews"><h2>Reviews (kind 422)</h2>${head}<ul class="km-reviews">${items}</ul>
 <p class="km-muted">Reviews are signed claims by pseudonymous Nostr keys, shown as submitted. KlickyMart checks signatures and format, not the opinion.</p>
 <p>Agents: sign a kind 422 review with <code>["a","${esc(aTag ?? `31420:<record-author>:${d}`)}"]</code> and POST it to <code>/reviews</code>. <a href="/about#reviews">How to review</a>.</p></section>`;
+}
+
+type AltItem = { d: string; name: string | null; checkout: number | null; agent_access: number | null; guest: boolean | null; btc_grade: number | null; pay: string[]; evidence: string };
+
+export function altListHtml(items: AltItem[]): string {
+  if (!items.length) return `<p class="km-muted">No reachable stores in this category yet.</p>`;
+  return `<ol class="km-alt-list" data-testid="alt-list">${items.map((i) => `<li><a href="/merchant/${esc(i.d)}"><strong>${esc(i.name ?? i.d)}</strong></a> <span class="km-muted">${esc(i.d)}</span> · checkout ${i.checkout ?? "?"} · access ${i.agent_access ?? "?"}${i.guest === null ? "" : i.guest ? " · guest" : " · account"} · BTC ${i.btc_grade ?? "ungraded"}${i.pay.length ? " · " + uniquePayLabels(i.pay).slice(0, 4).map(esc).join(", ") : ""} · <a href="${esc(i.evidence)}" rel="nofollow noopener">evidence</a></li>`).join("")}</ol>`;
+}
+
+export function renderAlternatives(origin: string, b: { from: string | null; categories: string[]; items: AltItem[]; filters: { pay: string | null; guest: boolean } }, shell: PageShell): string {
+  const body = `<h1>Where else can my agent buy this?</h1>
+<p class="km-lead">${b.from ? `Instead of ${esc(b.from)}: ` : ""}${esc(b.categories.join(", "))}${b.filters.pay ? ` · pays with ${esc(b.filters.pay)}` : ""}${b.filters.guest ? " · no account" : ""}</p>
+${altListHtml(b.items)}
+<p class="km-muted">Ranked by checkout reached, agent access, BTC grade, checkout ease. Categories are a coarse draft. JSON: <code>GET /alternatives</code> · MCP <code>find_alternatives</code></p>`;
+  return pageLayout({ title: "Alternatives", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/alternatives" }, shell);
 }

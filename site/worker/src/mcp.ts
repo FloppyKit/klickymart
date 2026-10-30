@@ -112,6 +112,18 @@ export function mcpToolsList(): unknown {
         },
       },
       {
+        name: "find_alternatives",
+        description: "Where else can my agent buy this? Give a blocking domain and/or a category (electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other, or a product word like headphones). Returns in-map stores an agent can reach, ranked by checkout reached, agent access, BTC grade, checkout ease, each with an evidence URL. Index only; never crawls.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            domain: { type: "string" }, category: { type: "string" },
+            pay: { type: "string", enum: ["lightning", "btc", "cashu"] }, guest: { type: "boolean", description: "exclude stores known to require an account" },
+            limit: { type: "integer", maximum: 50 },
+          },
+        },
+      },
+      {
         name: "get_reviews",
         description: "Kind 422 reviews of a merchant (signed claims by pseudonymous keys; not verified by KlickyMart).",
         inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
@@ -137,6 +149,7 @@ export type McpHandler = (method: string, params: unknown, id: unknown) => Promi
 export function createMcpHandler(deps: {
   runQuery: (sp: URLSearchParams) => Promise<{ body: unknown; filter_ms: number }>;
   getRecord: (domain: string) => Promise<{ body: unknown } | null>;
+  findAlternatives?: (args: Record<string, unknown>) => { ok: true; body: unknown } | { ok: false; message: string } | Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
   submitReview?: (event: unknown, dryRun: boolean) => Promise<{ status: number; body: Record<string, unknown> }>;
   getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
@@ -180,6 +193,12 @@ export function createMcpHandler(deps: {
         const rec = await deps.getRecord(domain);
         if (!rec) return { ...base, error: { code: -32001, message: "not found" } };
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(rec.body) }], structuredContent: rec.body } };
+      }
+      if (p.name === "find_alternatives" && deps.findAlternatives) {
+        const r = await deps.findAlternatives(p.arguments ?? {});
+        if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
+        const items = (r.body as { items: { d: string; checkout: number | null; btc_grade: number | null; evidence: string }[] }).items;
+        return { ...base, result: { content: [{ type: "text", text: items.map((i) => `${i.d} co=${i.checkout ?? "?"} btc=${i.btc_grade ?? "?"} ${i.evidence}`).join("\n") || "no matches" }], structuredContent: r.body } };
       }
       if (p.name === "get_reviews" && deps.getReviews) {
         const domain = String(p.arguments?.domain ?? "");

@@ -1,0 +1,828 @@
+{
+"categories": [
+"electronics",
+"gift-cards",
+"groceries",
+"apparel",
+"hardware",
+"books",
+"travel",
+"crypto-hardware",
+"other"
+],
+"map": {
+"1password.com": [
+"other"
+],
+"aa.com": [
+"travel"
+],
+"abebooks.com": [
+"books"
+],
+"abercrombie.com": [
+"apparel"
+],
+"academy.com": [
+"apparel"
+],
+"acehardware.com": [
+"hardware"
+],
+"adidas.com": [
+"apparel"
+],
+"adobe.com": [
+"other"
+],
+"agoda.com": [
+"travel"
+],
+"airbnb.com": [
+"travel"
+],
+"alaskaair.com": [
+"travel"
+],
+"alibaba.com": [
+"electronics",
+"hardware",
+"other"
+],
+"aliexpress.com": [
+"electronics",
+"apparel",
+"hardware",
+"other"
+],
+"amazon.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"groceries",
+"gift-cards",
+"other"
+],
+"amctheatres.com": [
+"travel"
+],
+"amtrak.com": [
+"travel"
+],
+"anker.com": [
+"electronics"
+],
+"anthropologie.com": [
+"apparel"
+],
+"apple.com": [
+"electronics"
+],
+"att.com": [
+"electronics"
+],
+"audible.com": [
+"books"
+],
+"autotrader.com": [
+"hardware"
+],
+"autozone.com": [
+"hardware"
+],
+"axs.com": [
+"travel"
+],
+"barnesandnoble.com": [
+"books"
+],
+"basspro.com": [
+"apparel"
+],
+"bedbathandbeyond.com": [
+"hardware"
+],
+"bestbuy.com": [
+"electronics"
+],
+"bhphotovideo.com": [
+"electronics"
+],
+"bisq.network": [
+"other"
+],
+"bitcoinmagazine.com": [
+"books",
+"apparel"
+],
+"bitcoinstore.com": [
+"crypto-hardware",
+"apparel"
+],
+"bitkey.world": [
+"crypto-hardware"
+],
+"bitrefill.com": [
+"gift-cards"
+],
+"bitwarden.com": [
+"other"
+],
+"blueapron.com": [
+"groceries"
+],
+"booking.com": [
+"travel"
+],
+"booksamillion.com": [
+"books"
+],
+"bookshop.org": [
+"books"
+],
+"bose.com": [
+"electronics"
+],
+"cabelas.com": [
+"apparel"
+],
+"cafepress.com": [
+"apparel"
+],
+"canon.com": [
+"electronics"
+],
+"canva.com": [
+"other"
+],
+"cargurus.com": [
+"hardware"
+],
+"carmax.com": [
+"hardware"
+],
+"carnival.com": [
+"travel"
+],
+"cars.com": [
+"hardware"
+],
+"carvana.com": [
+"hardware"
+],
+"chegg.com": [
+"books"
+],
+"chewy.com": [
+"other"
+],
+"choicehotels.com": [
+"travel"
+],
+"coach.com": [
+"apparel"
+],
+"coincards.com": [
+"gift-cards"
+],
+"coinkite.com": [
+"crypto-hardware"
+],
+"corsair.com": [
+"electronics"
+],
+"costco.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"groceries",
+"gift-cards",
+"other"
+],
+"craigslist.org": [
+"other"
+],
+"cricut.com": [
+"hardware"
+],
+"cryptocloaks.com": [
+"crypto-hardware",
+"apparel"
+],
+"cvs.com": [
+"other"
+],
+"dell.com": [
+"electronics"
+],
+"delta.com": [
+"travel"
+],
+"depop.com": [
+"apparel"
+],
+"dhgate.com": [
+"electronics",
+"apparel",
+"other"
+],
+"dickssportinggoods.com": [
+"apparel"
+],
+"discogs.com": [
+"other"
+],
+"disneyplus.com": [
+"other"
+],
+"dji.com": [
+"electronics"
+],
+"dominos.com": [
+"groceries"
+],
+"doordash.com": [
+"groceries"
+],
+"dropbox.com": [
+"other"
+],
+"dyson.com": [
+"electronics"
+],
+"ebay.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"other"
+],
+"epicgames.com": [
+"other"
+],
+"etsy.com": [
+"apparel",
+"gift-cards",
+"other"
+],
+"eufy.com": [
+"electronics"
+],
+"eventbrite.com": [
+"travel"
+],
+"expedia.com": [
+"travel"
+],
+"expressvpn.com": [
+"other"
+],
+"fanatics.com": [
+"apparel"
+],
+"fandango.com": [
+"travel"
+],
+"farfetch.com": [
+"apparel"
+],
+"fold.me": [
+"gift-cards"
+],
+"foundation.xyz": [
+"crypto-hardware"
+],
+"fountain.fm": [
+"other"
+],
+"g2a.com": [
+"gift-cards",
+"other"
+],
+"gamestop.com": [
+"electronics"
+],
+"gap.com": [
+"apparel"
+],
+"garmin.com": [
+"electronics"
+],
+"godaddy.com": [
+"other"
+],
+"gog.com": [
+"other"
+],
+"goodrx.com": [
+"other"
+],
+"gopro.com": [
+"electronics"
+],
+"gopuff.com": [
+"groceries"
+],
+"grainger.com": [
+"hardware"
+],
+"grubhub.com": [
+"groceries"
+],
+"harborfreight.com": [
+"hardware"
+],
+"hertz.com": [
+"travel"
+],
+"hilton.com": [
+"travel"
+],
+"hm.com": [
+"apparel"
+],
+"hobbylobby.com": [
+"hardware"
+],
+"hodlhodl.com": [
+"other"
+],
+"hollisterco.com": [
+"apparel"
+],
+"homedepot.com": [
+"hardware"
+],
+"hotels.com": [
+"travel"
+],
+"hottopic.com": [
+"apparel"
+],
+"hotwire.com": [
+"travel"
+],
+"hp.com": [
+"electronics"
+],
+"hsn.com": [
+"apparel",
+"electronics",
+"other"
+],
+"hulu.com": [
+"other"
+],
+"humblebundle.com": [
+"other"
+],
+"hyatt.com": [
+"travel"
+],
+"iherb.com": [
+"other"
+],
+"ihg.com": [
+"travel"
+],
+"ikea.com": [
+"hardware"
+],
+"instacart.com": [
+"groceries"
+],
+"jcpenney.com": [
+"apparel"
+],
+"jetblue.com": [
+"travel"
+],
+"kayak.com": [
+"travel"
+],
+"kohls.com": [
+"apparel",
+"other"
+],
+"kroger.com": [
+"groceries"
+],
+"lego.com": [
+"other"
+],
+"lenovo.com": [
+"electronics"
+],
+"levi.com": [
+"apparel"
+],
+"lg.com": [
+"electronics"
+],
+"livenation.com": [
+"travel"
+],
+"llbean.com": [
+"apparel"
+],
+"logitech.com": [
+"electronics"
+],
+"lowes.com": [
+"hardware"
+],
+"lululemon.com": [
+"apparel"
+],
+"macys.com": [
+"apparel"
+],
+"marriott.com": [
+"travel"
+],
+"mattel.com": [
+"other"
+],
+"max.com": [
+"other"
+],
+"mcdonalds.com": [
+"groceries"
+],
+"menards.com": [
+"hardware"
+],
+"mercari.com": [
+"electronics",
+"apparel",
+"other"
+],
+"michaels.com": [
+"hardware"
+],
+"microsoft.com": [
+"electronics"
+],
+"mullvad.net": [
+"other"
+],
+"namecheap.com": [
+"other"
+],
+"ncl.com": [
+"travel"
+],
+"neimanmarcus.com": [
+"apparel"
+],
+"netflix.com": [
+"other"
+],
+"newegg.com": [
+"electronics"
+],
+"nike.com": [
+"apparel"
+],
+"nintendo.com": [
+"other"
+],
+"nodl.it": [
+"crypto-hardware"
+],
+"nordstrom.com": [
+"apparel"
+],
+"nordstromrack.com": [
+"apparel"
+],
+"nordvpn.com": [
+"other"
+],
+"officedepot.com": [
+"hardware"
+],
+"opennode.com": [
+"other"
+],
+"oreillyauto.com": [
+"hardware"
+],
+"paramountplus.com": [
+"other"
+],
+"partsgeek.com": [
+"hardware"
+],
+"patagonia.com": [
+"apparel"
+],
+"peacocktv.com": [
+"other"
+],
+"petco.com": [
+"other"
+],
+"petsmart.com": [
+"other"
+],
+"porkbun.com": [
+"other"
+],
+"poshmark.com": [
+"apparel"
+],
+"potterybarn.com": [
+"hardware"
+],
+"priceline.com": [
+"travel"
+],
+"primal.net": [
+"other"
+],
+"proton.me": [
+"other"
+],
+"puma.com": [
+"apparel"
+],
+"qvc.com": [
+"apparel",
+"electronics",
+"other"
+],
+"rakuten.com": [
+"other"
+],
+"razer.com": [
+"electronics"
+],
+"redbubble.com": [
+"apparel"
+],
+"rei.com": [
+"apparel"
+],
+"revolve.com": [
+"apparel"
+],
+"ring.com": [
+"electronics"
+],
+"river.com": [
+"other"
+],
+"royalcaribbean.com": [
+"travel"
+],
+"samsclub.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"groceries",
+"gift-cards",
+"other"
+],
+"samsung.com": [
+"electronics"
+],
+"satoshistore.io": [
+"crypto-hardware",
+"apparel"
+],
+"scholastic.com": [
+"books"
+],
+"seatgeek.com": [
+"travel"
+],
+"sephora.com": [
+"other"
+],
+"shein.com": [
+"apparel"
+],
+"shop.ledger.com": [
+"crypto-hardware"
+],
+"shop.trezor.io": [
+"crypto-hardware"
+],
+"shopify.com": [
+"other"
+],
+"shutterfly.com": [
+"other"
+],
+"skechers.com": [
+"apparel"
+],
+"sonos.com": [
+"electronics"
+],
+"sony.com": [
+"electronics"
+],
+"southwest.com": [
+"travel"
+],
+"spotify.com": [
+"other"
+],
+"squarespace.com": [
+"other"
+],
+"staples.com": [
+"hardware"
+],
+"starbucks.com": [
+"groceries",
+"gift-cards"
+],
+"start9.com": [
+"crypto-hardware"
+],
+"steampowered.com": [
+"other"
+],
+"stockx.com": [
+"apparel"
+],
+"store.blockstream.com": [
+"crypto-hardware"
+],
+"store.coinkite.com": [
+"crypto-hardware"
+],
+"store.google.com": [
+"electronics"
+],
+"store.playstation.com": [
+"other"
+],
+"strike.me": [
+"other"
+],
+"stubhub.com": [
+"travel"
+],
+"subway.com": [
+"groceries"
+],
+"summitracing.com": [
+"hardware"
+],
+"swanbitcoin.com": [
+"other"
+],
+"swarovski.com": [
+"apparel"
+],
+"t-mobile.com": [
+"electronics"
+],
+"tacobell.com": [
+"groceries"
+],
+"target.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"groceries",
+"gift-cards",
+"other"
+],
+"tcgplayer.com": [
+"other"
+],
+"teepublic.com": [
+"apparel"
+],
+"temu.com": [
+"electronics",
+"apparel",
+"hardware",
+"other"
+],
+"tesla.com": [
+"other"
+],
+"thebitcoincompany.com": [
+"gift-cards"
+],
+"therealreal.com": [
+"apparel"
+],
+"thredup.com": [
+"apparel"
+],
+"thriftbooks.com": [
+"books"
+],
+"ticketmaster.com": [
+"travel"
+],
+"toasttab.com": [
+"groceries"
+],
+"torrid.com": [
+"apparel"
+],
+"tractorsupply.com": [
+"hardware"
+],
+"travelocity.com": [
+"travel"
+],
+"trekbikes.com": [
+"apparel"
+],
+"trip.com": [
+"travel"
+],
+"ubereats.com": [
+"groceries"
+],
+"uline.com": [
+"hardware"
+],
+"ulta.com": [
+"other"
+],
+"underarmour.com": [
+"apparel"
+],
+"uniqlo.com": [
+"apparel"
+],
+"united.com": [
+"travel"
+],
+"verizon.com": [
+"electronics"
+],
+"victoriassecret.com": [
+"apparel"
+],
+"vinted.com": [
+"apparel"
+],
+"vistaprint.com": [
+"other"
+],
+"vrbo.com": [
+"travel"
+],
+"walgreens.com": [
+"other"
+],
+"walmart.com": [
+"electronics",
+"apparel",
+"hardware",
+"books",
+"groceries",
+"gift-cards",
+"other"
+],
+"wayfair.com": [
+"hardware"
+],
+"whatnot.com": [
+"other"
+],
+"wholefoodsmarket.com": [
+"groceries"
+],
+"wish.com": [
+"electronics",
+"apparel",
+"other"
+],
+"wix.com": [
+"other"
+],
+"wyndhamhotels.com": [
+"travel"
+],
+"xbox.com": [
+"other"
+],
+"zappos.com": [
+"apparel"
+],
+"zara.com": [
+"apparel"
+],
+"zazzle.com": [
+"apparel",
+"other"
+]
+},
+"v": "2026-10-29"
+}

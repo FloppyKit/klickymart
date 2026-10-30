@@ -257,3 +257,6 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
   :root:not([data-theme]) .km-hero-panel h1,:root:not([data-theme]) .km-hero-panel .km-lead,:root:not([data-theme]) .km-hero-panel .km-eyebrow{text-shadow:0 0 12px rgb(255 255 255 / .9),0 1px 2px rgb(255 255 255 / .75)}
   :root:not([data-theme]) .km-hero-panel .km-story,:root:not([data-theme]) .km-hero-panel .km-story-key,:root:not([data-theme]) .km-check label:not(.km-sr-only){text-shadow:none}
 }
+.km-check select{min-width:0;padding:.4rem;border-radius:6px}
+.km-inline{display:inline-flex!important;flex:0 0 auto!important;align-items:center;gap:.3rem;font-weight:400!important}
+.km-alt{margin-top:.6rem}.km-alt-list{margin:.3rem 0;padding-left:1.2rem;text-align:left}

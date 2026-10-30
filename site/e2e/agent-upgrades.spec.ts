@@ -45,3 +45,16 @@ for (const scheme of ["dark", "light"] as const) {
     await page.screenshot({ path: `e2e/artifacts/home-check-box-${scheme}-desktop.png` });
   });
 }
+
+test("alternatives UI: homepage form and blocked-site suggestions", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto("/");
+  await page.fill("#alt-q", "headphones");
+  await page.click('[data-testid="alt-form"] button');
+  await expect(page.locator('[data-testid="alt-list"] li').first()).toBeVisible();
+  await page.screenshot({ path: "e2e/artifacts/alternatives-headphones-dark-desktop.png", fullPage: false });
+  await page.goto("/check?format=html&domain=microsoft.com");
+  await expect(page.locator('[data-testid="check-alternatives"]')).toContainText("Blocked here? Try these");
+  await page.screenshot({ path: "e2e/artifacts/check-blocked-alternatives-dark-desktop.png" });
+});

@@ -8,6 +8,7 @@ Generated from the crawler's constants. Kinds (provisional): site record `31420`
 | `r` | same domain | generic domain lookup |
 | `L` | `nip-xx` | label namespace |
 | `t` | `shopping` + subcategory codes (open) | category |
+| `l category:` (draft, not yet in signed events) | `electronics`, `gift-cards`, `groceries`, `apparel`, `hardware`, `books`, `travel`, `crypto-hardware`, `other` | coarse category for alternatives lookup; site uses `data/category-map.json` until records are re-signed |
 | `l status:` | `agents-not-welcome`, `blocked-tos`, `crawled`, `error` | crawl outcome |
 | `l tos:` | `bans-automation`, `ok`, `unknown` | terms of service on automation |
 | `l pay:` | `ach`, `apple-pay`, `ark`, `bnpl`, `bolt12`, `btc-onchain`, `card`, `cashapp`, `cashu`, `check`, `cod`, `crypto`, `ebt`, `ethereum`, `fedimint`, `gift-card`, `google-pay`, `hsa-fsa`, `lightning`, `liquid`, `litecoin`, `lnurl`, `monero`, `paypal`, `shop-pay`, `silent-payments`, `usdc`, `usdt`, `venmo`, `zelle`, `bnpl:<provider>`, `other:<label>` | payment method seen, any scope |

@@ -42,6 +42,7 @@ We respect every rule, and we publish every restriction. Each entry is `{"c":cod
 |---|---|---|
 | `d` | domain | `example-store.com` (record key) |
 | `cat` | codes | from SITE-LIST categories, e.g. `gen`, `elec`, `groc`, `appr`, `home`, `beau`, `food`, `trav`, `tix`, `auto`, `pet`, `toy`, `book`, `sw`, `mkt` (marketplace) |
+| `category` | list | coarse shopper-facing category (draft, GO 5.6), one or more of `electronics`, `gift-cards`, `groceries`, `apparel`, `hardware`, `books`, `travel`, `crypto-hardware`, `other`. Derived from `cat` plus domain knowledge for marketplaces; tag `["l","category:<value>","nip-xx"]` once signed |
 | `ag` | 0–3 | agent access: 0 blocked at landing, 1 browse only (or key pages blocked), 2 product/cart pages readable, 3 payment-method screen reached and read |
 | `ar` | list | agent restrictions with evidence (replaces v0.1 `blk`/`blk_at`, see below) |
 | `fetch` | map | HTTP outcome per step, e.g. `{"robots":200,"home":403}` |
