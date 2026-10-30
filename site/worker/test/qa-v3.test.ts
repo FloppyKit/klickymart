@@ -50,7 +50,7 @@ describe("QA 2026-10-30 fixes", () => {
     const s = await snap();
     const br = body(checkDomain(s, "bitrefill.com", O));
     expect(br.pay.online.concat(br.pay.unscoped)).toContain("ln");
-    expect(q(s, "pay_group=lightning").total).toBeGreaterThanOrEqual(5);
+    expect(q(s, "pay_group=lightning").total).toBeGreaterThanOrEqual(4); // trezor moved to btc_indirect (Confirmo) in v5
   });
   it("headphones resolve to audio; Dell/HP/Alibaba are not alternatives; audio sellers are", async () => {
     expect(resolveSub("over-ear headphones")).toEqual({ sub: "audio", category: "electronics" });

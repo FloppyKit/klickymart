@@ -51,7 +51,7 @@ describe("agent capabilities (embedded events)", () => {
   it("summary.json counts by status and btc grade", async () => {
     const snap = await embeddedSnapshot();
     const summary = buildSummaryJson(snap);
-    expect(summary.records).toBe(324);
+    expect(summary.records).toBe(348);
     expect(summary.by_status.crawled).toBeGreaterThan(0);
     expect(summary.by_btc_grade["0"]).toBeGreaterThanOrEqual(0);
     expect(summary.version).toBe("events-test");

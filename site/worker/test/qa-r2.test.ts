@@ -103,3 +103,33 @@ describe("live catalog paging (mocked fetch not available; unit of coverage note
     expect(j.count).toBe(0); expect(j.coverage_note).toMatch(/sonos\.com/);
   });
 });
+
+import { policyShip, landedFor } from "../src/landed";
+import { querySnapshot, validateQueryParams } from "../src/query";
+describe("shipping policy + indirect BTC (data v5)", () => {
+  const getSnap = async () => { const { rows, report } = await ingestFromNdjsonText(REAL as string, { allowSynthetic: false, sourceLabel: "t" }); return rowsToSnapshot([...rows.values()], report.version, report.source); };
+  it("policyShip: threshold, region, no guessing, ambiguous 'free' ignored", () => {
+    const p = { rules: [{ type: "free_over" as const, min_usd: 49, region: "US" }] };
+    expect(policyShip(p, "KS", 203.99)?.usd).toBe(0);
+    expect(policyShip(p, "KS", 20)).toBeNull();
+    expect(policyShip({ rules: [{ type: "flat" as const, usd: 15.95, region: "US" }, { type: "per_region" as const, usd: 5, region: "AK-HI" }] }, "AK", 10)?.usd).toBe(5);
+    expect(policyShip({ rules: [{ type: "free" as const, region: "US" }, { type: "free_over" as const, min_usd: 75, region: "US" }] }, "KS", 20)).toBeNull();
+    expect(policyShip({ rules: [{ type: "calculated" as const, region: "US" }] }, "KS", 20)).toBeNull();
+  });
+  it("Bose $203.99 to 66061 gets a policy-derived landed total", async () => {
+    const s = await getSnap(); const row = s.rows.find((r) => r.d === "bose.com")!;
+    const l = landedFor(parseRaw(row.raw_json), "66061", 203.99) as any;
+    expect(l.shipping.label).toBe("policy-derived"); expect(l.shipping.usd).toBe(0);
+    expect(l.est_total).toBeCloseTo(221.76, 2); expect(l.est_total_label).toMatch(/policy-derived/);
+  });
+  it("Trezor is btc_indirect via Confirmo, not native; /q btc_indirect=1 finds it", async () => {
+    const s = await getSnap(); const raw = parseRaw(s.rows.find((r) => r.d === "shop.trezor.io")!.raw_json) as any;
+    expect(raw.pay).not.toContain("btc"); expect(raw.btc_indirect[0].via).toBe("confirmo");
+    const v = validateQueryParams(new URLSearchParams("btc_indirect=1&limit=50")); if (!v.ok) throw new Error(v.message);
+    expect(JSON.stringify(querySnapshot(s, v.params))).toContain("shop.trezor.io");
+  });
+  it("Bitrefill checkout mapped to the email step; nothing submitted", async () => {
+    const s = await getSnap(); const cm = (parseRaw(s.rows.find((r) => r.d === "bitrefill.com")!.raw_json) as any).checkout_map;
+    expect(cm.stage).toBe("checkout"); expect(cm.first_blocker.needs).toContain("email"); expect(cm.steps.length).toBe(5);
+  });
+});

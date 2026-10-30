@@ -25,7 +25,7 @@ describe("nostr verify", () => {
       allowSynthetic: false,
       contentHash: "test-events",
     });
-    expect(rows.size).toBe(324);
+    expect(rows.size).toBe(348);
     expect(report.rejected.length).toBe(0);
   });
 });

@@ -117,7 +117,7 @@ describe("round-1 batch 2 (Blair, Personal Shopper)", () => {
     const o = findOffers(parseOffers(OFFERS as string), snap, "https://x", { q: "$25 gift card", domain: "bitrefill.com" }) as { ok: true; body: { items: any[] } };
     expect(o.body.items.length).toBeGreaterThan(0);
     expect(o.body.items[0].denomination.face_usd).toBe(25);
-    expect(o.body.items[0].denomination.fee).toBeNull();
+    expect(o.body.items[0].denomination.fee).toBe(1.55); // observed on the product page (v5)
   });
   it("/check carries btc_indirect and grade range fields", async () => {
     const snap = await realSnap();
