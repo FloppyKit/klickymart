@@ -12,6 +12,10 @@ import { NOSTR_KIND_FULFILLMENT } from "./nostr-kinds";
 /** Public key of the facilitator (secret held only as the FACILITATOR_SK_HEX Worker secret). */
 export const FACILITATOR_NPUB = "npub1zw8a7v4eyagkd0eqpqle0c06xxnvyuwaps2hyk3xykqgfsa49h9srq3694";
 export const FACILITATOR_PUBKEY = "138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb";
+/** KM-002 hotfix: facilitation is paused until payment proofs are cryptographically verified (KM-001).
+ * The code stays; it only runs when the FACILITATE_ENABLED var is exactly "1". */
+export function facilitationEnabled(env: { FACILITATE_ENABLED?: string }): boolean { return env.FACILITATE_ENABLED === "1"; }
+export const FACILITATION_PAUSED_BODY = { ok: false, error: { code: "facilitation_paused", message: "Facilitation is paused. KlickyMart is not signing facilitated 421s while payment-proof verification is being fixed. Publish your 422 without a facilitated 421.", retryable: false } };
 export const FACILITATE_LIMITS = { perAgentPerDay: 5, perIpPerDay: 20, globalPerDay: 500, perAgentDomainPerDay: 1 };
 export type Verification = "verified-preimage" | "verified-zap" | "unverified-claim";
 export const FACILITATE_NOTE = "Signed by KlickyMart as FACILITATOR, not by the store. It records that an agent showed KlickyMart this payment proof; it is not a store confirmation. KlickyMart does not publish it: publish it yourself, then reference it from your 422.";

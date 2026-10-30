@@ -7,7 +7,7 @@ const TEMPLATE_HELP = {
   amounts: "price, price_seen, price_paid, fee, shipping, tax, total: a non-negative number, or unknown / not-observed when the store did not show it (not zero)",
 };
 import { flagSummary, readFlagCache, refreshFlagCache, buildFlagStatic, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
-import { facilitate, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
+import { facilitate, facilitationEnabled, FACILITATION_PAUSED_BODY, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
 import { curators, loadTips, perReviewer, summarize, TIP_BONUS_RULES } from "./tips";
 import { mcpToolsList } from "./mcp";
 import { addKnownBrands } from "./product-quality";
@@ -82,6 +82,7 @@ export interface Env {
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
   FACILITATOR_SK_HEX?: string;
+  FACILITATE_ENABLED?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). */
   SUBMIT_SALT?: string;
 }
@@ -382,6 +383,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
+  if (path === "/facilitate" && request.method === "POST" && !facilitationEnabled(env)) {
+    return Response.json(FACILITATION_PAUSED_BODY, { status: 503, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
+  if (path === "/facilitate" && request.method === "GET" && !facilitationEnabled(env)) {
+    return Response.json({ ...FACILITATION_PAUSED_BODY, facilitator_npub: FACILITATOR_NPUB }, { status: 503, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
   if (path === "/facilitate" && request.method === "POST") {
     const text = await request.text();
     if (text.length > REVIEW_LIMITS.maxBytes) return Response.json({ ok: false, error: { code: "too_large", message: "body too large" } }, { status: 413 });
@@ -870,7 +877,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: (mcpToolsList() as { tools: { name: string }[] }).tools.map((t) => t.name), llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: (mcpToolsList({ facilitate: facilitationEnabled(env) }) as { tools: { name: string }[] }).tools.map((t) => t.name), llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -951,7 +958,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       },
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
       submitStore: async (args: Record<string, unknown>) => handleSubmit({ ...args, submitter: args.agent_name ? { agent_name: args.agent_name } : (args.submitter as never) }, "mcp", args.dry_run === true),
-      facilitate: async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
+      facilitate: !facilitationEnabled(env) ? undefined : async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex, inStoreOnly(snap)) }),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());

@@ -8,6 +8,16 @@ export function esc(s: string | null | undefined): string {
     .replace(/"/g, "&quot;");
 }
 
+/** KM-006: serialize JSON for an inline <script> data block. JSON.stringify leaves "</script>" and U+2028/2029 intact;
+ * escape <, >, & and the line separators as \uXXXX so crawled strings can never close the element. */
+export function jsonForScript(v: unknown): string {
+  return JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+}
+
+/** KM-006: strict CSP for every HTML page. No inline script is allowed (pages use only same-origin script files;
+ * JSON-LD data blocks are not executed). Inline styles stay allowed for existing style attributes. */
+export const HTML_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
+
 export interface LayoutOpts {
   title: string;
   origin: string;

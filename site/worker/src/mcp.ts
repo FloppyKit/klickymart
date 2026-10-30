@@ -72,7 +72,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/alternatives": { get: { summary: "Where else can my agent buy this? Ranked stores in a coarse category", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Store you were blocked at" }, { name: "category", in: "query", required: false, schema: { type: "string" }, description: "Coarse category or product word (headphones, gift card); agent-native categories: vps, vpn, esim, paid-api, gift-cards" }, { name: "sub", in: "query", required: false, schema: { type: "string" }, description: "Product family" }, { name: "pay", in: "query", required: false, schema: { type: "string" }, description: "lightning | btc | cashu" }, { name: "guest", in: "query", required: false, schema: { type: "string" }, description: "1 = guest checkout confirmed" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP" }, { name: "taxpre", in: "query", required: false, schema: { type: "string" }, description: "1 = only stores observed to show tax before payment (with zip)" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/offers": { get: { summary: "Product offers observed on store pages (JSON-LD / Shopify JSON); live=1 adds live Shopify Catalog results (never stored)", parameters: [{ name: "q", in: "query", required: false, schema: { type: "string" }, description: "Product words; synonyms like ANC / noise-cancelling / over-ear are expanded" }, { name: "gtin", in: "query", required: false, schema: { type: "string" }, description: "GTIN/UPC/EAN" }, { name: "mpn", in: "query", required: false, schema: { type: "string" }, description: "Manufacturer part number" }, { name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Limit to one store" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed cost" }, { name: "in_stock", in: "query", required: false, schema: { type: "string" }, description: "1 = in stock only" }, { name: "max_price", in: "query", required: false, schema: { type: "number" }, description: "USD" }, { name: "live", in: "query", required: false, schema: { type: "string" }, description: "1 = add live Shopify Catalog results" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/recheck": { get: { summary: "Re-read robots.txt and home status for an indexed store now (rate-limited)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } }, post: { summary: "Same as GET", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
-      "/facilitate": { get: { summary: "Facilitator npub, limits and usage", responses: { "200": { description: "JSON" } } }, post: { summary: "Get a kind 421 signed by KlickyMart as FACILITATOR (not the store) after a payment-proof check; returned unpublished", responses: { "200": { description: "signed event" }, "400": { description: "bad proof/param" }, "409": { description: "store claimed its listing" }, "429": { description: "rate limited" }, "503": { description: "not configured" } } } },
+      "/facilitate": { get: { summary: "Facilitator npub, limits and usage", responses: { "200": { description: "JSON" } } }, post: { summary: "PAUSED (returns 503 facilitation_paused). Get a kind 421 signed by KlickyMart as FACILITATOR (not the store) after a payment-proof check; returned unpublished", responses: { "200": { description: "signed event" }, "400": { description: "bad proof/param" }, "409": { description: "store claimed its listing" }, "429": { description: "rate limited" }, "503": { description: "not configured" } } } },
       "/wallet": { get: { summary: "Non-custodial wallet setup page", responses: { "200": { description: "HTML" } } } },
       "/wallet.json": { get: { summary: "Wallet setup guide and checklist (JSON)", responses: { "200": { description: "JSON" } } } },
       "/flags.json": { get: { summary: "Flagged agent notes with explainable reasons", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
@@ -131,8 +131,8 @@ export function queryParamsToMcpArgs(args: Record<string, unknown>): URLSearchPa
   return sp;
 }
 
-export function mcpToolsList(): unknown {
-  return {
+export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
+  const all = {
     tools: [
       {
         name: "search_merchants",
@@ -277,6 +277,8 @@ export function mcpToolsList(): unknown {
       },
     ],
   };
+  // KM-002: facilitate_purchase is hidden while facilitation is paused.
+  return opts.facilitate ? all : { tools: all.tools.filter((t) => t.name !== "facilitate_purchase") };
 }
 
 /** D8 draft: an UNSIGNED kind 420 "watch" need template. KlickyMart never signs for the caller and does not yet act on watches. */
@@ -325,7 +327,7 @@ export function createMcpHandler(deps: {
         },
       };
     }
-    if (method === "tools/list") return { ...base, result: mcpToolsList() };
+    if (method === "tools/list") return { ...base, result: mcpToolsList({ facilitate: !!deps.facilitate }) };
     if (method === "tools/call") {
       const p = params as { name?: string; arguments?: Record<string, unknown> };
       if (p.name === "search_merchants") {

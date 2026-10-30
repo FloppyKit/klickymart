@@ -6,7 +6,7 @@ import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
 import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
 import { renderAgentPolicy, renderCheckoutDetail, renderV5, renderWhy } from "../explain";
-import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
+import { awning, esc, eyebrow, gradeBadge, jsonForScript, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
 import type { TrustInfo } from "../submissions";
 import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact, uniquePayLabels } from "../records-api";
@@ -321,7 +321,7 @@ ${reviewsBlock}`;
 ${anwBlock}
 ${renderWhy(raw)}
 ${renderAgentPolicy(raw)}
-<section id="access"><h2>Can an agent get in?</h2><p>Agent access: ${row.ag ?? "unknown"}</p></section>
+<section id="access"><h2>Can an agent get in?</h2><p>Agent access: ${esc(String(row.ag ?? "unknown"))}</p></section>
 <section id="terms"><h2>Their terms</h2><p>${esc(String(row.tos ?? "unknown"))}</p>${typeof raw.tos_url === "string" ? `<blockquote class="km-quote">${esc(String(raw.tos_q ?? ""))}</blockquote><p><a href="${esc(String(raw.tos_url))}" rel="nofollow noopener">Source</a></p>` : ""}</section>
 <section id="pay"><h2>How you can pay</h2>${renderPayTable(raw)}</section>
 ${renderCheckoutDetail(row, raw)}
@@ -331,7 +331,7 @@ ${renderV5(raw)}
 ${reviewsBlock}
 <div class="km-callout"><p>Run this store? You can confirm your identity and publish your own record. <a href="/claim?domain=${esc(row.d)}">Claim this domain</a></p></div>
 <p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>
-<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "Organization", name: row.name ?? row.d, url: `https://${row.d}/` })}</script>`;
+<script type="application/ld+json">${jsonForScript({ "@context": "https://schema.org", "@type": "Organization", name: row.name ?? row.d, url: `https://${row.d}/` })}</script>`;
 
   return pageLayout({ title: row.name ?? row.d, origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
 }
@@ -590,7 +590,7 @@ export function renderCheckResult(origin: string, b: Record<string, unknown>, sh
 
 export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, aTag: string | null): string {
   const items = (rv?.items ?? []).map((r) => `<li class="km-review" data-testid="review">
-  <strong>${r.rating}/${r.rating_max}</strong> · ${esc(r.attempt)}${r.pay ? ` · paid with ${esc(payLabel(r.pay))}` : ""} · <span class="km-muted">${esc(new Date(r.created_at * 1000).toISOString().slice(0, 10))} · key ${esc(r.pubkey.slice(0, 12))}… · ${esc(r.verified)}</span>
+  <strong>${esc(String(r.rating))}/${esc(String(r.rating_max))}</strong> · ${esc(r.attempt)}${r.pay ? ` · paid with ${esc(payLabel(r.pay))}` : ""} · <span class="km-muted">${esc(new Date(r.created_at * 1000).toISOString().slice(0, 10))} · key ${esc(r.pubkey.slice(0, 12))}… · ${esc(r.verified)}</span>
   <p>${esc(r.content)}</p></li>`).join("");
   const head = rv && rv.count ? `<p>${rv.count} review${rv.count === 1 ? "" : "s"} · average ${rv.avg_rating_5}/5</p>` : `<p class="km-muted">No reviews yet.</p>`;
   return `<section id="reviews"><h2>Reviews (kind 422)</h2>${head}<ul class="km-reviews">${items}</ul>

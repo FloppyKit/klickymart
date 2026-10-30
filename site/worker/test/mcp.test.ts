@@ -14,6 +14,6 @@ describe("mcp", () => {
     });
     const r = await handler("tools/list", {}, 1);
     const tools = (r.result as { tools: unknown[] }).tools;
-    expect(tools).toHaveLength(16);
+    expect(tools).toHaveLength(15); // facilitate_purchase hidden while paused (KM-002)
   });
 });

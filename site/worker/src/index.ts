@@ -1,6 +1,7 @@
 import { handleRequest, mcpErrorFor, type Env as RouterEnv } from "./router";
 import { catchUp, relayList } from "./relay-ingest";
 import { ingestCtx } from "./ingester-do";
+import { HTML_CSP } from "./render/layout";
 export { RelayIngester } from "./ingester-do";
 
 export default {
@@ -19,13 +20,13 @@ export default {
       || path === "/og.png"
       || path === "/DATA-LICENSE"
     ) {
-      return env.ASSETS.fetch(request);
+      return withCsp(await env.ASSETS.fetch(request));
     }
 
     const isMcp = path === "/mcp" && request.method === "POST";
     const body = isMcp ? await request.clone().text().catch(() => "") : "";
     try {
-      return await nonEmpty(await handleRequest(request, env), request);
+      return withCsp(await nonEmpty(await handleRequest(request, env), request));
     } catch (e) {
       // Never let a thrown error become a plain-text Cloudflare 1101 page.
       if (isMcp) {
@@ -78,4 +79,14 @@ export async function nonEmpty(res: Response, req: Request): Promise<Response> {
   if (t.trim()) return res;
   return Response.json({ error: { code: "empty_response", message: "the handler produced no body; this is a KlickyMart bug, please retry", retryable: true, retry_after_s: 2 }, count: 0, items: [] },
     { status: 503, headers: { "Retry-After": "2", "Access-Control-Allow-Origin": "*" } });
+}
+
+/** KM-006: every HTML response gets a strict CSP unless the route already set its own (e.g. /report's stricter one). */
+export function withCsp(res: Response): Response {
+  if (!/text\/html/i.test(res.headers.get("content-type") ?? "") || res.headers.has("Content-Security-Policy")) return res;
+  const out = new Response(res.body, res);
+  out.headers.set("Content-Security-Policy", HTML_CSP);
+  out.headers.set("X-Content-Type-Options", "nosniff");
+  out.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return out;
 }
