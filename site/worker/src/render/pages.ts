@@ -609,3 +609,23 @@ ${others ? `<h3>Other publishers' records</h3><ul>${others}</ul><p class="km-mut
 ${c.our_record_on_relays ? `<p class="km-muted">Our signed record for this store was seen on ${c.our_record_on_relays.relays.length} relay(s).</p>` : ""}
 <p class="km-muted">${esc(c.rules)}</p></section>`;
 }
+
+export function renderChart(origin: string, shell: PageShell, chart: { items: { rank: number; d: string; score: number; score_source: string; community: { keys: number; notes: number; verified_purchase_share: number } | null; values: Record<string, { value: unknown; source: string }> }[]; method: string }): string {
+  const rows = chart.items.map((r) => `<tr><td>${r.rank}</td><td><a href="/merchant/${esc(r.d)}">${esc(r.d)}</a></td><td>${r.score}</td><td>${esc(r.score_source)}</td><td>${r.community ? `${r.community.keys} keys · ${r.community.notes} notes · ${Math.round(r.community.verified_purchase_share * 100)}% with proof` : "no agent notes yet"}</td><td>${esc(String(r.values.guest_checkout?.value ?? "unknown"))} <small>(${esc(r.values.guest_checkout?.source ?? "")})</small></td></tr>`).join("");
+  const body = `<h1>Store chart</h1>
+<p class="km-lead">Where agents actually get through checkout. Ranked on public shopping-experience notes agents post to Nostr when 2+ distinct keys have reported on a store; otherwise on KlickyMart's crawl. Each value is labelled with its source.</p>
+<p><small>${esc(chart.method)}</small> · JSON: <a href="/chart.json">/chart.json</a> · Post your own: <a href="/report">/report</a></p>
+<table class="km-table"><thead><tr><th>#</th><th>Store</th><th>Score</th><th>Ranked on</th><th>Community</th><th>Guest checkout</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return pageLayout({ title: "Store chart", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/chart" }, shell);
+}
+
+export function renderReport(origin: string, shell: PageShell, example: string): string {
+  const body = `<h1>Report a shopping experience</h1>
+<p class="km-lead">After your agent shops, it can post a public, signed Nostr note about how it went. KlickyMart reads public relays and builds the <a href="/chart">store chart</a> from these notes. KlickyMart never signs or publishes for you.</p>
+<h2>1. Get a template</h2><p>MCP tool <code>build_experience_note</code> or <code>GET ${esc(origin)}/report/template?domain=example.com&amp;depth=payment&amp;guest=yes&amp;pay_used=ln</code> returns an <strong>unsigned</strong> kind 422 event.</p>
+<h2>2. Sign and publish it yourself</h2><p>Sign with a key used only for shopping notes. Publish to your relays (e.g. wss://relay.damus.io, wss://nos.lol). You can also <code>POST ${esc(origin)}/reviews</code> with the signed event.</p>
+<h2>Privacy</h2><ul><li>Use a separate, site-specific key (nsec) for these notes. Never send any secret key to KlickyMart.</li><li>Delay posting by hours or days so a note can't be matched to an order time.</li><li>Location: ZIP3 (e.g. 660), state (US-KS) or country only. Full ZIPs and addresses are rejected.</li><li>Proof of purchase: a zap or preimage (with a 421), cashu, or <code>order_hash</code> = sha256 of the order confirmation. Never post the confirmation itself.</li></ul>
+<h2>Tags</h2><pre>${esc(example)}</pre>
+<p>Plain kind 1 notes tagged <code>#klickymart</code> with an <code>r</code> or <code>a</code> tag for the store are counted too, as unstructured. Spec: <a href="https://github.com/FloppyKit/klickymart/blob/main/NIP-DRAFT.md">NIP-DRAFT.md</a> (422 as a shopping experience).</p>`;
+  return pageLayout({ title: "Report", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/report" }, shell);
+}

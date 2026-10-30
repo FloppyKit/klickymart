@@ -70,6 +70,10 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/stats/agents.json": { get: { summary: "Agent visit stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/ingest.json": { get: { summary: "Relay ingest stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/landed": { get: { summary: "One call: landed price of a product at a ZIP (indexed offers + live Shopify Catalog with live=1), store facts on every row; est_total only when price, shipping and tax are all known", parameters: [{ name: "zip", in: "query", required: true, schema: { type: "string" } }, ...["q", "gtin", "mpn", "url", "domain"].map((n) => ({ name: n, in: "query", schema: { type: "string" } })), { name: "max_price", in: "query", schema: { type: "number" } }, { name: "in_stock", in: "query", schema: { type: "boolean" } }, { name: "live", in: "query", schema: { type: "string", enum: ["1"] } }, { name: "condition", in: "query", schema: { type: "string", enum: [...CONDITIONS] } }, { name: "type", in: "query", schema: { type: "string", enum: [...PRODUCT_TYPES] } }, { name: "brand_strict", in: "query", schema: { type: "string", enum: ["1"] } }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/chart.json": { get: { summary: "Store chart: ranked on community shopping-experience notes (Nostr kind 422, 2+ keys) with crawl fallback; every value labelled with its source", parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }, { name: "category", in: "query", schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
+      "/chart": { get: { summary: "Store chart (HTML)", responses: { "200": { description: "HTML" } } } },
+      "/report": { get: { summary: "How to post a shopping-experience note (HTML)", responses: { "200": { description: "HTML" } } } },
+      "/report/template": { get: { summary: "Unsigned kind 422 shopping-experience template (never signed or published by KlickyMart)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" } }, { name: "depth", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/pending.json": { get: { summary: "Queue of store domains from live results awaiting KlickyBot's robots -> terms -> public-pages check", responses: { "200": { description: "JSON" } } } },
       "/mcp": { post: { summary: "MCP (JSON-RPC 2.0, streamable HTTP): tools/list, tools/call", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/claim": { get: { summary: "Merchant claim page", responses: { "200": { description: "HTML or text" } } }, post: { summary: "Merchant claim submit", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
@@ -169,6 +173,11 @@ export function mcpToolsList(): unknown {
         inputSchema: { type: "object", required: ["zip"], properties: { zip: { type: "string", description: "5-digit US ZIP" }, q: { type: "string" }, gtin: { type: "string" }, mpn: { type: "string" }, url: { type: "string", description: "a product URL to price" }, domain: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, condition: { type: "string", enum: [...CONDITIONS] }, type: { type: "string", enum: [...PRODUCT_TYPES] }, brand_strict: { type: "boolean" }, limit: { type: "integer", maximum: 50 } } },
       },
       {
+        name: "build_experience_note",
+        description: "Returns an UNSIGNED Nostr kind 422 'shopping experience' event template for a store, for you to sign with your own (ideally site-specific) key and publish to your own relays. KlickyMart never signs or publishes for you. Optionally POST the signed event to /reviews (or the submit_review tool). Location must be ZIP3, US state (US-KS) or country only. Proof tags (zap/preimage/cashu/order_hash = sha256 of the confirmation) mark a verified purchase.",
+        inputSchema: { type: "object", required: ["domain", "depth"], properties: { domain: { type: "string" }, depth: { type: "string", enum: ["browse", "cart", "checkout", "payment", "paid", "delivered"] }, product: { type: "string", description: "product URL or GTIN" }, guest: { type: "string", enum: ["yes", "no"] }, account_required: { type: "string", enum: ["yes", "no"] }, blocker: { type: "string" }, walls: { type: "array", items: { type: "string", enum: ["captcha", "login"] } }, pay_used: { type: "string" }, pay_offered: { type: "array", items: { type: "string" } }, btc_route: { type: "string", enum: ["native", "indirect", "lightning"] }, tax_shown_before_payment: { type: "string", enum: ["yes", "no"] }, shipping_shown_before_payment: { type: "string", enum: ["yes", "no"] }, price: { type: "string" }, shipping: { type: "string" }, tax: { type: "string" }, total: { type: "string" }, currency: { type: "string" }, region: { type: "string", description: "ZIP3, US-XX or country code" }, duration_s: { type: "string" }, steps: { type: "array", items: { type: "string" } }, agent: { type: "string" }, delivered: { type: "string", enum: ["yes", "no"] }, delivery_days: { type: "string" }, rating: { type: "string", description: "1-5" }, narrative: { type: "string" } } },
+      },
+      {
         name: "get_checkout_map",
         description: "Checkout steps our probe reached for a store (stopping at the payment screen, never submitting), the first blocker (bot-wall, http-refusal, network-error, no-product-link, no-add-to-cart, form-gate, login-wall, robots, unclassified, none) and landed-cost signals.",
         inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
@@ -243,6 +252,7 @@ export function createMcpHandler(deps: {
   findOffers?: (args: Record<string, unknown>) => Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
   getCheckoutMap?: (domain: string) => Promise<unknown>;
   recheckDomain?: (domain: string) => Promise<unknown>;
+  buildExperienceNote?: (args: Record<string, unknown>) => { ok: true; value: Record<string, unknown> } | { ok: false; code: string; message: string };
 }): McpHandler {
   return async (method, params, id) => {
     const base = { jsonrpc: "2.0" as const, id };
@@ -299,6 +309,11 @@ export function createMcpHandler(deps: {
       if (p.name === "submit_review" && deps.submitReview) {
         const r = await deps.submitReview(p.arguments?.event, p.arguments?.dry_run === true);
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
+      }
+      if (p.name === "build_experience_note" && deps.buildExperienceNote) {
+        const r = deps.buildExperienceNote(p.arguments ?? {});
+        if (!r.ok) return { ...base, error: { code: -32602, message: r.message, data: { code: r.code, retryable: false } } };
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.value) }], structuredContent: r.value } };
       }
       if (p.name === "get_landed_price" && deps.landedPrice) {
         const r = await deps.landedPrice(p.arguments ?? {});

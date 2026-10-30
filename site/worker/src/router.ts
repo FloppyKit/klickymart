@@ -1,4 +1,6 @@
 import { mcpToolsList } from "./mcp";
+import { experienceTemplate, loadAggregates, parseExperience, storeExperience } from "./experience";
+import { buildChart } from "./chart";
 import { checkExtras, checkoutOf } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { rowsToSnapshot, snapshotFromJson } from "./index-mem";
@@ -44,6 +46,7 @@ import {
   renderQueryResults,
   renderCheckResult,
   renderAlternatives,
+  renderChart, renderReport,
 } from "./render/pages";
 
 export interface Env {
@@ -207,6 +210,19 @@ function err400(param: string, message: string): Response {
 async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean): Promise<{ status: number; body: Record<string, unknown> }> {
   const known = new Set(snap.rows.map((r) => r.d));
   const p = parseReviewEvent(body, (d) => known.has(d));
+  const x = parseExperience(body, (d) => known.has(d));
+  if (!p.ok && !x.ok) return { status: 400, body: { ok: false, error: { code: x.code === "not_an_experience" || x.code === "bad_kind" ? p.code : x.code, message: x.code === "not_an_experience" || x.code === "bad_kind" ? p.message : x.message } } };
+  if (!p.ok && x.ok) {
+    // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
+    if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, stored: false } };
+    try {
+      const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
+      if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
+      const st = await storeExperience(env.DB, x.value, body, { source: "post" });
+      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart" } };
+    } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
+  }
   if (!p.ok) return { status: 400, body: { ok: false, error: { code: p.code, message: p.message } } };
   if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
   try {
@@ -220,6 +236,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
       try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1])); } catch { proof_status = "unverified-claim"; }
     }
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
+    if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }
     return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews` } };
   } catch {
     return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
@@ -382,6 +399,24 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       ...(rows.length === 0 && q.domain ? { coverage_note: coverageNote(q.domain, live) } : {}),
       ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
   };
+  if ((path === "/chart.json" || path === "/chart") && request.method === "GET") {
+    const aggs = await loadAggregates(env.DB);
+    const ch = buildChart(snap, aggs, { limit: Number(url.searchParams.get("limit") ?? 50) || 50, category: url.searchParams.get("category") ?? undefined });
+    if (path === "/chart") return new Response(renderChart(origin, shell, ch), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, items: ch.items }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
+  }
+  if (path === "/report/template" && request.method === "GET") {
+    const args: Record<string, unknown> = Object.fromEntries(url.searchParams.entries());
+    for (const k of ["pay_offered", "walls", "steps"]) if (typeof args[k] === "string") args[k] = String(args[k]).split(",");
+    const d = String(args.domain ?? "").toLowerCase().replace(/^www\./, "");
+    const t = experienceTemplate(args, aTagFor(d));
+    if (!t.ok) return err400(t.code === "region_too_precise" ? "region" : t.code === "bad_depth" ? "depth" : "domain", t.message);
+    return Response.json(t.value, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
+  if (path === "/report" && request.method === "GET") {
+    const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "yes", account_required: "no", pay_used: "lightning", pay_offered: ["card", "lightning", "spay"], btc_route: "native", tax_shown_before_payment: "yes", shipping_shown_before_payment: "yes", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
+    return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
   if (path === "/pending.json" && request.method === "GET") {
     // Our own queue of store domains surfaced by live results that we haven't checked yet (domain + queue time only).
     const out: { domain: string; queued_at: string | null }[] = [];
@@ -391,9 +426,19 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     } catch { /* KV optional */ }
     return Response.json({ count: out.length, items: out, note: "Store domains seen in live Shopify Catalog results that KlickyMart has not checked yet. KlickyBot checks them in order: robots.txt, then the store's terms (a ban is recorded as the fact and the store is not crawled), then public pages only. No catalog product data is kept." }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
   }
+  // Agent-observed shipping/tax from shopping-experience notes. Kept beside (never merged into) the crawl/policy figures.
+  const attachObserved = async (body: Record<string, unknown>) => {
+    const items = (body.items as Record<string, unknown>[] | undefined) ?? [];
+    const ds = [...new Set(items.map((i) => String(i.d ?? i.domain ?? i.store ?? "")).filter(Boolean))].slice(0, 50);
+    const aggs = ds.length ? await loadAggregates(env.DB, ds) : new Map();
+    const obs: Record<string, unknown> = {};
+    for (const [d, a] of aggs) obs[d] = { source: "observed by agents (Nostr kind 422 notes)", keys: a.keys, corroborated: a.corroborated, shipping_usd: a.observed.shipping_usd, tax_rate_pct: a.observed.tax_rate_pct, latest: a.latest_at };
+    body.observed_by_agents = { note: "Separate from landed totals above, which come from KlickyMart's crawl and store policies. Corroborated means 2+ distinct keys.", stores: obs };
+  };
   if (path === "/landed" && request.method === "GET") {
     const r = await landedCall((k) => url.searchParams.get(k));
     if (!r.ok) return err400(r.param, r.message);
+    await attachObserved(r.body as Record<string, unknown>);
     return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: { ...apiHeaders(snap.version, 0), ...(url.searchParams.get("live") === "1" ? { "Cache-Control": "no-store" } : {}) } });
   }
 
@@ -449,6 +494,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (alt.ok) res.body.alternatives = { categories: alt.body.categories, items: alt.body.items, more: `${origin}/alternatives?domain=${res.body.domain}` };
       }
       res.body.community = await getCommunity(env.DB, String(res.body.domain), crawlerHex);
+      const ex = (await loadAggregates(env.DB, [String(res.body.domain)])).get(String(res.body.domain));
+      res.body.community_experience = ex ? { ...ex, source: "Nostr shopping-experience notes", chart: `${origin}/chart` } : { source: "Nostr shopping-experience notes", keys: 0, note: "No agent has posted a shopping-experience note for this store yet.", report: `${origin}/report` };
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
     }
     if (url.searchParams.get("format") === "html") {
@@ -670,6 +717,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (r.ok && z && validZip(z)) addLanded(r.body as { items: Record<string, unknown>[] }, z, args.taxpre === true || args.taxpre === 1);
         return r;
       },
+      buildExperienceNote: (args) => { const d = String(args.domain ?? "").toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]; return experienceTemplate(args, aTagFor(d)); },
       landedPrice: async (args) => {
         const r = await landedCall((k) => (args[k] === undefined || args[k] === null ? null : k === "live" ? (args[k] === true || args[k] === "1" ? "1" : null) : String(args[k])));
         return r.ok ? r : { ok: false as const, message: `${r.param}: ${r.message}` };
