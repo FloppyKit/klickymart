@@ -1,4 +1,5 @@
 import { storeFacts } from "./explain";
+import { storeCard, landedForProduct, hostOf } from "./store-card";
 /** GO D1: product offers observed by KlickyBot (deterministic: schema.org JSON-LD and Shopify /products.json only).
  * Shopify catalog (UCP) results are never stored: its usage guidelines forbid caching, so /offers can add them live (live=1). */
 import type { Snapshot } from "./index-mem";
@@ -49,10 +50,38 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
       ...(o.dn ? { denomination: o.dn } : {}),
       shipping: o.sh ? { usd: o.sh.usd, method: o.sh.me ?? "jsonld-shippingDetails", src: o.sh.src ?? null, note: o.sh.note ?? null } : { usd: null, note: "unknown for this item; see landed (with zip) for store-level free-shipping thresholds" },
-      store: row ? { verdict: row.status === "crawled" ? "reachable" : row.status, checkout_depth: storeFacts(row).co, guest: storeFacts(row).guest, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
+      store: row ? { ...storeCard(snap, o.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
       ...(zip && o.c === "USD" ? { landed: landedFor(raw, zip, o.p, o.sh ?? null) } : {}),
     };
   });
   return { ok: true as const, body: { query: qy, count: items.length, total: scored.length, items,
     note: "Offers are KlickyBot's own observations from the store's public product data (JSON-LD or Shopify JSON) at checked_at; prices change, so confirm on the store page. Unknown fields are null, which means not observed." } };
+}
+
+type LiveVariant = { url?: string; title?: string; price?: { amount?: number; currency?: string }; availability?: { available?: boolean } };
+type LiveProduct = { id?: string; title?: string; variants?: LiveVariant[] };
+/** Normalize live Shopify Catalog products into product results with store facts, then apply our filters AFTER fetching
+ * (the catalog ignores max_price/in_stock). Nothing here is stored. */
+export function liveItems(products: LiveProduct[], snap: Snapshot, origin: string, qy: OfferQuery) {
+  const applied: string[] = []; let dropped = 0;
+  const out: Record<string, unknown>[] = [];
+  for (const p of products) {
+    const vs = (p.variants ?? []).filter((v) => v.price?.amount != null);
+    if (!vs.length) continue;
+    const pool = qy.in_stock ? vs.filter((v) => v.availability?.available) : vs;
+    const v = [...(pool.length ? pool : vs)].sort((a, b) => a.price!.amount! - b.price!.amount!)[0]!;
+    const price = v.price!.amount! / 100, cur = v.price!.currency ?? null, avail = v.availability?.available ?? null;
+    if (qy.in_stock && avail !== true) { dropped++; continue; }
+    if (qy.max_price !== undefined && (cur !== "USD" || price > qy.max_price)) { dropped++; continue; }
+    const card = storeCard(snap, v.url ?? "", origin);
+    out.push({
+      source: "shopify-catalog-live", title: p.title ?? null, variant: v.title ?? null, price, currency: cur, stock: avail === true ? "in" : avail === false ? "out" : null,
+      url: v.url ?? null, domain: hostOf(v.url), checked_at: new Date().toISOString(), store: card,
+      ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null) } : {}),
+    });
+  }
+  if (qy.max_price !== undefined) applied.push(`max_price<=${qy.max_price} USD`);
+  if (qy.in_stock) applied.push("in_stock");
+  return { items: out, filters_applied_after_fetch: applied, dropped_by_filters: dropped,
+    note: applied.length ? `Shopify Catalog does not apply ${applied.join(" and ")}; KlickyMart filtered the live results after fetching (dropped ${dropped}).` : null };
 }
