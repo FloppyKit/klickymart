@@ -22,9 +22,16 @@
     b.type = "button";
     b.textContent = "Copy";
     b.className = "km-copy";
+    b.setAttribute("aria-label", "Copy to clipboard");
     b.addEventListener("click", function () {
       var t = el.querySelector("code");
-      if (t && navigator.clipboard) navigator.clipboard.writeText(t.textContent || "");
+      if (t && navigator.clipboard) {
+        navigator.clipboard.writeText(t.textContent || "").then(function () {
+          b.textContent = "Copied";
+          b.setAttribute("data-copied", "1");
+          setTimeout(function () { b.textContent = "Copy"; b.removeAttribute("data-copied"); }, 1400);
+        }, function () {});
+      }
     });
     el.insertBefore(b, el.firstChild);
   });

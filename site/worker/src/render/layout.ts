@@ -20,6 +20,7 @@ export interface LayoutOpts {
   landscapeBtc?: number;
   landscapeTier?: number;
   sceneOnly?: boolean;
+  story?: { total: number; reachable: number; private_btc: number; private_btc_reachable: number };
 }
 
 export function layout(o: LayoutOpts): string {
@@ -29,6 +30,9 @@ export function layout(o: LayoutOpts): string {
   const reach = typeof o.landscapeReach === "number" ? o.landscapeReach.toFixed(4) : "0";
   const btc = typeof o.landscapeBtc === "number" ? o.landscapeBtc.toFixed(4) : "0";
   const tierAttr = typeof o.landscapeTier === "number" ? ` data-tier="${o.landscapeTier}"` : "";
+  const storyAttr = o.story
+    ? ` data-total="${o.story.total}" data-reachable="${o.story.reachable}" data-private-btc="${o.story.private_btc}" data-private-btc-reachable="${o.story.private_btc_reachable}"`
+    : "";
   const previewBadge = o.previewData
     ? `<span class="km-preview-badge" role="status">Preview data</span>`
     : "";
@@ -46,7 +50,7 @@ export function layout(o: LayoutOpts): string {
 <body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}${o.sceneOnly ? " km-scene-only" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>
 <div class="km-landscape-wrap" aria-hidden="true">
-  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}></canvas>
+  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}${storyAttr}></canvas>
   <canvas id="km-landscape-gl" class="km-landscape-canvas km-landscape-gl" hidden aria-hidden="true"></canvas>
 </div>
 <header class="km-header" role="banner">
@@ -83,17 +87,24 @@ export function eyebrow(text: string): string {
 }
 
 export function gradeBadge(btc: number | null): string {
-  if (btc === null) return `<span class="km-grade km-g-ungraded">not graded</span>`;
-  return `<span class="km-grade km-g${btc}">BTC ${btc}</span>`;
+  if (btc === null) return `<span class="km-grade km-g-ungraded" title="Bitcoin not graded">BTC –</span>`;
+  const priv = btc >= 3 ? " km-g-private" : "";
+  const title = btc >= 3 ? `Private Bitcoin, grade ${btc} of 4` : `Bitcoin grade ${btc} of 4`;
+  return `<span class="km-grade km-g${btc}${priv}" title="${title}">BTC ${btc}/4</span>`;
 }
 
 export function statusPill(status: string): string {
   const map: Record<string, string> = {
     crawled: "Reachable",
-    "blocked-tos": "Blocked by ToS",
+    "blocked-tos": "ToS bans automation",
     "agents-not-welcome": "Agents not welcome",
     error: "Error",
   };
   const cls = status === "crawled" ? "ok" : status === "blocked-tos" ? "tos" : status === "agents-not-welcome" ? "anw" : "err";
   return `<span class="km-status km-status-${cls}">${esc(map[status] ?? status)}</span>`;
+}
+
+/** Striped shop awning used as a section header below the fold. */
+export function awning(title: string, sub?: string, tag: "h1" | "h2" = "h2"): string {
+  return `<div class="km-awning"><div class="km-awning-stripes" aria-hidden="true"></div><${tag} class="km-awning-title">${esc(title)}</${tag}>${sub ? `<p class="km-awning-sub">${esc(sub)}</p>` : ""}</div>`;
 }

@@ -312,6 +312,236 @@
     }
   }
 
+  // ---- Store at the end of the road + agent shoppers (2D tier) ----
+  var dataTotal = parseInt(canvas2d.getAttribute("data-total") || "0", 10) || 0;
+  var dataReachable = parseInt(canvas2d.getAttribute("data-reachable") || "0", 10) || 0;
+  var dataPrivReach = parseInt(canvas2d.getAttribute("data-private-btc-reachable") || "0", 10) || 0;
+  var reachOverride = params.has("reach") && !Number.isNaN(parseFloat(params.get("reach") || ""));
+  var btcOverride = params.has("btc") && !Number.isNaN(parseFloat(params.get("btc") || ""));
+
+  function shopperCounts() {
+    var total = dataTotal || 250;
+    var reachableN = reachOverride || !dataTotal ? Math.round(reach * total) : dataReachable;
+    var n = Math.max(0, Math.min(8, Math.round(reachableN / 20)));
+    var orange = btcOverride ? Math.round(btc * n) : Math.min(n, Math.ceil(dataPrivReach / 20));
+    return { n: n, orange: orange };
+  }
+
+  function storeGeom(w, horizon) {
+    var W = Math.max(84, Math.min(196, w * 0.13));
+    var p = Math.max(1, Math.round(W / 64));
+    W = Math.round(W / p) * p;
+    var H = Math.round(W * 0.5 / p) * p;
+    return { W: W, H: H, p: p, bx: Math.round(w * 0.5 - W * 0.5), by: Math.round(horizon - H) };
+  }
+  function drawStore(w, horizon, light) {
+    var g = storeGeom(w, horizon);
+    var W = g.W, H = g.H, p = g.p, bx = g.bx, by = g.by;
+    var lit = 0.25 + reach * 0.75;
+    ctx.save();
+
+    // Gas canopy + two pumps, right of the building
+    var cw = Math.round(W * 0.62), cx0 = bx + W + p * 3, ch = Math.round(H * 0.82);
+    var ctop = horizon - ch;
+    ctx.fillStyle = "#1a1530";
+    ctx.fillRect(cx0 + p * 3, ctop + p * 3, p * 2, ch - p * 3);
+    ctx.fillRect(cx0 + cw - p * 5, ctop + p * 3, p * 2, ch - p * 3);
+    ctx.fillStyle = "#e9e4f2";
+    ctx.fillRect(cx0, ctop, cw, p * 3);
+    ctx.fillStyle = "#ff4f9a";
+    ctx.fillRect(cx0, ctop + p * 2, cw, p);
+    var dl = ctx.createLinearGradient(0, ctop + p * 3, 0, horizon);
+    dl.addColorStop(0, "rgba(255,240,200," + (0.08 + reach * 0.32) + ")");
+    dl.addColorStop(1, "rgba(255,240,200,0)");
+    ctx.fillStyle = dl;
+    ctx.fillRect(cx0 + p, ctop + p * 3, cw - p * 2, ch - p * 3);
+    [0.3, 0.62].forEach(function (f) {
+      var px = Math.round(cx0 + cw * f);
+      var ph = p * 8;
+      ctx.fillStyle = "#2a2346";
+      ctx.fillRect(px, horizon - ph, p * 4, ph);
+      ctx.fillStyle = "#c9c2e0";
+      ctx.fillRect(px, horizon - ph, p * 4, p);
+      ctx.fillStyle = reach > 0.3 ? "rgba(110,243,255," + lit + ")" : "#12101f";
+      ctx.fillRect(px + p, horizon - ph + p * 2, p * 2, p * 2);
+      ctx.fillStyle = "#0c0a16";
+      ctx.fillRect(px + p * 4, horizon - ph + p * 3, p, p * 3);
+    });
+
+    // Building body, flat roof, sign band
+    ctx.fillStyle = light ? "#2b2445" : "#1c1830";
+    ctx.fillRect(bx, by, W, H);
+    var signH = Math.round(H * 0.26 / p) * p;
+    ctx.fillStyle = "#e9e4f2";
+    ctx.fillRect(bx - p, by - p, W + p * 2, p);
+    ctx.fillStyle = "#14112a";
+    ctx.fillRect(bx - p, by, W + p * 2, signH);
+    var fs = Math.max(8, Math.floor(signH * 0.72));
+    ctx.font = "bold " + fs + "px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "#6ef3ff";
+    ctx.shadowBlur = 2 + reach * 16;
+    ctx.fillStyle = "rgba(110,243,255," + (0.3 + reach * 0.7) + ")";
+    var label = "KLICKYMART";
+    var tw = ctx.measureText(label).width;
+    var sx = tw > W - p * 2 ? (W - p * 2) / tw : 1;
+    ctx.save();
+    ctx.translate(bx + W / 2, by + signH / 2 + p * 0.5);
+    ctx.scale(sx, 1);
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+    ctx.shadowBlur = 0;
+
+    // Striped awning with a scalloped edge
+    var ay = by + signH, ah = p * 3, stripes = 12, sw = (W + p * 2) / stripes;
+    for (var i = 0; i < stripes; i++) {
+      ctx.fillStyle = i % 2 ? "#f4ead8" : "#ff4f9a";
+      ctx.fillRect(Math.round(bx - p + i * sw), ay, Math.ceil(sw), ah);
+      ctx.beginPath();
+      ctx.arc(bx - p + i * sw + sw / 2, ay + ah, sw / 2, 0, Math.PI);
+      ctx.fill();
+    }
+    // Big windows either side of the door; they light up with reach
+    var wy = ay + ah + p * 2;
+    var wh = horizon - wy - p;
+    var doorW = Math.round(W * 0.14 / p) * p;
+    var doorX = Math.round(bx + W / 2 - doorW / 2);
+    var sideW = (W - doorW - p * 6) / 2;
+    var paneW = (sideW - p * 2) / 3;
+    var order = [2, 3, 1, 4, 0, 5];
+    var litPanes = Math.round(reach * 6 + 0.15);
+    for (var k = 0; k < 6; k++) {
+      var idx = k % 3;
+      var x = k < 3 ? bx + p * 2 + idx * (paneW + p) : doorX + doorW + p * 2 + idx * (paneW + p);
+      var on = order.indexOf(k) < litPanes;
+      ctx.fillStyle = "#0a0816";
+      ctx.fillRect(Math.round(x) - p, wy - p, Math.round(paneW) + p * 2, wh + p);
+      if (on) {
+        ctx.shadowColor = "#ffe9a8";
+        ctx.shadowBlur = 4 + reach * 10;
+        ctx.fillStyle = "rgba(255,233,168," + (0.65 + reach * 0.35) + ")";
+      } else {
+        ctx.fillStyle = "#151231";
+      }
+      ctx.fillRect(Math.round(x), wy, Math.round(paneW), wh - p);
+      ctx.shadowBlur = 0;
+      if (on) {
+        ctx.fillStyle = "rgba(160,110,60,0.45)";
+        ctx.fillRect(Math.round(x), wy + Math.round(wh * 0.5), Math.round(paneW), p);
+      }
+    }
+    ctx.fillStyle = "#0a0816";
+    ctx.fillRect(doorX - p, wy - p, doorW + p * 2, horizon - wy + p);
+    ctx.fillStyle = reach > 0.5 ? "rgba(255,233,168,0.55)" : "#151231";
+    ctx.fillRect(doorX, wy, doorW, horizon - wy);
+    ctx.fillStyle = "#c9c2e0";
+    ctx.fillRect(doorX + doorW - p * 2, wy + Math.round((horizon - wy) / 2), p, p * 2);
+
+    // Neon OPEN sign in the left window
+    var openOn = Math.max(0, Math.min(1, (reach - 0.4) / 0.25));
+    ctx.font = "bold " + Math.max(6, Math.floor(wh * 0.3)) + "px ui-monospace, Menlo, Consolas, monospace";
+    var ox = bx + p * 2 + paneW * 1.5 + p;
+    var oy = wy + wh * 0.26;
+    if (openOn > 0) {
+      ctx.shadowColor = "#ff3b6b";
+      ctx.shadowBlur = 6 + openOn * 12;
+      ctx.fillStyle = "rgba(255,90,120," + (0.4 + openOn * 0.6) + ")";
+    } else {
+      ctx.fillStyle = "rgba(120,60,80,0.55)";
+    }
+    ctx.fillText("OPEN", ox, oy);
+    ctx.shadowBlur = 0;
+    canvas2d.dataset.storeOpen = openOn > 0 ? "1" : "0";
+    canvas2d.dataset.storeLitWindows = String(litPanes);
+
+    if (reach > 0.15) {
+      var pool = ctx.createRadialGradient(w / 2, horizon, 2, w / 2, horizon, W * 0.9);
+      pool.addColorStop(0, "rgba(255,233,168," + (reach * 0.22) + ")");
+      pool.addColorStop(1, "rgba(255,233,168,0)");
+      ctx.fillStyle = pool;
+      ctx.fillRect(w / 2 - W, horizon, W * 2, W * 0.5);
+    }
+    ctx.restore();
+  }
+  var SHOPPER_A = [
+    ".....o......",
+    ".....a......",
+    "...hhhhh....",
+    "..hhvhhhh...",
+    "..hvhhhhh...",
+    "..hhhhhhh...",
+    "...hhhhh....",
+    "....nnn.....",
+    "..bbbbbbb...",
+    ".rbbbbbbbr..",
+    ".rbbbbbbbr..",
+    ".rbbbbbbbGGG",
+    "..bbbbbbbGGG",
+    "...l...l.GGG",
+    "...l...l....",
+    "..ll...ll...",
+  ];
+  var SHOPPER_B = SHOPPER_A.slice(0, 13).concat(["....l.l..GGG", "....l.l.....", "...ll.ll...."]);
+
+  function drawShopper(x, y, px, frame, orange, alpha) {
+    var map = frame ? SHOPPER_B : SHOPPER_A;
+    var pal = {
+      o: orange ? "#ffb347" : "#6ef3ff",
+      a: "#8c86a8",
+      h: orange ? "#ffd29a" : "#cfd3ef",
+      v: "#ffffff",
+      n: "#5d577a",
+      b: orange ? "#f7931a" : "#9aa0c8",
+      r: orange ? "#c96f0c" : "#6f7499",
+      G: "#c8a070",
+      l: "#4a4466",
+    };
+    var ox = Math.round(x - 6 * px);
+    var oy = Math.round(y - 16 * px);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (orange) {
+      ctx.shadowColor = "#f7931a";
+      ctx.shadowBlur = 6 + px * 3;
+    }
+    for (var r = 0; r < map.length; r++) {
+      for (var c = 0; c < map[r].length; c++) {
+        var ch = map[r].charAt(c);
+        if (ch === ".") continue;
+        ctx.fillStyle = pal[ch];
+        ctx.fillRect(ox + c * px, oy + r * px, px, px);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawShoppers(w, h, horizon, t) {
+    var counts = shopperCounts();
+    canvas2d.dataset.shoppers = String(counts.n);
+    canvas2d.dataset.shoppersOrange = String(counts.orange);
+    if (!counts.n) return;
+    var floorH = h - horizon;
+    var roadW = 0.2 + reach * 0.05;
+    var still = pauseMotion || reduced;
+    for (var i = 0; i < counts.n; i++) {
+      var side = i % 2 === 0 ? -1 : 1;
+      var slot = Math.floor(i / 2);
+      // Walk between the store (d=0.16) and just above the hero card (d=0.55).
+      var span = 0.39;
+      var base = 0.53 - slot * 0.095 - (side > 0 ? 0.047 : 0);
+      var travel = still ? 0 : (t || 0) * 0.0000045;
+      var d = 0.16 + ((((base - 0.16 - travel * span) % span) + span) % span);
+      var depth = d * d;
+      var y = horizon + floorH * depth;
+      var x = w * 0.5 + side * (roadW * w * 0.95 * depth + 8 + 14 * depth);
+      var px = Math.max(1, Math.round(1 + depth * 5));
+      var alpha = Math.max(0, Math.min(1, (d - 0.16) / 0.06, (0.55 - d) / 0.02 + 0.2));
+      var frame = still ? 0 : Math.floor((t || 0) / 420 + i) % 2;
+      drawShopper(x, y, px, frame, i < counts.orange, alpha);
+    }
+  }
+
   var glActive = false;
   var running2d = false;
   var raf2d = 0;
@@ -322,13 +552,16 @@
     var w = size.w;
     var h = size.h;
     var light = isLightTheme();
-    var scroll = reduced ? 0 : ((t || 0) * 0.00012) % 1;
+    var scroll = pauseMotion ? 0 : ((t || 0) * 0.00012) % 1;
 
     ctx.clearRect(0, 0, w, h);
     var horizon = drawSky(w, h, light);
-    drawSun(w, horizon, light);
+    // Mountains sit behind the sun; the store stands in front of it.
     drawMountains(w, horizon, light);
+    drawSun(w, horizon, light);
     drawFloor(w, h, horizon, scroll, light);
+    drawStore(w, horizon, light);
+    drawShoppers(w, h, horizon, pauseMotion ? 0 : t);
     canvas2d.dataset.tier = String(Math.round(fidelity2d()));
     canvas2d.dataset.landscapeMode = glActive ? "hidden" : "2d";
     window.__kmLandscapeReady = true;

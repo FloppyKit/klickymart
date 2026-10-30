@@ -1,5 +1,5 @@
 import type { Snapshot } from "../index-mem";
-import { landscapeFromSnapshot, parseLandscapeOverride } from "../landscape-metrics";
+import { computeStoryCounts, landscapeFromSnapshot, parseLandscapeOverride, type StoryCounts } from "../landscape-metrics";
 
 export interface PageShell {
   previewData: boolean;
@@ -7,6 +7,7 @@ export interface PageShell {
   landscapeBtc: number;
   landscapeTier?: number;
   sceneOnly?: boolean;
+  story?: StoryCounts;
 }
 
 export function isPreviewDataMode(env: { PREVIEW_DATA?: string }): boolean {
@@ -26,5 +27,6 @@ export function buildPageShell(snap: Snapshot, env: { PREVIEW_DATA?: string }, u
     landscapeBtc: override.btc ?? metrics.btc,
     landscapeTier: override.tier,
     sceneOnly,
+    story: computeStoryCounts(snap.rows),
   };
 }

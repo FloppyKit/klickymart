@@ -1,8 +1,8 @@
 import type { IndexRow, Snapshot } from "../index-mem";
-import { esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
+import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
 import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact } from "../records-api";
-import { landscapeFormulaInputs } from "../landscape-metrics";
+import { computeStoryCounts, landscapeFormulaInputs, storyLine } from "../landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "../nostr-kinds";
 
 const ANW_LABELS: Record<string, string> = {
@@ -38,6 +38,7 @@ function pageLayout(
     landscapeBtc: shell.landscapeBtc,
     landscapeTier: shell.landscapeTier,
     sceneOnly: shell.sceneOnly,
+    story: shell.story,
   });
 }
 
@@ -48,15 +49,16 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     { href: "/dashboard?reachable=1", label: "Reachable by agents" },
     { href: "/dashboard?guest=1", label: "Guest checkout" },
   ];
+  const story = computeStoryCounts(snap.rows);
   const rows = items.slice(0, 20).map((row) => {
     const c = rowToCompact(row, origin);
     const pays = [...c.pay.online, ...c.pay.instore, ...c.pay.unscoped].slice(0, 4)
       .map((p) => `<span class="km-pay-chip">${esc(payLabel(p))}</span>`).join("");
-    return `<li class="km-result-row">
-      <a href="${esc(merchantUrl(origin, row.d))}"><strong>${esc(row.name ?? row.d)}</strong></a>
-      <span class="km-muted">${esc(row.d)}</span>
-      ${statusPill(row.status)} ${gradeBadge(row.btc)}
-      <span class="km-pay-list">${pays || "<span class=\"km-muted\">unknown</span>"}</span>
+    return `<li class="km-result-row km-tag">
+      <div class="km-tag-id"><a href="${esc(merchantUrl(origin, row.d))}"><strong>${esc(row.name ?? row.d)}</strong></a>
+      <span class="km-tag-domain">${esc(row.d)}</span></div>
+      <div class="km-tag-labels">${statusPill(row.status)}${gradeBadge(row.btc)}</div>
+      <div class="km-pay-list">${pays || "<span class=\"km-muted\">pay unknown</span>"}</div>
     </li>`;
   }).join("");
 
@@ -65,27 +67,34 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
 <section class="km-hero km-hero-panel km-home-hero">
   ${eyebrow("OPEN DATA · SIGNED RECORDS · NO LOGIN")}
   <h1>Where agents shop.</h1>
-  <p class="km-lead">Which stores a software agent can reach, how checkout works, and every way they let you pay, with Bitcoin graded for privacy. Each record links to the page it came from.</p>
+  <p class="km-story" data-testid="story-line">${esc(storyLine(story))}</p>
+  <p class="km-story-key">The road fills in as stores open to agents; the sun rises as private Bitcoin spreads.</p>
   <form class="km-search" method="get" action="/">
     <label class="km-sr-only" for="q">Search</label>
     <input id="q" name="q" value="${esc(q ?? "")}" placeholder="Search merchants or domains">
     <button type="submit">Search</button>
   </form>
 </section>
+<div class="km-store">
+${awning("On the shelves", "Which stores a software agent can reach, how checkout works, and every way they let you pay. Bitcoin graded 0–4 for privacy; every record links to the page it came from.")}
 <section class="km-section km-home-quick">
-  <h2 class="km-h2">Start with</h2>
+  <h2 class="km-sr-only">Start with</h2>
   <ul class="km-quick">${quick.map((l) => `<li><a class="km-btn km-btn-ghost" href="${esc(l.href)}">${esc(l.label)}</a></li>`).join("")}</ul>
 </section>
-<section class="km-section km-home-scrim">
+<section class="km-section km-home-list" aria-label="Stores">
+  <div class="km-tag-legend km-muted"><span>Agent access</span><span>BTC privacy grade 0–4 <span class="km-legend-priv">3+ = private</span></span></div>
   <ul class="km-results">${rows || `<li class="km-empty">No sites match. Try fewer filters.</li>`}</ul>
 </section>
-<section class="km-section km-agents km-home-scrim">
+<section class="km-section km-agents km-staff">
+  <p class="km-staff-label">STAFF ONLY · FOR AGENTS</p>
   <h2 class="km-h2">For agents</h2>
   <p>Query the map over HTTP, MCP, or a plain NDJSON file. No key needed.</p>
-  <div class="km-codeblock"><pre><code>curl '${origin}/q?reachable=1&amp;limit=5'</code></pre></div>
-  <div class="km-codeblock"><pre><code>${origin}/mcp</code></pre></div>
-  <div class="km-codeblock"><pre><code>curl '${origin}/export.ndjson'</code></pre></div>
-</section>`;
+  <div class="km-codeblock"><span class="km-code-label">HTTP</span><pre><code>curl '${origin}/q?reachable=1&amp;limit=5'</code></pre></div>
+  <div class="km-codeblock"><span class="km-code-label">MCP</span><pre><code>${origin}/mcp</code></pre></div>
+  <div class="km-codeblock"><span class="km-code-label">NDJSON</span><pre><code>curl '${origin}/export.ndjson'</code></pre></div>
+  <p class="km-receipt-foot">NO KEY · NO LOGIN · CC0 DATA</p>
+</section>
+</div>`;
 
   return pageLayout({
     title: "Where agents shop",
@@ -112,7 +121,7 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
   const tiles = [
     { label: "Crawled", count: stats.by_status.crawled ?? 0, href: "/dashboard?status=crawled" },
     { label: "Reachable (ag≥1)", count: reachable, href: "/dashboard?reachable=1" },
-    { label: "Blocked by their terms", count: stats.by_status["blocked-tos"] ?? 0, href: "/dashboard?status=blocked-tos" },
+    { label: "ToS bans automation", count: stats.by_status["blocked-tos"] ?? 0, href: "/dashboard?status=blocked-tos" },
     { label: "Agents not welcome", count: stats.by_status["agents-not-welcome"] ?? 0, href: "/dashboard?status=agents-not-welcome" },
     { label: "Errors", count: stats.by_status.error ?? 0, href: "/dashboard?status=error" },
     { label: "Total", count: stats.records, href: "/dashboard" },
@@ -155,11 +164,11 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
   ).join("");
 
   const body = `
-<h1>The map, in numbers.</h1>
-<p class="km-lead">Every site we checked, what stopped us, and what they accept. Landscape metrics below drive the retro grid and sun on every page.</p>
+<div class="km-store km-dash">
+${awning("The map, in numbers.", "Every site we checked, what stopped us, and what they accept. The landscape inputs below drive the road, the store and the sun.", "h1")}
 <div class="km-tiles">${tiles.map((t) => `<a class="km-tile" href="${esc(t.href)}"><span class="km-tile-n">${t.count}</span><span class="km-tile-l">${esc(t.label)}</span></a>`).join("")}</div>
 
-<section class="km-section">
+<section class="km-section km-receipt">
 <h2 class="km-h2">Landscape inputs</h2>
 <dl class="km-dl">
 <dt>Reach (${landscapeIn.reach.value.toFixed(4)})</dt>
@@ -170,19 +179,29 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
 </dl>
 </section>
 
+<div class="km-receipt-grid">
+<section class="km-receipt">
 <h2 class="km-h2">Bitcoin grade (all sites)</h2>
 <p class="km-muted">Ungraded (<span class="km-grade km-g-ungraded">not graded</span>) is distinct from grade 0.</p>
 <svg class="km-chart" viewBox="0 0 260 120" role="img" aria-label="Bitcoin grade histogram">${bars}</svg>
+</section>
+<section class="km-receipt">
 
 <h2 class="km-h2">Agent access (ag)</h2>
 <table class="km-table km-table-compact"><thead><tr><th>ag</th><th>Sites</th></tr></thead><tbody>${agRows}</tbody></table>
+</section>
+</div>
+<section class="km-receipt">
 
 <h2 class="km-h2">Payment methods (observed)</h2>
 <table class="km-table km-table-compact"><thead><tr><th>Method</th><th>Online</th><th>In-store</th><th>Unscoped</th></tr></thead><tbody>${payRows || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
+</section>
+<section class="km-receipt">
 
 <h2 class="km-h2">Bitcoin-accepting merchants</h2>
 <ul class="km-btc-list">${btcList || `<li class="km-muted">None indexed</li>`}</ul>
 ${(stats.bitcoin_accepting?.length ?? 0) > 40 ? `<p class="km-muted">Showing 40 of ${stats.bitcoin_accepting!.length}. Use <code>/q?pay_group=bitcoin</code> for the full set.</p>` : ""}
+</section>
 
 <form class="km-filters" method="get" action="/dashboard">
   <details open><summary>Filters</summary>
@@ -198,6 +217,7 @@ ${(stats.bitcoin_accepting?.length ?? 0) > 40 ? `<p class="km-muted">Showing 40 
   <button type="submit" class="km-btn km-btn-ghost">Apply</button>
   </details>
 </form>
+<div class="km-receipt km-receipt-table">
 <table class="km-table">
 <caption>Merchant map (${total} sites)</caption>
 <thead><tr>
@@ -205,7 +225,9 @@ ${(stats.bitcoin_accepting?.length ?? 0) > 40 ? `<p class="km-muted">Showing 40 
 </tr></thead>
 <tbody>${tableRows}</tbody>
 </table>
-${total > 100 ? `<p><a href="/dashboard?${esc(searchParams.toString())}&amp;limit=500">Show all</a></p>` : ""}`;
+</div>
+${total > 100 ? `<p><a href="/dashboard?${esc(searchParams.toString())}&amp;limit=500">Show all</a></p>` : ""}
+</div>`;
 
   return pageLayout({ title: "Dashboard", origin, version: snap.version, tsMin: snap.meta.ts_min, tsMax: snap.meta.ts_max, body, path: "/dashboard" }, shell);
 }

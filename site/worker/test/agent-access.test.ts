@@ -3,7 +3,7 @@ import { SELF } from "cloudflare:test";
 import { ingestFromNdjsonText } from "../src/ingest";
 import { rowsToSnapshot } from "../src/index-mem";
 import { EMBEDDED_EVENTS_NDJSON } from "../src/fixture-data";
-import { buildKlickymartWellKnown, buildNostrWellKnown } from "../src/agent-capabilities";
+import { buildKlickymartWellKnown, buildNostrWellKnown, parseRelayUrls } from "../src/agent-capabilities";
 import { buildSummaryJson } from "../src/summary-json";
 import { NOSTR_KIND_CRAWL_RECORD } from "../src/nostr-kinds";
 import wranglerToml from "../../wrangler.toml?raw";
@@ -25,7 +25,7 @@ describe("agent capabilities (embedded events)", () => {
     const snap = await embeddedSnapshot();
     const doc = buildKlickymartWellKnown("https://klickymart.com", snap, {
       contact: "bot@klickymart.com",
-      relayUrlsRaw: "wss://relay.klickymart.com",
+      relayUrlsRaw: "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net",
     }) as {
       record_schema_version: string;
       nostr_kinds: { crawl_record: number };
@@ -37,7 +37,7 @@ describe("agent capabilities (embedded events)", () => {
     expect(doc.nostr_kinds.crawl_record).toBe(NOSTR_KIND_CRAWL_RECORD);
     expect(doc.endpoints.query).toBe("https://klickymart.com/q");
     expect(doc.endpoints.summary).toBe("https://klickymart.com/summary.json");
-    expect(doc.relays).toEqual(["wss://relay.klickymart.com"]);
+    expect(doc.relays).toEqual(["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]);
     expect(doc.crawler.npub).toBe(CRAWLER_NPUB);
     expect(JSON.stringify(doc)).not.toContain(CRAWLER_HEX);
   });
@@ -147,5 +147,18 @@ describe("wrangler production config", () => {
     expect(toml).toContain("custom_domain = true");
     expect(toml).toContain('pattern = "www.klickymart.com"');
     expect(toml).toContain("RELAY_URLS");
+    expect(toml).not.toContain("relay.klickymart.com");
+    expect(toml).toContain('RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"');
+  });
+});
+
+describe("relay url parsing", () => {
+  it("falls back to public relays and parses comma lists", () => {
+    expect(parseRelayUrls(undefined)).toEqual(["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]);
+    expect(parseRelayUrls("wss://relay.damus.io,wss://nos.lol, wss://relay.primal.net")).toEqual([
+      "wss://relay.damus.io",
+      "wss://nos.lol",
+      "wss://relay.primal.net",
+    ]);
   });
 });

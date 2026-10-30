@@ -129,3 +129,40 @@ export function parseLandscapeOverride(
   }
   return out;
 }
+
+/** A store "takes Bitcoin privately" when its BTC grade is 3 or 4. */
+export const PRIVATE_BTC_MIN_GRADE = 3;
+
+export interface StoryCounts {
+  total: number;
+  reachable: number;
+  private_btc: number;
+  private_btc_reachable: number;
+}
+
+/** Live counts for the home story line and the agent shoppers on the road. */
+export function computeStoryCounts(rows: IndexRow[]): StoryCounts {
+  let reachable = 0;
+  let privateBtc = 0;
+  let privateBtcReachable = 0;
+  for (const r of rows) {
+    const isReach = r.status === "crawled" && r.ag !== null && r.ag >= 1;
+    const isPriv = r.btc !== null && r.btc >= PRIVATE_BTC_MIN_GRADE;
+    if (isReach) reachable++;
+    if (isPriv) privateBtc++;
+    if (isReach && isPriv) privateBtcReachable++;
+  }
+  return { total: rows.length, reachable, private_btc: privateBtc, private_btc_reachable: privateBtcReachable };
+}
+
+/** One shopper per 20 reachable stores, capped at 8. */
+export function agentShopperCount(reachable: number): number {
+  return Math.max(0, Math.min(8, Math.round(reachable / 20)));
+}
+
+export function storyLine(c: StoryCounts): string {
+  const stores = (n: number) => (n === 1 ? "store" : "stores");
+  const letIn = c.reachable === 1 ? "lets" : "let";
+  const take = c.private_btc === 1 ? "takes" : "take";
+  return `${c.reachable} of ${c.total} ${stores(c.total)} ${letIn} agents in. ${c.private_btc} ${take} Bitcoin privately. Watch the sun rise.`;
+}

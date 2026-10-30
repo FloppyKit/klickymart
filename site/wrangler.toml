@@ -23,7 +23,7 @@ SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
 # Comma-separated or JSON array of wss:// URLs (placeholder until relay is live).
-RELAY_URLS = "wss://relay.klickymart.com"
+RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"
 # Set PREVIEW_DATA = "1" in a preview deployment to load synthetic *.example records only.
 # PREVIEW_DATA = "0"
 
@@ -53,4 +53,4 @@ id = "REPLACE_AT_DEPLOY"
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
-RELAY_URLS = "wss://relay.klickymart.com"
+RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"

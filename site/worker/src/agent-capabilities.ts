@@ -3,8 +3,10 @@ import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
 import type { Snapshot } from "./index-mem";
 import { crawlerNpubFromSnapshot, crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 
+export const DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
+
 export function parseRelayUrls(raw: string | undefined): string[] {
-  if (!raw?.trim()) return ["wss://relay.klickymart.com"];
+  if (!raw?.trim()) return [...DEFAULT_RELAYS];
   const trimmed = raw.trim();
   if (trimmed.startsWith("[")) {
     try {
