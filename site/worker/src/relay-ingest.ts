@@ -1,3 +1,4 @@
+import { markFacilitatedHistory } from "./facilitate";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -9,6 +10,7 @@ import { KIND_NOTE, NOTE_HASHTAG, parseExperience, storeExperience } from "./exp
 import { decodeBolt11 } from "./bolt11";
 
 export const ZAP_RECEIPT_KIND = 9735;
+export const DELETION_KIND = 5;
 export const INGEST_LIMITS = { perPubkeyPerDay: 200, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
 
 export interface IngestCtx {
@@ -33,6 +35,9 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   if (ctx.ourPubkey) f.push({ kinds: [NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE], "#a": domains.map((d) => `${NOSTR_KIND_CRAWL_RECORD}:${ctx.ourPubkey}:${d}`), since });
   // Zap receipts on known 421s (payment proof) and on known 422/kind-1 notes (tips; see tips.ts).
   if (fulfillmentIds.length) f.push({ kinds: [ZAP_RECEIPT_KIND], "#e": fulfillmentIds.slice(0, 400) });
+  // NIP-09 deletions of anything we store (by id) and of notes tagged for us (k tags); applied only when the author matches.
+  if (fulfillmentIds.length) f.push({ kinds: [DELETION_KIND], "#e": fulfillmentIds.slice(0, 400) });
+  f.push({ kinds: [DELETION_KIND], "#k": [String(NOSTR_KIND_ACCEPTANCE), String(NOSTR_KIND_FULFILLMENT), String(NOSTR_KIND_NEED), String(KIND_NOTE)], since });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
   return f;
@@ -63,7 +68,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
+  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
@@ -73,6 +78,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!ev.tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return { ok: false, reason: "bad tags" };
   if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + 600) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
+  if (ev.kind === DELETION_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "deletion without e tags" };
   const d = eventDomain(ev, ctx);
   if (ev.kind === NOSTR_KIND_CRAWL_RECORD) {
     if (!d) return { ok: false, reason: "31420 without valid d tag" };
@@ -116,6 +122,26 @@ async function getEvent(db: D1Database, id: string | undefined): Promise<Ev | nu
   return r ? (JSON.parse(r.raw_json) as Ev) : null;
 }
 
+/** NIP-09: for each e-tagged id, delete our stored copy (event, review, note, record) only when the deletion's pubkey is the
+ * event's author, and keep a tombstone (id + author) so later catch-ups cannot re-ingest it. Ids we have not seen yet get a
+ * tombstone bound to the deleter's pubkey, which only blocks events by that same pubkey. Tips on a deleted note disappear
+ * with it (tips are read only for stored notes) and aggregates are computed on read, so they update immediately. */
+export async function applyDeletion(db: D1Database, del: Ev, nowS: number): Promise<{ deleted: string[]; ignored: string[] }> {
+  const out = { deleted: [] as string[], ignored: [] as string[] };
+  for (const id of [...new Set(del.tags.filter((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")).map((t) => t[1]!))].slice(0, 100)) {
+    const row = await db.prepare("SELECT pubkey FROM nostr_events WHERE id = ?").bind(id).first<{ pubkey: string }>();
+    let author = row?.pubkey;
+    if (!author) { try { author = (await db.prepare("SELECT pubkey FROM experiences WHERE id = ? UNION SELECT pubkey FROM reviews WHERE id = ?").bind(id, id).first<{ pubkey: string }>())?.pubkey; } catch { /* */ } }
+    if (author && author !== del.pubkey) { out.ignored.push(id); continue; }
+    const stmts = [db.prepare("DELETE FROM nostr_events WHERE id = ?").bind(id), db.prepare("DELETE FROM reviews WHERE id = ?").bind(id),
+      db.prepare("DELETE FROM site_records WHERE id = ?").bind(id), db.prepare("DELETE FROM experiences WHERE id = ?").bind(id),
+      db.prepare("INSERT OR IGNORE INTO tombstones (id, pubkey, deletion_id, deleted_at) VALUES (?,?,?,?)").bind(id, del.pubkey, del.id, nowS)];
+    try { await db.batch(stmts); } catch { await db.batch(stmts.slice(0, 3)); }
+    out.deleted.push(id);
+  }
+  return out;
+}
+
 /** Store a batch of events seen on a relay. Dedupe by id (adds the relay to the event's relay list).
  * Query-light: one lookup for existing ids, one for pubkey counts, then a single D1 batch (D1 per-invocation query limits). */
 export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: string }[], ctx: IngestCtx): Promise<IngestResult> {
@@ -130,6 +156,23 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     if (!v.ok) { reject(v.reason); continue; }
     valid.push({ ev: raw as Ev, relay, d: v.d });
     res.maxCreated = Math.max(res.maxCreated, (raw as Ev).created_at);
+  }
+  const dels = valid.filter((x) => x.ev.kind === DELETION_KIND);
+  if (dels.length) {
+    for (const { ev } of dels) { await applyDeletion(db, ev, nowS); res.accepted++; }
+    for (let k = valid.length - 1; k >= 0; k--) if (valid[k]!.ev.kind === DELETION_KIND) valid.splice(k, 1);
+  }
+  if (valid.length) {
+    const ids0 = [...new Set(valid.map((x) => x.ev.id))];
+    const tomb = new Map<string, string>();
+    for (let k = 0; k < ids0.length; k += 90) {
+      const chunk = ids0.slice(k, k + 90);
+      try {
+        const { results } = await db.prepare(`SELECT id, pubkey FROM tombstones WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all<{ id: string; pubkey: string }>();
+        for (const r of results ?? []) tomb.set(r.id, r.pubkey);
+      } catch { /* migration pending */ }
+    }
+    for (let k = valid.length - 1; k >= 0; k--) if (tomb.get(valid[k]!.ev.id) === valid[k]!.ev.pubkey) { valid.splice(k, 1); reject("deleted by author (tombstone)"); }
   }
   if (!valid.length) return res;
   const existing = new Map<string, string>();
@@ -193,6 +236,8 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     const zap = await getEvent(db, tagv(ev.tags, "zap"));
     await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: checkProof(ev, ful, zap) });
   }
+  const touched = new Set([...reviews, ...exps, ...valid.filter((x) => x.ev.kind === NOSTR_KIND_FULFILLMENT).map((x) => x.ev)].map((e) => eventDomain(e, ctx) ?? tagv(e.tags, "r")).filter((x): x is string => !!x));
+  for (const d of touched) await markFacilitatedHistory(db, d);
   return res;
 }
 

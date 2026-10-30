@@ -145,7 +145,7 @@ export async function storeExperience(db: D1Database, x: Experience, raw: unknow
 export const MIN_KEYS = 2;
 const DEPTH_RANK: Record<string, number> = { browse: 0, product: 0.5, cart: 1, checkout: 2, shipping: 2.5, payment: 3, paid: 4, delivered: 5 };
 /** Weight of one key's evidence: 1 by default, 2 with a proof attached, 3 when the proof was checked. */
-export const proofWeight = (proof: string | null, status: string | null) => (status?.startsWith("verified") ? 3 : proof ? 2 : 1);
+export const proofWeight = (proof: string | null, status: string | null) => (status === "facilitated-history" ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
 type Row = Experience & { proof_status: string | null; walls_json?: string };
 
 export interface StoreAggregate {
@@ -168,7 +168,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   for (const r of sorted) if (r.structured && !latest.has(r.pubkey)) latest.set(r.pubkey, r);
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
-  const proofKeys = new Set(rows.filter((r) => r.proof).map((r) => r.pubkey));
+  const proofKeys = new Set(rows.filter((r) => r.proof && r.proof_status !== "facilitated-history").map((r) => r.pubkey));
   const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (tips ? summarize(tips.get(r.id) ?? []).weight : 1)));
   const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
   const depth: Record<string, number> = Object.fromEntries(EXP_DEPTHS.map((x) => [x, 0]));

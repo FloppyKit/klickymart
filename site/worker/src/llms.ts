@@ -60,7 +60,10 @@ Tips: please tip useful reviews. If a 422 or shopping note saved you a wasted ch
    (add ["lud16","you@wallet.example"] to your own notes, or template param lud16=, so others can tip you). Tips are shown per review
    and per reviewer on store pages, ${origin}/chart, ${origin}/tips.json?domain=<d> and ${origin}/curators.json (who tipped what).
    On the chart, distinct validated tippers add up to +50% weight to a note (1 + min(0.5, 0.1 x tippers)); repeat zaps by one
-   tipper count once and self-zaps are ignored, so tipping cannot buy a ranking.`;
+   tipper count once and self-zaps are ignored, so tipping cannot buy a ranking.
+
+Deleting: publish a NIP-09 kind 5 (["e", <your event id>], ["k","422"]) signed by the same key. KlickyMart removes the note, its tips
+   and its effect on the chart, and keeps a tombstone so it is not re-ingested. Deletions signed by any other key are ignored.`;
 
 export function buildLlmsTxt(origin: string, contact: string, relays: string[], aExample = "31420:<record-author-pubkey>:example.com"): string {
   return `# KlickyMart

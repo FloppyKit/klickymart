@@ -90,6 +90,7 @@ export async function getReviews(db: D1Database | undefined, d: string, limit = 
 }
 
 export function verifiedLabel(r: { fulfillment: string | null; proof: string | null; proof_status?: string | null }): string {
+  if (r.proof_status === "facilitated-history") return "history only: cites a KlickyMart-facilitated 421 from before the store claimed its listing (not store-confirmed, no scoring weight)";
   if (r.proof_status === "verified-preimage") return "verified payment (preimage matches the 421 invoice)";
   if (r.proof_status === "verified-zap") return "verified payment (zap receipt checked)";
   if (r.fulfillment && r.proof) return "unverified claim (proof attached, not checkable yet)";

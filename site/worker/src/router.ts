@@ -1,4 +1,4 @@
-import { facilitate, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
+import { facilitate, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
 import { curators, loadTips, perReviewer, summarize } from "./tips";
 import { mcpToolsList } from "./mcp";
 import { addKnownBrands } from "./product-quality";
@@ -217,6 +217,13 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
   const p = parseReviewEvent(body, (d) => known.has(d));
   const x = parseExperience(body, (d) => known.has(d));
+  if (env.DB && (p.ok || x.ok)) {
+    const ev0 = body as Ev;
+    try {
+      const tb = await env.DB.prepare("SELECT pubkey FROM tombstones WHERE id = ?").bind(ev0.id).first<{ pubkey: string }>();
+      if (tb && tb.pubkey === ev0.pubkey) return { status: 410, body: { ok: false, error: { code: "deleted", message: "this event was deleted by its author (NIP-09) and cannot be resubmitted" } } };
+    } catch { /* migration pending */ }
+  }
   if (!p.ok && !x.ok) return { status: 400, body: { ok: false, error: { code: x.code === "not_an_experience" || x.code === "bad_kind" ? p.code : x.code, message: x.code === "not_an_experience" || x.code === "bad_kind" ? p.message : x.message } } };
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
@@ -244,6 +251,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     }
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }
+    await markFacilitatedHistory(env.DB, p.value.d);
     return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews`, ...xb } };
   } catch {
     return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
@@ -842,6 +850,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           resultHtml = `<p>Found nostr.json (HTTP ${res.status}). CORS: ${res.cors ? "yes" : "no"}</p><ul>${entries}</ul>`;
           if (res.underscore && env.DB) {
             await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?)").bind(v.domain, res.underscore, `_${v.domain}`, Math.floor(Date.now() / 1000)).run();
+            await markFacilitatedHistory(env.DB, v.domain);
           }
         }
       }

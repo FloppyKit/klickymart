@@ -16,6 +16,7 @@ export interface Community {
   attempts: Record<string, number>;
   pay_reports: { pay: string; label: string; agents: number; paid_agents: number; verified_agents: number; corroborated: boolean; summary: string }[];
   verified_payments: number;
+  facilitated_history?: { reviewers: number; note: string };
   handshake: { needs: number; fulfillments: number };
   other_publishers: { pubkey: string; id: string; created_at: number; relays: string[]; status: unknown; pay: unknown; btc: unknown }[];
   our_record_on_relays: { id: string; created_at: number; relays: string[] } | null;
@@ -44,6 +45,8 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
     const verifiedKeys = new Set(all.filter((r) => r.proof_status?.startsWith("verified")).map((r) => r.pubkey));
     out.reviewers = per.length;
     out.verified_payments = verifiedKeys.size;
+    const hist = new Set(all.filter((r) => r.proof_status === "facilitated-history").map((r) => r.pubkey));
+    if (hist.size) out.facilitated_history = { reviewers: hist.size, note: "These reviews cite a 421 KlickyMart signed as facilitator before the store claimed its listing. Shown as history; not store-confirmed and no scoring weight." };
     if (per.length) out.avg_rating_5 = Math.round((per.reduce((a, r) => a + (r.rating * 5) / r.rating_max, 0) / per.length) * 10) / 10;
     for (const r of per) out.attempts[r.attempt] = (out.attempts[r.attempt] ?? 0) + 1;
     const pays = new Map<string, { agents: Set<string>; paid: Set<string>; verified: Set<string> }>();

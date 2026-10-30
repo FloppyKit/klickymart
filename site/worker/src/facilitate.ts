@@ -100,3 +100,24 @@ export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILI
   return { status: 200, body: { ok: true, verification: pr.verification, label, event: ev, facilitator_npub: FACILITATOR_NPUB, published: false, note: FACILITATE_NOTE,
     next: "Publish this 421 to your relays yourself, then publish your 422 with [\"e\", <this id>, \"\", \"fulfillment\"] (+ your preimage/zap proof tag)." } };
 }
+
+export const HISTORY_STATUS = "facilitated-history";
+/** After a store claims its listing, facilitated 421s (signed by our facilitator key) are history only: notes and reviews that
+ * cite one keep it visible but get proof_status "facilitated-history" (no proof weight, never store-confirmed, not a
+ * verified payment). Idempotent; call after a claim and after storing notes/reviews for a claimed domain. */
+export async function markFacilitatedHistory(db: D1Database, d: string): Promise<number> {
+  try {
+    const claim = await db.prepare("SELECT MIN(checked_at) AS t FROM claims WHERE d = ?").bind(d).first<{ t: number | null }>();
+    if (claim?.t == null) return 0;
+    const { results } = await db.prepare("SELECT id FROM nostr_events WHERE kind = ? AND pubkey = ? AND d = ?").bind(NOSTR_KIND_FULFILLMENT, FACILITATOR_PUBKEY, d).all<{ id: string }>();
+    let n = 0;
+    for (const { id } of results ?? []) {
+      const r = await db.batch([
+        db.prepare("UPDATE reviews SET proof_status = ? WHERE d = ? AND fulfillment = ? AND IFNULL(proof_status,'') != ?").bind(HISTORY_STATUS, d, id, HISTORY_STATUS),
+        db.prepare("UPDATE experiences SET proof_status = ? WHERE d = ? AND instr(raw_json, ?) > 0 AND IFNULL(proof_status,'') != ?").bind(HISTORY_STATUS, d, id, HISTORY_STATUS),
+      ]);
+      n += r.reduce((a, x) => a + (x.meta?.changes ?? 0), 0);
+    }
+    return n;
+  } catch { return 0; }
+}

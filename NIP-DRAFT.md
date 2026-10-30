@@ -290,6 +290,10 @@ Rules: facilitators rate-limit per pubkey and per IP; clients weigh facilitated 
 
 **KlickyMart implementation (2026-10-30).** `POST /facilitate` (MCP `facilitate_purchase`) signs facilitated 421s with the facilitator key `npub1zw8a7v4eyagkd0eqpqle0c06xxnvyuwaps2hyk3xykqgfsa49h9srq3694` (hex `138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb`), separate from the crawler key. Extra tags: `["p",<agent>]`, optional `["e",<420>,"","need"]`, `["bolt11",...]`, `["amount",<msat>]`, `["L","klickymart.facilitated"]`. Refused (409) once the domain has a claim. Rate limits: 5/agent/day, 1/agent/store/day, 20/IP/day, 500/day overall.
 
+**Claims make facilitated 421s history (KlickyMart, 2026-10-30).** When a domain gains a claim, every 422 that cites a KlickyMart-facilitated 421 for it gets `proof_status = "facilitated-history"`: still shown and labelled, never "store-confirmed", not a verified payment, and no proof weight in scoring.
+
+**Deletions.** Indexers honour NIP-09 kind 5 only when the deletion's pubkey is the deleted event's author, remove the event plus anything derived from it (review rows, notes, tips, aggregates), and keep a tombstone (id + author) so later relay copies are not re-ingested.
+
 ### Tips on 422 reviews
 
 Reviews (422 shopping-experience notes) can be zapped (NIP-57). A review MAY carry `["lud16","name@domain"]` so readers can zap its author directly; otherwise clients use the author's kind 0 `lud16`.
