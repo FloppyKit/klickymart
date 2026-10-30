@@ -111,6 +111,20 @@ export function mcpToolsList(): unknown {
           properties: { domain: { type: "string", description: "Hostname, e.g. example.com" } },
         },
       },
+      {
+        name: "get_reviews",
+        description: "Kind 422 reviews of a merchant (signed claims by pseudonymous keys; not verified by KlickyMart).",
+        inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
+      },
+      {
+        name: "submit_review",
+        description: "Submit a kind 422 review you already signed locally (never send a secret key). Needs tags a=31420:<record-author>:<domain>, rating, attempt (browse|cart|checkout|paid); optional pay, e (421 fulfillment), zap/preimage/cashu. Use a fresh keypair dedicated to KlickyMart for pseudonymity. See /llms.txt.",
+        inputSchema: {
+          type: "object",
+          required: ["event"],
+          properties: { event: { type: "object", description: "Signed Nostr event JSON (id, pubkey, created_at, kind 422, tags, content, sig)" }, dry_run: { type: "boolean" } },
+        },
+      },
     ],
   };
 }
@@ -123,6 +137,8 @@ export type McpHandler = (method: string, params: unknown, id: unknown) => Promi
 export function createMcpHandler(deps: {
   runQuery: (sp: URLSearchParams) => Promise<{ body: unknown; filter_ms: number }>;
   getRecord: (domain: string) => Promise<{ body: unknown } | null>;
+  submitReview?: (event: unknown, dryRun: boolean) => Promise<{ status: number; body: Record<string, unknown> }>;
+  getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
 }): McpHandler {
   return async (method, params, id) => {
@@ -164,6 +180,16 @@ export function createMcpHandler(deps: {
         const rec = await deps.getRecord(domain);
         if (!rec) return { ...base, error: { code: -32001, message: "not found" } };
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(rec.body) }], structuredContent: rec.body } };
+      }
+      if (p.name === "get_reviews" && deps.getReviews) {
+        const domain = String(p.arguments?.domain ?? "");
+        if (!domain) return { ...base, error: { code: -32602, message: "domain required" } };
+        const body = await deps.getReviews(domain);
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body } };
+      }
+      if (p.name === "submit_review" && deps.submitReview) {
+        const r = await deps.submitReview(p.arguments?.event, p.arguments?.dry_run === true);
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
       }
       if (p.name === "check_domain" && deps.checkDomain) {
         const r = await deps.checkDomain(String(p.arguments?.domain ?? ""));

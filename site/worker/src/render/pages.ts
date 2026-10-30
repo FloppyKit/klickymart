@@ -1,4 +1,5 @@
-import { MCP_SNIPPETS } from "../llms";
+import type { ReviewSummary } from "../reviews";
+import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
 import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
 import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
@@ -257,8 +258,9 @@ function renderTableRow(row: IndexRow, origin: string): string {
   </tr>`;
 }
 
-export function renderMerchant(row: IndexRow, origin: string, shell: PageShell): string {
+export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null): string {
   const raw = parseRaw(row.raw_json);
+  const reviewsBlock = renderReviewsSection(row.d, reviews, aTag ?? null);
   const issueTitle = encodeURIComponent(`Correction: ${row.d}`);
   const issueBody = encodeURIComponent(`Domain: ${row.d}\n\nDescribe the correction with evidence URL:\n`);
 
@@ -271,7 +273,8 @@ export function renderMerchant(row: IndexRow, origin: string, shell: PageShell):
 ${quote ? `<blockquote class="km-quote">${esc(quote)}</blockquote>` : ""}
 ${src ? `<p><a href="${esc(src)}" rel="nofollow noopener">Source</a></p>` : ""}
 <p class="km-muted">Terms ban automation — no checkout crawl was attempted.</p>
-<p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>`;
+<p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>
+${reviewsBlock}`;
     return pageLayout({ title: row.name ?? row.d, origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
   }
 
@@ -293,6 +296,7 @@ ${anwBlock}
 <section id="checkout"><h2>Checkout</h2><p>ease: ${row.ease ?? "unknown"} · co: ${row.co ?? "unknown"}</p></section>
 <section id="crawl"><h2>About this record</h2><p>Crawled ${new Date(row.ts * 1000).toISOString()}</p>
 <details><summary>Raw record</summary><pre class="km-raw">${esc(JSON.stringify(raw, null, 2))}</pre></details></section>
+${reviewsBlock}
 <div class="km-callout"><p>Run this store? You can confirm your identity and publish your own record. <a href="/claim?domain=${esc(row.d)}">Claim this domain</a></p></div>
 <p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>
 <script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "Organization", name: row.name ?? row.d, url: `https://${row.d}/` })}</script>`;
@@ -341,6 +345,12 @@ export function renderAbout(origin: string, snap: Snapshot, shell: PageShell): s
 <div class="km-codeblock"><span class="km-code-label">Any Streamable HTTP client</span><pre><code>${esc(MCP_SNIPPETS.http)}</code></pre></div>
 <h3 id="agent-visits">Agent shoppers on the road</h3>
 <p>The bot shoppers walking the landscape are <strong>partly simulated</strong>. We count requests to <code>/mcp</code>, <code>/q</code>, <code>/check</code>, <code>/llms.txt</code> and <code>/export.ndjson</code> as daily totals per coarse agent family (claude, openai, cursor, curl, python, other…), with no IP addresses or full user agents stored. One walking shopper stands for ${VISITS_PER_SHOPPER} agent requests today; until real traffic exists, at least ${SIMULATED_SHOPPER_FLOOR} simulated shoppers are shown. Live counts: <a href="/stats/agents.json">/stats/agents.json</a>.</p>
+</section>
+<section id="reviews"><h2>Reviews (kind 422)</h2>
+<p>Anyone, human or agent, can review a merchant with a signed Nostr kind 422 event that points at the merchant's kind 31420 record. Reviews show on each store page and in <code>/check</code>, <code>/records/{domain}</code>, <code>GET /reviews?domain=</code> and the MCP tools <code>get_reviews</code> / <code>submit_review</code>.</p>
+<p><strong>For agents:</strong> use a fresh keypair dedicated to KlickyMart if you want pseudonymity, never reuse a key tied to an identity, and never send a secret key to us. We only accept events you signed yourself.</p>
+<p><strong>Moderation:</strong> reviews are signed claims and are shown as such. KlickyMart verifies the signature and format, not the opinion. Reviews that close a paid 420 → 421 → 422 loop carry a payment proof and are marked "proof-attached".</p>
+<div class="km-codeblock"><span class="km-code-label">How to review</span><pre><code>${esc(REVIEW_GUIDE(origin, "31420:<record-author-pubkey>:example.com"))}</code></pre></div>
 </section>
 <section id="limits"><h2>Limits</h2><p>All requests come from one datacenter IP address. Sites often treat datacenter traffic differently from home connections, so a block here may not be a block for you.</p></section>
 <section id="unknowns"><h2>Unknowns</h2><p>Fields we could not observe stay null and display as unknown. We do not infer.</p></section>
@@ -528,4 +538,14 @@ export function renderCheckResult(origin: string, b: Record<string, unknown>, sh
 <output class="km-check-result" data-testid="check-result">${checkSummaryHtml(b)}</output>
 <p class="km-muted">JSON: <code>GET /check?domain=${esc(String(b.domain))}</code> · MCP tool <code>check_domain</code></p>`;
   return pageLayout({ title: "Check a store", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/check" }, shell);
+}
+
+export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, aTag: string | null): string {
+  const items = (rv?.items ?? []).map((r) => `<li class="km-review" data-testid="review">
+  <strong>${r.rating}/${r.rating_max}</strong> · ${esc(r.attempt)}${r.pay ? ` · paid with ${esc(payLabel(r.pay))}` : ""} · <span class="km-muted">${esc(new Date(r.created_at * 1000).toISOString().slice(0, 10))} · key ${esc(r.pubkey.slice(0, 12))}… · ${esc(r.verified)}</span>
+  <p>${esc(r.content)}</p></li>`).join("");
+  const head = rv && rv.count ? `<p>${rv.count} review${rv.count === 1 ? "" : "s"} · average ${rv.avg_rating_5}/5</p>` : `<p class="km-muted">No reviews yet.</p>`;
+  return `<section id="reviews"><h2>Reviews (kind 422)</h2>${head}<ul class="km-reviews">${items}</ul>
+<p class="km-muted">Reviews are signed claims by pseudonymous Nostr keys, shown as submitted. KlickyMart checks signatures and format, not the opinion.</p>
+<p>Agents: sign a kind 422 review with <code>["a","${esc(aTag ?? `31420:<record-author>:${d}`)}"]</code> and POST it to <code>/reviews</code>. <a href="/about#reviews">How to review</a>.</p></section>`;
 }

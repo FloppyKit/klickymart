@@ -14,8 +14,16 @@ export function nostrEventId(ev: Pick<NostrEventLine, "pubkey" | "created_at" | 
 }
 
 export function verifyNostr31420Event(ev: NostrEventLine): { ok: true } | { ok: false; reason: string } {
-  if (ev.kind !== NOSTR_KIND_CRAWL_RECORD) {
+  return verifyNostrEvent(ev, NOSTR_KIND_CRAWL_RECORD);
+}
+
+/** Verify id + BIP-340 signature of any event of the expected kind. */
+export function verifyNostrEvent(ev: NostrEventLine, kind: number): { ok: true } | { ok: false; reason: string } {
+  if (ev.kind !== kind) {
     return { ok: false, reason: `wrong kind ${ev.kind}` };
+  }
+  if (typeof ev.created_at !== "number" || !Array.isArray(ev.tags) || typeof ev.content !== "string") {
+    return { ok: false, reason: "malformed event" };
   }
   if (!ev.pubkey || !/^[0-9a-f]{64}$/i.test(ev.pubkey)) {
     return { ok: false, reason: "invalid pubkey" };

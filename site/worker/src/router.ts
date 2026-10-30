@@ -11,6 +11,9 @@ import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilit
 import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
+import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
+import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
+import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
 import { agentStats, recordAgentVisit, visitsToday } from "./agent-visits";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
@@ -173,6 +176,22 @@ function err400(param: string, message: string): Response {
   return Response.json({ error: { code: "bad_param", message, param } }, { status: 400 });
 }
 
+async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean): Promise<{ status: number; body: Record<string, unknown> }> {
+  const known = new Set(snap.rows.map((r) => r.d));
+  const p = parseReviewEvent(body, (d) => known.has(d));
+  if (!p.ok) return { status: 400, body: { ok: false, error: { code: p.code, message: p.message } } };
+  if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
+  try {
+    const rl = await rateLimitCheck(env.DB, p.value);
+    if (rl) return { status: 429, body: { ok: false, error: rl } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false } };
+    const st = await storeReview(env.DB, p.value, body);
+    return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews` } };
+  } catch {
+    return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
+  }
+}
+
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const origin = env.SITE_ORIGIN || `${url.protocol}//${url.host}`;
@@ -191,9 +210,33 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     shell.agentVisitsToday = await visitsToday(env.DB);
   }
 
+  const crawlerHex = crawlerPubkeyHexFromSnapshot(snap, env.CRAWLER_PUBKEY_HEX);
+  const aTagFor = (d: string) => (crawlerHex ? `${K31420}:${crawlerHex}:${d}` : null);
+
+  if (path === "/reviews" && request.method === "POST") {
+    const text = await request.text();
+    if (text.length > REVIEW_LIMITS.maxBytes) return Response.json({ ok: false, error: { code: "too_large", message: "event too large" } }, { status: 413 });
+    let ev: unknown;
+    try { ev = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON" } }, { status: 400 }); }
+    const dry = url.searchParams.get("dry_run") === "1";
+    const r = await submitReview(env, snap, ev, dry);
+    return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/reviews" && request.method === "GET") {
+    const d = (url.searchParams.get("domain") ?? "").toLowerCase();
+    if (!d) return err400("domain", "domain required");
+    return Response.json({ ...licenseMetaBlock(), domain: d, a: aTagFor(d), reviews: await getReviews(env.DB, d) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=30" } });
+  }
+
   if (path === "/check" && request.method === "GET") {
-    const res = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
-    if (!res.ok) return err400("domain", res.message);
+    const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
+    if (!res0.ok) return err400("domain", res0.message);
+    const res = res0;
+    if (res.body.verdict !== "not-in-index") {
+      const rv = await getReviews(env.DB, String(res.body.domain), 0);
+      res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
+    }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderCheckResult(origin, res.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
@@ -266,7 +309,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         ...licenseMetaBlock(),
         record: raw,
         derived: rowToCompact(row, origin),
-        nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null },
+        nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null, a: aTagFor(domain) },
+        reviews: await getReviews(env.DB, domain),
       },
       { headers: apiHeaders(snap.version, 0) },
     );
@@ -277,7 +321,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const row = snap.rows.find((r) => r.d === domain);
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
-      return new Response(renderMerchant(row, origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -334,7 +378,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === "/llms.txt") {
     const relays = (env.RELAY_URLS ?? "").replace(/[\[\]"]/g, "").split(",").map((x) => x.trim()).filter(Boolean);
-    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays, aTagFor("example.com") ?? undefined), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/llms-full.txt") {
@@ -352,7 +396,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -387,6 +431,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
       checkDomain: async (domain) => checkDomain(snap, domain, origin),
+      submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
+      getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()) }),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());
         if (!row) return null;

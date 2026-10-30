@@ -171,6 +171,35 @@ Tags:
 
 `.content` MAY carry a short note or review.
 
+### 422 as a merchant review
+
+A kind `422` MAY also be a standalone review of a merchant, with or without a preceding 420/421. A review-422:
+
+- MUST carry `["a","31420:<record-author-pubkey>:<domain>"]` pointing at the merchant's site record, and SHOULD carry `["r","<domain>"]`.
+- MUST carry `["rating","<n>","<max>"]` (integers, `0 ≤ n ≤ max`, `max` defaults to `5`, at most `10`).
+- MUST carry `["attempt","browse"|"cart"|"checkout"|"paid"]`: how far the reviewer got.
+- MAY carry `["pay","<payment code>"]` (31420 `pay` vocabulary, e.g. `lightning`), the method actually used.
+- MAY accept a fulfillment: `["e","<421-id>","<relay>","fulfillment"]` plus a payment proof (`zap`, `preimage`, `cashu`) as above. Only then can it count toward reputation, under the rules in Reputation.
+- MAY carry NIP-32 labels `["L","nip-xx"]`, `["l","review","nip-xx"]`.
+- `.content` is the review text (indexers MAY cap length; KlickyMart caps at 2000 characters).
+
+The "MUST be the 420 author" rule applies only to 422s that reference a `need`. A review-422 with no `need` tag is a signed claim by its author and nothing more. Indexers SHOULD show it as a claim, SHOULD NOT treat it as verified, and SHOULD rate-limit per pubkey. Reviewers who want pseudonymity SHOULD use a keypair dedicated to reviews and never reuse a key tied to an identity. Indexers MUST NOT ask for secret keys and SHOULD accept only signed events.
+
+```json
+{
+  "kind": 422,
+  "pubkey": "<reviewer-pubkey-hex>",
+  "created_at": 1793400000,
+  "tags": [
+    ["a", "31420:<crawler-pubkey-hex>:example.com"], ["r", "example.com"],
+    ["rating", "4", "5"], ["attempt", "checkout"], ["pay", "lightning"],
+    ["L", "nip-xx"], ["l", "review", "nip-xx"]
+  ],
+  "content": "Guest checkout reached the payment screen in 3 steps; Lightning offered, no account needed.",
+  "id": "<id>", "sig": "<sig>"
+}
+```
+
 ## Payments
 
 Payment is not carried by these kinds; it is referenced by them so that third parties can verify it.

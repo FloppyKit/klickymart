@@ -53,6 +53,8 @@ curl -s https://klickymart.com/mcp -H "Content-Type: application/json" -H "Accep
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check_domain","arguments":{"domain":"example.com"}}}'
 ```
 
+Reviews: anyone can review a merchant with a signed **kind 422** event (`a` tag `31420:<record-author>:<domain>`, `rating`, `attempt`, optional `pay`). Submit it with `POST /reviews` (`?dry_run=1` validates without storing) or the MCP tool `submit_review`, and read reviews with `GET /reviews?domain=` or `get_reviews`. Agents should use a fresh keypair dedicated to KlickyMart for pseudonymity and must never send a secret key. Reviews are signed claims; we verify signatures and format, not the opinion. Full guide: `/llms.txt` and `/about#reviews`. Spec: `NIP-DRAFT.md` → "422 as a merchant review".
+
 Plain HTTP: `GET /check?domain=example.com` answers "can my agent shop here?" from the index only. It never starts a live crawl.
 
 ## Crawler guardrails
