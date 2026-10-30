@@ -10,7 +10,16 @@ const strip = (o: unknown): unknown => {
   }
   return o;
 };
-export async function liveCatalogSearch(query: string, zip: string | null, origin: string, fetcher: typeof fetch = fetch) {
+const hostOf = (u: unknown) => { try { return new URL(String(u)).hostname.replace(/^www\./, ""); } catch { return ""; } };
+/** Keep only products sold by `domain` (any variant URL on that host or a subdomain). */
+export function filterByDomain(sc: unknown, domain: string): { sc: unknown; dropped: number } {
+  const d = domain.toLowerCase().replace(/^www\./, "");
+  const o = sc as { products?: { variants?: { url?: string }[] }[] } | null;
+  if (!o || !Array.isArray(o.products)) return { sc, dropped: 0 };
+  const keep = o.products.filter((p) => (p.variants ?? []).some((v) => { const h = hostOf(v.url); return h === d || h.endsWith("." + d); }));
+  return { sc: { ...o, products: keep }, dropped: o.products.length - keep.length };
+}
+export async function liveCatalogSearch(query: string, zip: string | null, origin: string, fetcher: typeof fetch = fetch, domain?: string) {
   const body = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search_catalog", arguments: {
     meta: { "ucp-agent": { profile: `${origin}/.well-known/ucp` } },
     catalog: { query, context: { address_country: "US", ...(zip ? { postal_code: zip } : {}), currency: "USD" }, filters: { available: true } } } } };
@@ -20,7 +29,9 @@ export async function liveCatalogSearch(query: string, zip: string | null, origi
     if (j.error) return { ok: false, source: "Shopify Catalog (live)", error: j.error.message, detail: j.error.data ?? null };
     let sc = j.result?.structuredContent;
     if (!sc && j.result?.content?.[0]?.text) { try { sc = JSON.parse(j.result.content[0].text); } catch { sc = j.result.content[0].text; } }
-    return { ok: true, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart; prices in minor units)", results: strip(sc) };
+    let note: string | undefined;
+    if (domain) { const f = filterByDomain(sc, domain); sc = f.sc; note = `domain=${domain}: kept only products whose URL is on that store; dropped ${f.dropped} from other stores`; }
+    return { ok: true, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart; prices in minor units)", ...(note ? { domain_filter: note } : {}), results: strip(sc) };
   } catch (e) {
     return { ok: false, source: "Shopify Catalog (live)", error: String(e).slice(0, 120) };
   }
