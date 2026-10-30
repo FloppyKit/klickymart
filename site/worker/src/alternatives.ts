@@ -32,9 +32,9 @@ export function subsFor(raw: Record<string, unknown>): string[] {
 }
 
 export const COARSE_CATEGORIES = ["electronics", "gift-cards", "groceries", "apparel", "hardware", "books", "travel", "crypto-hardware", "other"] as const;
-const PAY_FILTER: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"] };
+const PAY_FILTER: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"] };
 const SYNONYMS: [RegExp, string][] = [
-  [/headphone|earbud|laptop|phone|tv|camera|electronic|speaker|monitor/i, "electronics"],
+  [/noise.?cancel|\banc\b|over.?ear|headphone|earbud|laptop|phone|tv|camera|electronic|speaker|monitor/i, "electronics"],
   [/gift ?card|voucher|top.?up|refill/i, "gift-cards"],
   [/grocer|food|snack/i, "groceries"],
   [/shirt|shoe|cloth|apparel|jacket|hoodie|fashion/i, "apparel"],
@@ -80,7 +80,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     if (!cats.length) return { ok: false as const, message: `${from} is not in the index; pass category= too` };
   }
   if (!cats.length) return { ok: false as const, message: "pass domain= or category=" };
-  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: "pay must be lightning, btc or cashu" };
+  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: "pay must be lightning, btc (on-chain only), onchain, bitcoin (on-chain or Lightning) or cashu" };
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
   const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number }[] = [];
   const turnedAway: { d: string; name: string | null; status: string; reason: string | null; record: string }[] = [];
