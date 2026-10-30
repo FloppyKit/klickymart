@@ -365,3 +365,31 @@ describe("queue status (box crawler)", () => {
     expect(q.items.some((x) => x.id === id)).toBe(true);
   });
 });
+
+describe("empty queue export (regression: 503 empty_response on queue.ndjson)", () => {
+  it("returns 200 with an empty NDJSON body and the NDJSON content-type, with and without ?state=", async () => {
+    for (const q of ["?state=pending", "", "?state=crawled", "?state=error"]) {
+      await env.DB.prepare("DELETE FROM crawl_queue WHERE state = ?").bind(q ? q.split("=")[1] : "pending").run();
+      const r = await SELF.fetch(`https://km.test/submit/queue.ndjson${q}`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get("content-type")).toMatch(/application\/x-ndjson/);
+      expect(r.headers.get("X-Count")).toBe("0");
+      expect(await r.text()).toBe("");
+    }
+  });
+  it("queue.json is 200 with count 0 and items [] for an empty queue, with and without ?state=", async () => {
+    for (const q of ["?state=pending", ""]) {
+      await env.DB.prepare("DELETE FROM crawl_queue WHERE state = 'pending'").run();
+      const r = await SELF.fetch(`https://km.test/submit/queue.json${q}`);
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ count: 0, items: [], state: "pending" });
+    }
+  });
+  it("a non-empty NDJSON queue still has no opt-out header, and other empty bodies are still guarded", async () => {
+    await submitStore({ domain: uniq("nq") }, ctx({ ip: "198.51.100.99" }));
+    const r = await SELF.fetch("https://km.test/submit/queue.ndjson?state=pending");
+    expect(r.headers.get("X-KM-Empty-OK")).toBeNull();
+    expect((await r.text()).trim().split("\n").length).toBeGreaterThan(0);
+    expect((await SELF.fetch("https://km.test/submit/queue.ndjson?state=bogus")).status).toBe(400);
+  });
+});

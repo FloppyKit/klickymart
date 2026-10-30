@@ -71,6 +71,7 @@ interface Env {
 /** Guarantee: no API route answers 200 with an empty body. JSON/text bodies that come back empty become an explicit JSON error. */
 export async function nonEmpty(res: Response, req: Request): Promise<Response> {
   if (req.method === "HEAD" || [101, 202, 204, 301, 302, 303, 304, 307, 308].includes(res.status)) return res;
+  if (res.headers.get("X-KM-Empty-OK") === "1") return res; // a deliberately empty list (e.g. an empty NDJSON queue) is a valid answer
   const ct = res.headers.get("content-type") ?? "";
   if (!/json|text\/plain|ndjson/.test(ct)) return res;
   const t = await res.clone().text();

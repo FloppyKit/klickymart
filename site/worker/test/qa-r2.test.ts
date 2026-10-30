@@ -88,6 +88,7 @@ describe("never an empty body", () => {
     for (const p of paths) {
       const r = await SELF.fetch(`https://example.com${p}${p === "/landed" ? "?zip=66061&q=x" : ""}`);
       if ([202, 204, 301, 302, 304].includes(r.status)) continue;
+      if (r.headers.get("X-KM-Empty-OK") === "1" && /ndjson/.test(r.headers.get("content-type") ?? "")) continue; // deliberately empty NDJSON list (e.g. empty crawl queue)
       expect((await r.text()).trim().length, p).toBeGreaterThan(0);
     }
   }, 30000);

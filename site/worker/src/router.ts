@@ -359,7 +359,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const st = url.searchParams.get("state") ?? "pending";
     if (!["pending", "review", "crawled", "refused", "error"].includes(st)) return err400("state", "state is pending | review | crawled | refused | error");
     const items = await exportQueue(env.DB, { state: st, since: Number(url.searchParams.get("since") ?? 0) || 0, limit: Number(url.searchParams.get("limit") ?? 500) || 500 });
-    if (path.endsWith(".ndjson")) return new Response(items.map((x) => JSON.stringify(x)).join("\n") + (items.length ? "\n" : ""), { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    if (path.endsWith(".ndjson")) return new Response(items.map((x) => JSON.stringify(x)).join("\n") + (items.length ? "\n" : ""), { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*", "X-Count": String(items.length), ...(items.length ? {} : { "X-KM-Empty-OK": "1" }) } });
     return Response.json({ ...licenseMetaBlock(), count: items.length, state: st, items, note: "Community-submitted domains waiting for the gated crawl (run on the KlickyMart box via crawler/gate.py, never from the Worker). Submitters only gave a domain, a category hint and a note." }, { headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
   if (path === "/submit" && request.method === "GET") {
