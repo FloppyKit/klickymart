@@ -3,7 +3,7 @@ import type { ReviewSummary } from "../reviews";
 import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
 import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
-import { renderAgentPolicy, renderCheckoutDetail, renderWhy } from "../explain";
+import { renderAgentPolicy, renderCheckoutDetail, renderV5, renderWhy } from "../explain";
 import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
 import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact, uniquePayLabels } from "../records-api";
@@ -307,6 +307,7 @@ ${renderAgentPolicy(raw)}
 <section id="terms"><h2>Their terms</h2><p>${esc(String(row.tos ?? "unknown"))}</p>${typeof raw.tos_url === "string" ? `<blockquote class="km-quote">${esc(String(raw.tos_q ?? ""))}</blockquote><p><a href="${esc(String(raw.tos_url))}" rel="nofollow noopener">Source</a></p>` : ""}</section>
 <section id="pay"><h2>How you can pay</h2>${renderPayTable(raw)}</section>
 ${renderCheckoutDetail(row, raw)}
+${renderV5(raw)}
 <section id="crawl"><h2>About this record</h2><p>Crawled ${new Date(row.ts * 1000).toISOString()}</p>
 <details><summary>Raw record</summary><pre class="km-raw">${esc(JSON.stringify(raw, null, 2))}</pre></details></section>
 ${reviewsBlock}
@@ -377,7 +378,14 @@ export function renderAbout(origin: string, snap: Snapshot, shell: PageShell): s
 <section id="ease"><h2>Checkout ease</h2><p>Derived: when status is crawled, ease equals co when set; else 0 when ag is 0; else null.</p></section>
 <section id="license"><h2>Licenses</h2>
 <p>Software in the <a href="https://github.com/FloppyKit/klickymart">GitHub repository</a> is under the <a href="https://opensource.org/licenses/MIT">MIT License</a> (<code>LICENSE</code>).</p>
-<p>Crawl records (JSON, API, and NDJSON export) are dedicated to the public domain under <a href="/DATA-LICENSE">CC0 1.0 Universal</a> (SPDX <code>CC0-1.0</code>).</p></section>`;
+<p>Crawl records (JSON, API, and NDJSON export) are dedicated to the public domain under <a href="/DATA-LICENSE">CC0 1.0 Universal</a> (SPDX <code>CC0-1.0</code>).</p></section>
+<section id="credits" data-testid="credits"><h2>Credits and third-party data</h2>
+<ul>
+<li><strong>BTC Map.</strong> Some stores were discovered from <a href="https://btcmap.org">BTC Map</a> (<code>seed_source: btcmap:place/&lt;id&gt;</code>). BTC Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, available under the <a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL 1.0)</a>. Records seeded this way carry <code>seed_license: ODbL-1.0</code> in the export and stay subject to ODbL attribution and share-alike terms.</li>
+<li><strong>Shopify Catalog.</strong> <code>/offers?live=1</code> adds results from Shopify's Global Catalog (UCP), fetched live with our <a href="/.well-known/ucp">agent profile</a>, never cached or stored, images omitted, per Shopify's catalog usage guidelines.</li>
+<li><strong>Tax estimates.</strong> ZIP tax estimates use Tax Foundation, <a href="https://taxfoundation.org/data/all/state/2026-sales-tax-rates-midyear/">2026 Sales Tax Rates, Midyear Update</a> (rates as of July 1, 2026), labeled <code>estimated</code>.</li>
+<li><strong>Domain age.</strong> Registration dates come from public RDAP (via <a href="https://rdap.org">rdap.org</a> and each registry).</li>
+</ul></section>`;
   return pageLayout({ title: "About", origin, version: snap.version, tsMin: snap.meta.ts_min, tsMax: snap.meta.ts_max, body, path: "/about" }, shell);
 }
 

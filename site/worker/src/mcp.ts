@@ -120,8 +120,28 @@ export function mcpToolsList(): unknown {
         inputSchema: {
           type: "object",
           required: ["domain"],
-          properties: { domain: { type: "string", description: "Hostname, e.g. example.com" } },
+          properties: { domain: { type: "string", description: "Hostname, e.g. example.com" }, zip: { type: "string", description: "5-digit US ZIP: adds landed-cost estimate (tax estimate by state, shipping signals)" } },
         },
+      },
+      {
+        name: "find_offers",
+        description: "Product-level offers KlickyBot observed on store pages (schema.org JSON-LD or Shopify JSON): price, currency, stock, URL, checked_at. Match by gtin (UPC/EAN), mpn, or name words (q). Optional zip adds a landed-cost estimate; live=true also returns a live (uncached) Shopify Catalog search for q.",
+        inputSchema: { type: "object", properties: { gtin: { type: "string" }, mpn: { type: "string" }, q: { type: "string" }, domain: { type: "string" }, zip: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 100 } } },
+      },
+      {
+        name: "get_checkout_map",
+        description: "Checkout steps our probe reached for a store (stopping at the payment screen, never submitting), the first blocker (bot-wall, http-refusal, network-error, no-product-link, login-wall, robots, none) and landed-cost signals.",
+        inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
+      },
+      {
+        name: "recheck_domain",
+        description: "Re-read robots.txt and the home-page status for an indexed store now. Max 1 per store per 10 minutes (else cached result + next_allowed_at), 60 per hour overall.",
+        inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
+      },
+      {
+        name: "watch_item",
+        description: "DRAFT (GO D8, not served yet): returns an unsigned kind 420 watch template for price/stock changes. KlickyMart does not act on watches yet and never signs for you.",
+        inputSchema: { type: "object", properties: { gtin: { type: "string" }, domain: { type: "string" }, max_price: { type: "number" }, in_stock: { type: "boolean" }, note: { type: "string" } } },
       },
       {
         name: "find_alternatives",
@@ -132,6 +152,7 @@ export function mcpToolsList(): unknown {
             domain: { type: "string" }, category: { type: "string", description: "coarse category or product word (headphones, laptop, gift card...)" },
             sub: { type: "string", description: "product family: audio, computers, phones, tv-video, cameras, gaming, wearables, smart-home, appliances, networking, accessories, gift-cards" },
             pay: { type: "string", enum: ["lightning", "btc", "cashu"] }, guest: { type: "boolean", description: "exclude stores known to require an account" },
+            zip: { type: "string", description: "5-digit US ZIP: adds landed cost per store" }, taxpre: { type: "boolean", description: "with zip: only stores observed to show shipping and tax before payment" },
             limit: { type: "integer", maximum: 50 },
           },
         },
@@ -154,6 +175,17 @@ export function mcpToolsList(): unknown {
   };
 }
 
+/** D8 draft: an UNSIGNED kind 420 "watch" need template. KlickyMart never signs for the caller and does not yet act on watches. */
+export function watchTemplate(a: Record<string, unknown>) {
+  const tags: string[][] = [["t", "watch"]];
+  if (a.gtin) tags.push(["l", `gtin:${String(a.gtin)}`, "nip-xx"]);
+  if (a.domain) tags.push(["r", String(a.domain)]);
+  if (a.max_price) tags.push(["cond", "price<", String(a.max_price), "USD"]);
+  if (a.in_stock) tags.push(["cond", "stock", "in"]);
+  tags.push(["expiration", String(Math.floor(Date.now() / 1000) + 30 * 86400)]);
+  return { status: "draft: watches are not served yet (GO D8). Today 'watch' on KlickyMart means KlickyMart watching relays for reviews.", unsigned_event: { kind: 420, content: String(a.note ?? ""), tags }, spec: "/llms.txt#watch" };
+}
+
 /** Versions whose basic tools/list + tools/call over plain JSON responses we serve. */
 export const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 
@@ -166,6 +198,10 @@ export function createMcpHandler(deps: {
   submitReview?: (event: unknown, dryRun: boolean) => Promise<{ status: number; body: Record<string, unknown> }>;
   getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
+  checkDomainZip?: (domain: string, zip: string | null) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
+  findOffers?: (args: Record<string, unknown>) => Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
+  getCheckoutMap?: (domain: string) => Promise<unknown>;
+  recheckDomain?: (domain: string) => Promise<unknown>;
 }): McpHandler {
   return async (method, params, id) => {
     const base = { jsonrpc: "2.0" as const, id };
@@ -223,8 +259,28 @@ export function createMcpHandler(deps: {
         const r = await deps.submitReview(p.arguments?.event, p.arguments?.dry_run === true);
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
       }
-      if (p.name === "check_domain" && deps.checkDomain) {
-        const r = await deps.checkDomain(String(p.arguments?.domain ?? ""));
+      if (p.name === "find_offers" && deps.findOffers) {
+        const r = await deps.findOffers(p.arguments ?? {});
+        if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
+        const items = (r.body as { items: { domain: string; name: string; price: number; currency: string; stock: string | null; url: string }[] }).items;
+        return { ...base, result: { content: [{ type: "text", text: items.map((i) => `${i.domain} ${i.currency} ${i.price} ${i.stock ?? "?"} ${i.name} ${i.url}`).join("\n") || "no offers observed" }], structuredContent: r.body } };
+      }
+      if (p.name === "get_checkout_map" && deps.getCheckoutMap) {
+        const b = await deps.getCheckoutMap(String(p.arguments?.domain ?? ""));
+        if (!b) return { ...base, error: { code: -32001, message: "not in index" } };
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(b) }], structuredContent: b } };
+      }
+      if (p.name === "recheck_domain" && deps.recheckDomain) {
+        const b = await deps.recheckDomain(String(p.arguments?.domain ?? ""));
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(b) }], structuredContent: b } };
+      }
+      if (p.name === "watch_item") {
+        const b = watchTemplate(p.arguments ?? {});
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(b) }], structuredContent: b } };
+      }
+      if (p.name === "check_domain" && (deps.checkDomainZip || deps.checkDomain)) {
+        const zip = p.arguments?.zip ? String(p.arguments.zip) : null;
+        const r = deps.checkDomainZip ? await deps.checkDomainZip(String(p.arguments?.domain ?? ""), zip) : await deps.checkDomain!(String(p.arguments?.domain ?? ""));
         if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
         const b = r.body as { domain: string; verdict: string };
         return { ...base, result: { content: [{ type: "text", text: `${b.domain}: ${b.verdict}\n${JSON.stringify(r.body)}` }], structuredContent: r.body } };

@@ -13,6 +13,10 @@ import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
+import { findOffers, parseOffers, type OfferQuery } from "./offers";
+import { landedFor, validZip } from "./landed";
+import { recheck } from "./recheck";
+import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, type Ev } from "./relay-ingest";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
@@ -247,9 +251,47 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true, limit: g("limit") ? Number(g("limit")) : undefined };
   };
 
+  const addLanded = (body: { items: Record<string, unknown>[] }, zip: string, taxpreOnly = false) => {
+    const byD = new Map(snap.rows.map((x) => [x.d, x]));
+    for (const it of body.items) { const row = byD.get(String(it.d)); if (row) it.landed = landedFor(parseRaw(row.raw_json), zip); }
+    if (taxpreOnly) body.items = body.items.filter((it) => (it.landed as { tax_shown_before_payment?: boolean | null } | undefined)?.tax_shown_before_payment === true);
+  };
+  const offersFor = async (q: OfferQuery, live: boolean) => {
+    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
+    const r = findOffers(parseOffers(EMBEDDED_OFFERS_NDJSON || ""), snap, origin, q);
+    if (r.ok && live && q.q) (r.body as Record<string, unknown>).live_shopify_catalog = await liveCatalogSearch(q.q, q.zip ?? null, origin);
+    return r;
+  };
+  const offerQuery = (g: (k: string) => string | null | undefined): OfferQuery | string => {
+    const zip = g("zip"); if (zip && !validZip(zip)) return "zip must be a 5-digit US ZIP code";
+    const mp = g("max_price");
+    return { gtin: g("gtin") || undefined, mpn: g("mpn") || undefined, q: g("q") || undefined, domain: g("domain") || undefined, zip: zip || null,
+      in_stock: g("in_stock") === "1" || g("in_stock") === "true", max_price: mp ? Number(mp) : undefined, limit: g("limit") ? Number(g("limit")) : undefined };
+  };
+
+  if (path === "/offers" && request.method === "GET") {
+    const q = offerQuery((k) => url.searchParams.get(k));
+    if (typeof q === "string") return err400("zip", q);
+    const r = await offersFor(q, url.searchParams.get("live") === "1");
+    if (!r.ok) return err400("q", r.message);
+    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: apiHeaders(snap.version, 0) });
+  }
+
+  if (path === "/recheck" && (request.method === "GET" || request.method === "POST")) {
+    const d = (url.searchParams.get("domain") ?? "").trim().toLowerCase().replace(/^www\./, "");
+    const row = snap.rows.find((x) => x.d === d || x.d === `www.${d}`);
+    if (!row) return err400("domain", "recheck only works for domains already in the index");
+    return Response.json(await recheck(env.DB, row.d, Math.floor(Date.now() / 1000)), { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
+  }
+
   if (path === "/alternatives" && request.method === "GET") {
     const r = findAlternatives(snap, origin, altParams(url.searchParams));
     if (!r.ok) return err400("domain", r.message);
+    const azip = url.searchParams.get("zip");
+    if (azip !== null) {
+      if (!validZip(azip)) return err400("zip", "zip must be a 5-digit US ZIP code");
+      addLanded(r.body as { items: Record<string, unknown>[] }, azip, url.searchParams.get("taxpre") === "1");
+    }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderAlternatives(origin, r.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
@@ -260,6 +302,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
     if (!res0.ok) return err400("domain", res0.message);
     const res = res0;
+    const zipQ = url.searchParams.get("zip");
+    if (zipQ !== null && !validZip(zipQ)) return err400("zip", "zip must be a 5-digit US ZIP code");
+    if (zipQ && res.body.verdict !== "not-in-index") {
+      const row = snap.rows.find((r) => r.d === res.body.domain);
+      if (row) res.body.landed = landedFor(parseRaw(row.raw_json), zipQ);
+    }
     if (res.body.verdict !== "not-in-index") {
       const rv = await getReviews(env.DB, String(res.body.domain), 0);
       if (res.body.verdict !== "reachable" || res.body.agent_ordering) {
@@ -439,7 +487,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "find_alternatives", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "find_alternatives", "find_offers", "get_checkout_map", "recheck_domain", "watch_item", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -447,6 +495,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json(body, { headers: apiHeaders(snap.version, 0) });
   }
 
+  if (path === "/.well-known/ucp" || path === "/ucp/agent-profile.json") {
+    // UCP platform (agent) profile for read-only catalog access. KlickyMart never creates carts or checkouts via UCP.
+    const v = "2026-08-25";
+    const cap = (n: string) => [{ version: v, spec: `https://ucp.dev/${v}/specification/shopping/catalog/`, schema: `https://ucp.dev/${v}/schemas/shopping/${n}.json` }];
+    return Response.json({ ucp: { version: v, services: {}, capabilities: { "dev.ucp.shopping.catalog.search": cap("catalog_search"), "dev.ucp.shopping.catalog.lookup": cap("catalog_lookup") }, payment_handlers: {} },
+      name: "KlickyMart (KlickyBot)", contact: "bot@klickymart.com", info: `${origin}/bot`, use: "read-only product lookup; results are not cached or stored" },
+      { headers: { "Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*" } });
+  }
   if (path === "/robots.txt") {
     return new Response(`# Agents: start at ${origin}/llms.txt (endpoints, MCP, record schema). About: ${origin}/about\nUser-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, { headers: { "Content-Type": "text/plain" } });
   }
@@ -474,7 +530,34 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
       checkDomain: async (domain) => checkDomain(snap, domain, origin),
-      findAlternatives: async (args) => findAlternatives(snap, origin, altParams(args)),
+      findAlternatives: async (args) => {
+        const r = findAlternatives(snap, origin, altParams(args));
+        const z = args.zip ? String(args.zip) : null;
+        if (r.ok && z && validZip(z)) addLanded(r.body as { items: Record<string, unknown>[] }, z, args.taxpre === true || args.taxpre === 1);
+        return r;
+      },
+      findOffers: async (args) => {
+        const q = offerQuery((k) => (args[k] === undefined || args[k] === null ? null : String(args[k])));
+        if (typeof q === "string") return { ok: false as const, message: q };
+        return offersFor(q, args.live === true);
+      },
+      getCheckoutMap: async (domain) => {
+        const row = snap.rows.find((r) => r.d === domain.toLowerCase() || r.d === `www.${domain.toLowerCase()}`);
+        if (!row) return null;
+        const raw = parseRaw(row.raw_json);
+        return { domain: row.d, checkout_depth: checkoutOf(row, raw), checkout_map: checkExtras(row, raw).checkout_map, landed_cost: checkExtras(row, raw).landed_cost };
+      },
+      recheckDomain: async (domain) => {
+        const d = domain.toLowerCase().replace(/^www\./, "");
+        const row = snap.rows.find((x) => x.d === d || x.d === `www.${d}`);
+        if (!row) return { error: "recheck only works for domains already in the index" };
+        return recheck(env.DB, row.d, Math.floor(Date.now() / 1000));
+      },
+      checkDomainZip: async (domain, zip) => {
+        const r = checkDomain(snap, domain, origin);
+        if (r.ok && zip && validZip(zip)) { const row = snap.rows.find((x) => x.d === r.body.domain); if (row) r.body.landed = landedFor(parseRaw(row.raw_json), zip); }
+        return r;
+      },
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex) }),
       getRecord: async (domain) => {

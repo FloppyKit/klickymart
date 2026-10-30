@@ -21,6 +21,7 @@ export function licenseResponseHeaders(): Record<string, string> {
   return {
     "X-KM-Code-License": LICENSE_CODE,
     "X-KM-Data-License": LICENSE_DATA,
+    "X-KM-Third-Party-Data": "records with seed_license=ODbL-1.0 were seeded from BTC Map, (c) OpenStreetMap contributors, ODbL 1.0 (https://opendatacommons.org/licenses/odbl/1-0/); see /about#credits",
     Link: '</openapi.json>; rel="describedby", </DATA-LICENSE>; rel="license"; type="text/plain"; title="Data license CC0-1.0"',
   };
 }
