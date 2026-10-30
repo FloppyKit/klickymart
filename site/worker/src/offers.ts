@@ -15,7 +15,7 @@ export function parseOffers(ndjson: string): Offer[] {
 import { queryTokens, offerTokens, coverage } from "./search-terms";
 const normGtin = (g: string) => g.replace(/\D/g, "").replace(/^0+/, "");
 
-export interface OfferQuery { gtin?: string; mpn?: string; q?: string; zip?: string | null; domain?: string; in_stock?: boolean; max_price?: number; limit?: number }
+export interface OfferQuery { gtin?: string; mpn?: string; q?: string; zip?: string | null; domain?: string; in_stock?: boolean; max_price?: number; limit?: number; condition?: string; type?: string; brand_strict?: boolean }
 export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: OfferQuery) {
   const limit = Math.min(Math.max(qy.limit ?? 20, 1), 100);
   const g = qy.gtin ? normGtin(qy.gtin) : null;
@@ -75,7 +75,7 @@ export function liveItems(products: LiveProduct[], snap: Snapshot, origin: strin
     if (qy.max_price !== undefined && (cur !== "USD" || price > qy.max_price)) { dropped++; continue; }
     const card = storeCard(snap, v.url ?? "", origin);
     out.push({
-      source: "shopify-catalog-live", title: p.title ?? null, variant: v.title ?? null, price, currency: cur, stock: avail === true ? "in" : avail === false ? "out" : null,
+      source: "shopify-catalog-live", title: p.title || v.title || null, name: p.title || v.title || null, variant: v.title ?? null, price, currency: cur, stock: avail === true ? "in" : avail === false ? "out" : null,
       url: v.url ?? null, domain: hostOf(v.url), checked_at: new Date().toISOString(), store: card,
       ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null) } : {}),
     });

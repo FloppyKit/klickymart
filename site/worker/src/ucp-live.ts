@@ -19,7 +19,8 @@ export function filterByDomain(sc: unknown, domain: string): { sc: unknown; drop
   const keep = o.products.filter((p) => (p.variants ?? []).some((v) => { const h = hostOf(v.url); return h === d || h.endsWith("." + d); }));
   return { sc: { ...o, products: keep }, dropped: o.products.length - keep.length };
 }
-export async function liveCatalogSearch(query: string, zip: string | null, origin: string, fetcher: typeof fetch = fetch, domain?: string) {
+export interface LiveOpts { maxMinor?: number; condition?: string[]; cursor?: string; pageSize?: number }
+export async function liveCatalogSearch(query: string, zip: string | null, origin: string, fetcher: typeof fetch = fetch, domain?: string, o: LiveOpts = {}) {
   const body = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search_catalog", arguments: {
     meta: { "ucp-agent": { profile: `${origin}/.well-known/ucp` } },
     catalog: { query, context: { address_country: "US", ...(zip ? { postal_code: zip } : {}), currency: "USD" }, filters: { available: true } } } } };
@@ -31,7 +32,7 @@ export async function liveCatalogSearch(query: string, zip: string | null, origi
     if (!sc && j.result?.content?.[0]?.text) { try { sc = JSON.parse(j.result.content[0].text); } catch { sc = j.result.content[0].text; } }
     let note: string | undefined;
     if (domain) { const f = filterByDomain(sc, domain); sc = f.sc; note = `domain=${domain}: kept only products whose URL is on that store; dropped ${f.dropped} from other stores`; }
-    return { ok: true, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart; prices in minor units)", ...(note ? { domain_filter: note } : {}), results: strip(sc) };
+    return { ok: true, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart; prices in minor units)", ...(note ? { domain_filter: note } : {}), results: strip(sc), pagination: (sc as { pagination?: { has_next_page?: boolean; cursor?: string; total_count?: number } } | null)?.pagination ?? null };
   } catch (e) {
     return { ok: false, source: "Shopify Catalog (live)", error: String(e).slice(0, 120) };
   }
