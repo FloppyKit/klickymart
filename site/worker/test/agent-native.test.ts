@@ -42,16 +42,18 @@ describe("agent-native stores (2026-10-30)", () => {
   });
   it("rail_status=verified-402 lists only stores whose 402 we saw, with price_seen; claimed ones stay claimed", () => {
     const v = q("rail_status=verified-402&limit=500");
-    expect(v.total).toBe(6);
+    expect(v.total).toBe(7);
     for (const row of v.items) {
       const a = anJson(row.d)! as { label: string; probe_402: { result: string; http: number; price_seen: { amount: string; asset: string } } };
       expect(a.label).toBe("verified-402");
       expect(a.probe_402.http).toBe(402);
-      expect(a.probe_402.price_seen.amount).toMatch(/^\d+$/);
+      expect(String(a.probe_402.price_seen.amount)).toMatch(/^\d+(\.\d+)?$/);
     }
     expect(anOf("stableenrich.dev")?.an_rails_v.x402).toBe("no-402");
     expect(anOf("stableenrich.dev")?.label).toBe("claimed");
-    expect(anOf("satsdns.com")?.an_rails_v.l402).toBe("claimed");
+    expect(anOf("satsdns.com")?.an_402?.proto).toBe("l402");
+    expect(anOf("satsdns.com")?.an_rails_v.l402).toBe("verified-402");
+    expect(anOf("sats4ai.com")?.an_rails_v.l402).toBe("no-402");
   });
   it("an_cat filter accepts alt names (paid-api = l402 + x402) and rejects junk", () => {
     expect(q("an_cat=paid-api&limit=500").total).toBe(q("an_cat=l402&limit=500").total + q("an_cat=x402&limit=500").total);
