@@ -14,6 +14,7 @@ export type ArCode = (typeof AR_CODES)[number];
 
 export const CAT_CODES = [
   "gen", "elec", "groc", "appr", "home", "beau", "food", "trav", "tix", "auto", "pet", "toy", "book", "sw", "mkt", "oth",
+  "btcnative", "gift", "sport", "office", "craft", "jewel",
 ] as const;
 export type CatCode = (typeof CAT_CODES)[number];
 
