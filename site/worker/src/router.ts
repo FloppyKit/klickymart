@@ -13,7 +13,9 @@ import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
-import { findOffers, parseOffers, type OfferQuery } from "./offers";
+import { hostOf } from "./store-card";
+import { zipToState } from "./landed";
+import { liveItems, findOffers, parseOffers, type OfferQuery } from "./offers";
 import { landedFor, validZip } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
@@ -58,6 +60,15 @@ export interface Env {
   INGESTER?: DurableObjectNamespace;
 }
 
+/** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
+export class InputError extends Error {}
+export function mcpErrorFor(e: unknown, id: unknown) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const bad = e instanceof InputError || /^invalid |must be|required|unknown /i.test(msg);
+  return { jsonrpc: "2.0", id: id ?? null, error: bad
+    ? { code: -32602, message: msg, data: { retryable: false, hint: "fix the arguments; see /llms.txt or tools/list for accepted values" } }
+    : { code: -32603, message: "internal error: " + msg.slice(0, 200), data: { retryable: true, retry_after_s: 2 } } };
+}
 let cachedSnap: Snapshot | null = null;
 let metaCheckedAt = 0;
 let cachedMetaVersion = "";
@@ -273,7 +284,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const offersFor = async (q: OfferQuery, live: boolean) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
     const r = findOffers(parseOffers(EMBEDDED_OFFERS_NDJSON || ""), snap, origin, q);
-    if (r.ok && live && q.q) (r.body as Record<string, unknown>).live_shopify_catalog = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain);
+    if (r.ok && live && q.q) {
+      const lv = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain) as { ok: boolean; results?: { products?: unknown[] } } & Record<string, unknown>;
+      if (lv.ok) {
+        const li = liveItems((lv.results?.products ?? []) as Parameters<typeof liveItems>[0], snap, origin, q);
+        lv.items = li.items; lv.filters_applied_after_fetch = li.filters_applied_after_fetch; lv.dropped_by_filters = li.dropped_by_filters; if (li.note) lv.filter_note = li.note;
+        delete lv.results; // normalized items carry everything; raw catalog payload is not re-served
+      }
+      (r.body as Record<string, unknown>).live_shopify_catalog = lv;
+    }
     return r;
   };
   const offerQuery = (g: (k: string) => string | null | undefined): OfferQuery | string => {
@@ -282,6 +301,32 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return { gtin: g("gtin") || undefined, mpn: g("mpn") || undefined, q: g("q") || undefined, domain: g("domain") || undefined, zip: zip || null,
       in_stock: g("in_stock") === "1" || g("in_stock") === "true", max_price: mp ? Number(mp) : undefined, limit: g("limit") ? Number(g("limit")) : undefined };
   };
+
+  /** One call: a product's landed price at a ZIP across indexed offers (+ live Shopify Catalog with live=1), store facts on every row. */
+  const landedCall = async (g: (k: string) => string | null | undefined) => {
+    const zip = g("zip");
+    if (!zip || !validZip(zip)) return { ok: false as const, param: "zip", message: "zip=<5-digit US ZIP> is required" };
+    const url = g("url");
+    const q0 = offerQuery(g);
+    if (typeof q0 === "string") return { ok: false as const, param: "zip", message: q0 };
+    const q: OfferQuery = { ...q0, zip, ...(url && !q0.q && !q0.gtin && !q0.mpn ? { domain: hostOf(url) } : {}), limit: Math.min(q0.limit ?? 20, 50) };
+    const live = g("live") === "1" || g("live") === "true";
+    const r = await offersFor(q, live && !!q.q);
+    if (!r.ok) return { ok: false as const, param: "q", message: r.message };
+    const b = r.body as { items: Record<string, any>[]; live_shopify_catalog?: { items?: Record<string, any>[]; filter_note?: string; ok?: boolean; error?: string } };
+    let rows: Record<string, any>[] = [...b.items.map((i) => ({ source: "klickymart-observed", ...i })), ...(b.live_shopify_catalog?.items ?? [])];
+    if (url) { const m = rows.filter((i) => String(i.url ?? "").split("?")[0] === url.split("?")[0]); if (m.length) rows = m; }
+    const key = (i: Record<string, any>) => [i.landed?.est_total == null ? 1 : 0, i.landed?.est_total ?? i.price ?? 1e9];
+    rows.sort((x, y) => { const a = key(x), c = key(y); return a[0] - c[0] || a[1] - c[1]; });
+    return { ok: true as const, body: { query: { ...q, live }, zip, state: zipToState(zip), count: rows.length, items: rows,
+      ranking: "rows with a known landed total first (cheapest first), then the rest by item price; est_total is null unless price, shipping and tax are all known",
+      ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
+  };
+  if (path === "/landed" && request.method === "GET") {
+    const r = await landedCall((k) => url.searchParams.get(k));
+    if (!r.ok) return err400(r.param, r.message);
+    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: { ...apiHeaders(snap.version, 0), ...(url.searchParams.get("live") === "1" ? { "Cache-Control": "no-store" } : {}) } });
+  }
 
   if (path === "/offers" && request.method === "GET") {
     const q = offerQuery((k) => url.searchParams.get(k));
@@ -544,7 +589,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const handler = createMcpHandler({
       runQuery: async (sp) => {
         const v = validateQueryParams(sp);
-        if (!v.ok) throw new Error(v.message);
+        if (!v.ok) throw new InputError(`${v.param}: ${v.message}`);
         const result = querySnapshot(snap, v.params);
         const items = result.items.map((r) => rowToCompact(r, origin));
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
@@ -555,6 +600,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         const z = args.zip ? String(args.zip) : null;
         if (r.ok && z && validZip(z)) addLanded(r.body as { items: Record<string, unknown>[] }, z, args.taxpre === true || args.taxpre === 1);
         return r;
+      },
+      landedPrice: async (args) => {
+        const r = await landedCall((k) => (args[k] === undefined || args[k] === null ? null : k === "live" ? (args[k] === true || args[k] === "1" ? "1" : null) : String(args[k])));
+        return r.ok ? r : { ok: false as const, message: `${r.param}: ${r.message}` };
       },
       findOffers: async (args) => {
         const q = offerQuery((k) => (args[k] === undefined || args[k] === null ? null : String(args[k])));
@@ -586,7 +635,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return { body: { record: parseRaw(row.raw_json), derived: rowToCompact(row, origin), explain: { ...checkExtras(row, parseRaw(row.raw_json)), checkout_depth: checkoutOf(row, parseRaw(row.raw_json)) } } };
       },
     });
-    const resp = await handler(parsed.method, parsed.params, parsed.id);
+    let resp: unknown;
+    try {
+      resp = await handler(parsed.method, parsed.params, parsed.id);
+    } catch (e) {
+      resp = mcpErrorFor(e, parsed.id);
+    }
+    if (resp === undefined || resp === null) resp = { jsonrpc: "2.0", id: parsed.id ?? null, error: { code: -32603, message: "empty result", data: { retryable: true, retry_after_s: 2 } } };
     return Response.json(resp, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
   }
 

@@ -1,3 +1,4 @@
+import { Q_CATEGORIES, STATUS_VALUES, CAT_CODES, SUBCATEGORIES, PAY_CODES, PAY_ALIASES, PAY_GROUP_NAMES, ALT_PAY_FILTERS, BLOCKER_KINDS } from "./vocab";
 import type { QueryParams } from "./query";
 import { validateQueryParams } from "./query";
 
@@ -17,7 +18,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
           parameters: [
             { name: "q", in: "query", schema: { type: "string" } },
             { name: "status", in: "query", schema: { type: "string" } },
-            { name: "category", in: "query", schema: { type: "string", enum: ["shopping"] } },
+            { name: "category", in: "query", schema: { type: "string", enum: Q_CATEGORIES } },
             { name: "cat", in: "query", schema: { type: "string" } },
             { name: "pay", in: "query", schema: { type: "string" } },
             { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 500 } },
@@ -58,7 +59,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       },
       "/export.ndjson": { get: { summary: "NDJSON export", responses: { "200": { description: "NDJSON stream" } } } },
       "/stats": { get: { summary: "Aggregate stats", responses: { "200": { description: "Stats JSON" } } } },
-      "/check": { get: { summary: "One store: pay, checkout map, policies, trust, landed-cost parts for a ZIP", description: "Top-level co/checkout, guest, agent_access and btc/btc_grade come from the same row as /alternatives. checkout_map.first_blocker.kind is one of: none, login-wall, bot-wall, http-refusal, network-error, no-product-link, no-add-to-cart, form-gate, robots, unclassified.", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed-cost parts" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/check": { get: { summary: "One store: pay, checkout map, policies, trust, landed-cost parts for a ZIP", description: "Top-level co/checkout, guest, agent_access and btc/btc_grade come from the same row as /alternatives. checkout_map.first_blocker.kind is one of: " + BLOCKER_KINDS.join(", ") + ".", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed-cost parts" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/alternatives": { get: { summary: "Where else can my agent buy this? Ranked stores in a coarse category", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Store you were blocked at" }, { name: "category", in: "query", required: false, schema: { type: "string" }, description: "Coarse category or product word (headphones, gift card)" }, { name: "sub", in: "query", required: false, schema: { type: "string" }, description: "Product family" }, { name: "pay", in: "query", required: false, schema: { type: "string" }, description: "lightning | btc | cashu" }, { name: "guest", in: "query", required: false, schema: { type: "string" }, description: "1 = guest checkout confirmed" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP" }, { name: "taxpre", in: "query", required: false, schema: { type: "string" }, description: "1 = only stores observed to show tax before payment (with zip)" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/offers": { get: { summary: "Product offers observed on store pages (JSON-LD / Shopify JSON); live=1 adds live Shopify Catalog results (never stored)", parameters: [{ name: "q", in: "query", required: false, schema: { type: "string" }, description: "Product words; synonyms like ANC / noise-cancelling / over-ear are expanded" }, { name: "gtin", in: "query", required: false, schema: { type: "string" }, description: "GTIN/UPC/EAN" }, { name: "mpn", in: "query", required: false, schema: { type: "string" }, description: "Manufacturer part number" }, { name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Limit to one store" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed cost" }, { name: "in_stock", in: "query", required: false, schema: { type: "string" }, description: "1 = in stock only" }, { name: "max_price", in: "query", required: false, schema: { type: "number" }, description: "USD" }, { name: "live", in: "query", required: false, schema: { type: "string" }, description: "1 = add live Shopify Catalog results" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/recheck": { get: { summary: "Re-read robots.txt and home status for an indexed store now (rate-limited)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } }, post: { summary: "Same as GET", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
@@ -66,6 +67,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/summary.json": { get: { summary: "Counts by status and BTC grade", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/agents.json": { get: { summary: "Agent visit stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/ingest.json": { get: { summary: "Relay ingest stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/landed": { get: { summary: "One call: landed price of a product at a ZIP (indexed offers + live Shopify Catalog with live=1), store facts on every row; est_total only when price, shipping and tax are all known", parameters: [{ name: "zip", in: "query", required: true, schema: { type: "string" } }, ...["q", "gtin", "mpn", "url", "domain"].map((n) => ({ name: n, in: "query", schema: { type: "string" } })), { name: "max_price", in: "query", schema: { type: "number" } }, { name: "in_stock", in: "query", schema: { type: "boolean" } }, { name: "live", in: "query", schema: { type: "string", enum: ["1"] } }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/mcp": { post: { summary: "MCP (JSON-RPC 2.0, streamable HTTP): tools/list, tools/call", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/claim": { get: { summary: "Merchant claim page", responses: { "200": { description: "HTML or text" } } }, post: { summary: "Merchant claim submit", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/contribute": { get: { summary: "How to contribute observations", responses: { "200": { description: "HTML or text" } } } },
@@ -112,17 +114,17 @@ export function mcpToolsList(): unknown {
           type: "object",
           properties: {
             q: { type: "string", description: "substring of domain or store name" },
-            status: { type: "array", items: { type: "string", enum: ["crawled", "agents-not-welcome", "blocked-tos", "error"] } },
+            status: { type: "array", items: { type: "string", enum: [...STATUS_VALUES] } },
             reachable: { type: "boolean", description: "status crawled and agent access >= 1" },
-            category: { type: "string", enum: ["shopping"], description: "Vertical (v1 has one: shopping). For product categories use cat, sub, or find_alternatives." },
-            cat: { type: "array", items: { type: "string" }, description: "Fine store-type codes: elec, gift, groc, food, appr, jewel, beau, home, craft, office, auto, book, trav, tix, sw, sport, pet, toy, gen, mkt, btcnative" },
-            sub: { type: "string", enum: ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale"], description: "Product family the store sells (v0.4 records)" },
+            category: { type: "string", enum: Q_CATEGORIES, description: "shopping (the vertical) or a coarse product category" },
+            cat: { type: "array", items: { type: "string", enum: [...CAT_CODES] }, description: "Fine store-type codes" },
+            sub: { type: "string", enum: [...SUBCATEGORIES], description: "Product family the store sells" },
             btc: { type: "integer", description: "exact BTC grade 0-4" },
             btc_min: { type: "integer" },
             btc_any: { type: "boolean" },
-            pay: { type: "array", items: { type: "string" }, description: "any of these method codes (card, pp, apay, gpay, ln, btc, cashu, ...)" },
+            pay: { type: "array", items: { type: "string", enum: [...PAY_CODES, ...Object.keys(PAY_ALIASES), ...PAY_GROUP_NAMES] }, description: "any of these method codes; aliases (btc-onchain, lightning, shop-pay...) are accepted; a single group name (bitcoin, lightning, ecash) works too" },
             pay_all: { type: "array", items: { type: "string" } },
-            pay_group: { type: "string", enum: ["bitcoin", "lightning", "ecash"] },
+            pay_group: { type: "string", enum: PAY_GROUP_NAMES },
             scope: { type: "string", enum: ["online", "instore", "unscoped", "any"] },
             ag_min: { type: "integer" }, co_min: { type: "integer" }, ease_min: { type: "integer" },
             guest: { type: "integer", enum: [0, 1] },
@@ -158,6 +160,11 @@ export function mcpToolsList(): unknown {
         inputSchema: { type: "object", properties: { gtin: { type: "string" }, mpn: { type: "string" }, q: { type: "string" }, domain: { type: "string" }, zip: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 100 } } },
       },
       {
+        name: "get_landed_price",
+        description: "One call: a product's landed price at a US ZIP. Searches KlickyMart-observed offers (and, with live=true, the live Shopify Catalog, never stored), and returns for every product: price, stock, url, checked_at, shipping (with source), est. tax with the rate used, est_total ONLY when price+shipping+tax are all known, plus store facts (pay methods incl. Shop Pay/Link/BTC, guest checkout, checkout depth, first blocker). Products from stores KlickyMart has not indexed say 'store not indexed'.",
+        inputSchema: { type: "object", required: ["zip"], properties: { zip: { type: "string", description: "5-digit US ZIP" }, q: { type: "string" }, gtin: { type: "string" }, mpn: { type: "string" }, url: { type: "string", description: "a product URL to price" }, domain: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 50 } } },
+      },
+      {
         name: "get_checkout_map",
         description: "Checkout steps our probe reached for a store (stopping at the payment screen, never submitting), the first blocker (bot-wall, http-refusal, network-error, no-product-link, no-add-to-cart, form-gate, login-wall, robots, unclassified, none) and landed-cost signals.",
         inputSchema: { type: "object", required: ["domain"], properties: { domain: { type: "string" } } },
@@ -179,8 +186,8 @@ export function mcpToolsList(): unknown {
           type: "object",
           properties: {
             domain: { type: "string" }, category: { type: "string", description: "coarse category or product word (headphones, laptop, gift card...)" },
-            sub: { type: "string", description: "product family: audio, computers, phones, tv-video, cameras, gaming, wearables, smart-home, appliances, networking, accessories, gift-cards" },
-            pay: { type: "string", enum: ["lightning", "btc", "cashu"] }, guest: { type: "boolean", description: "exclude stores known to require an account" },
+            sub: { type: "string", enum: [...SUBCATEGORIES], description: "product family" },
+            pay: { type: "string", enum: Object.keys(ALT_PAY_FILTERS) }, guest: { type: "boolean", description: "exclude stores known to require an account" },
             zip: { type: "string", description: "5-digit US ZIP: adds landed cost per store" }, taxpre: { type: "boolean", description: "with zip: only stores observed to show shipping and tax before payment" },
             limit: { type: "integer", maximum: 50 },
           },
@@ -228,6 +235,7 @@ export function createMcpHandler(deps: {
   getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
   checkDomainZip?: (domain: string, zip: string | null) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
+  landedPrice?: (args: Record<string, unknown>) => Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
   findOffers?: (args: Record<string, unknown>) => Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
   getCheckoutMap?: (domain: string) => Promise<unknown>;
   recheckDomain?: (domain: string) => Promise<unknown>;
@@ -288,12 +296,19 @@ export function createMcpHandler(deps: {
         const r = await deps.submitReview(p.arguments?.event, p.arguments?.dry_run === true);
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
       }
+      if (p.name === "get_landed_price" && deps.landedPrice) {
+        const r = await deps.landedPrice(p.arguments ?? {});
+        if (!r.ok) return { ...base, error: { code: -32602, message: r.message, data: { retryable: false, hint: "zip is required; give q, gtin, mpn or url" } } };
+        const items = (r.body as { items: { title?: string; name?: string; domain?: string; price?: number; currency?: string; url?: string; source?: string; landed?: { est_total?: number | null; est_tax?: number | null; shipping?: { usd?: number | null } }; store?: { indexed?: boolean; co?: number | null; guest?: boolean | null } }[] }).items;
+        const text = items.map((i) => `${i.domain ?? ""} ${i.currency ?? ""} ${i.price ?? "?"} ship=${i.landed?.shipping?.usd ?? "unknown"} tax~${i.landed?.est_tax ?? "?"} total=${i.landed?.est_total ?? "unknown"} | ${i.store?.indexed === false ? "store not indexed" : `co=${i.store?.co ?? "?"} guest=${i.store?.guest ?? "?"}`} | ${i.title ?? i.name ?? ""} ${i.url ?? ""} [${i.source ?? ""}]`).join("\n") || "no products found";
+        return { ...base, result: { content: [{ type: "text", text }], structuredContent: r.body } };
+      }
       if (p.name === "find_offers" && deps.findOffers) {
         const r = await deps.findOffers(p.arguments ?? {});
         if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
         const items = (r.body as { items: { domain: string; name: string; price: number; currency: string; stock: string | null; url: string }[] }).items;
-        const live = (r.body as { live_shopify_catalog?: { ok?: boolean; error?: string; results?: { products?: { title?: string; variants?: { url?: string; price?: { amount?: number; currency?: string }; availability?: { available?: boolean } }[] }[] } } }).live_shopify_catalog;
-        const liveLines = live ? (live.ok ? (live.results?.products ?? []).map((pr) => { const v = pr.variants?.[0]; return `[Shopify Catalog live, not stored] ${v?.price?.currency ?? ""} ${v?.price?.amount != null ? (v.price.amount / 100).toFixed(2) : "?"} ${v?.availability?.available ? "in" : "?"} ${pr.title ?? ""} ${v?.url ?? ""}`; }) : [`[Shopify Catalog live] error: ${live.error ?? "unknown"}`]) : [];
+        const live = (r.body as { live_shopify_catalog?: { ok?: boolean; error?: string; filter_note?: string; items?: { title?: string; price?: number; currency?: string; stock?: string | null; url?: string; store?: { indexed?: boolean; co?: number | null; guest?: boolean | null; pay?: string[] } ; landed?: { est_total?: number | null } }[] } }).live_shopify_catalog;
+        const liveLines = live ? (live.ok ? [...(live.items ?? []).map((i) => `[Shopify Catalog live, not stored] ${i.currency ?? ""} ${i.price ?? "?"} ${i.stock ?? "?"} ${i.title ?? ""} ${i.url ?? ""} | store: ${i.store?.indexed ? `co=${i.store.co ?? "?"} guest=${i.store.guest ?? "?"} pay=${(i.store.pay ?? []).join(",") || "?"}` : "not indexed"}${i.landed ? ` | est_total=${i.landed.est_total ?? "unknown"}` : ""}`), ...(live.filter_note ? [live.filter_note] : [])] : [`[Shopify Catalog live] error: ${live.error ?? "unknown"}`]) : [];
         return { ...base, result: { content: [{ type: "text", text: [...items.map((i) => `${i.domain} ${i.currency} ${i.price} ${i.stock ?? "?"} ${i.name} ${i.url}`), ...liveLines].join("\n") || "no offers observed" }], structuredContent: r.body } };
       }
       if (p.name === "get_checkout_map" && deps.getCheckoutMap) {
