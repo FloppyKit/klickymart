@@ -1,4 +1,4 @@
-import { handleRequest, type Env as RouterEnv } from "./router";
+import { handleRequest, mcpErrorFor, type Env as RouterEnv } from "./router";
 import { catchUp, relayList } from "./relay-ingest";
 import { ingestCtx } from "./ingester-do";
 export { RelayIngester } from "./ingester-do";
@@ -22,7 +22,19 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    return handleRequest(request, env);
+    const isMcp = path === "/mcp" && request.method === "POST";
+    const body = isMcp ? await request.clone().text().catch(() => "") : "";
+    try {
+      return await handleRequest(request, env);
+    } catch (e) {
+      // Never let a thrown error become a plain-text Cloudflare 1101 page.
+      if (isMcp) {
+        let id: unknown = null; try { id = (JSON.parse(body) as { id?: unknown }).id ?? null; } catch { /* */ }
+        return Response.json(mcpErrorFor(e, id), { headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      return Response.json({ error: { code: "internal", message: String(e instanceof Error ? e.message : e).slice(0, 200), retryable: true, retry_after_s: 2 } },
+        { status: 503, headers: { "Retry-After": "2", "Access-Control-Allow-Origin": "*" } });
+    }
   },
 
   /** Every 5 minutes: since-based catch-up from each relay, and make sure the live ingester DO is running. */
