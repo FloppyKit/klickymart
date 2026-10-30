@@ -47,6 +47,15 @@ test("store look screenshots", async ({ page }) => {
     await page.waitForTimeout(400);
     await page.screenshot({ path: `e2e/artifacts/${name}-dark-desktop.png`, clip: { x: 0, y: 0, width: 1280, height: 800 }, animations: "disabled" });
   }
+  // Close-ups of the hero sprites (scene-only so the hero card does not cover the walkers)
+  await darkHome(page, "?reach=0.9&btc=0.8&nomotion=1&scene=1");
+  await page.waitForTimeout(400);
+  const box = await page.locator("#km-landscape").evaluate(() => {
+    const horizon = window.innerHeight * (0.52 + 0.9 * 0.04);
+    return { cx: window.innerWidth / 2, horizon };
+  });
+  await page.screenshot({ path: "e2e/artifacts/store-closeup.png", clip: { x: box.cx - 230, y: box.horizon - 175, width: 460, height: 200 }, animations: "disabled" });
+  await page.screenshot({ path: "e2e/artifacts/walkers-closeup.png", clip: { x: box.cx - 260, y: box.horizon - 20, width: 520, height: 200 }, animations: "disabled" });
   await darkHome(page, "?nomotion=1");
   await page.waitForSelector(".km-copy");
   await page.locator(".km-store").scrollIntoViewIfNeeded();

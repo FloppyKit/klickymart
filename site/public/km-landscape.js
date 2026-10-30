@@ -104,8 +104,12 @@
       ctx.shadowColor = "#ff9040";
       ctx.shadowBlur = 14;
       ctx.globalAlpha = 0.95;
+      // dawn glint: clip to the sky so nothing bleeds through the translucent floor
       ctx.beginPath();
-      ctx.arc(cx, horizon + radius * 0.55, radius * 0.55, Math.PI * 1.08, Math.PI * 1.92);
+      ctx.rect(0, 0, w, horizon - 1);
+      ctx.clip();
+      ctx.beginPath();
+      ctx.arc(cx, horizon + radius * 0.35, radius * 0.55, Math.PI * 1.08, Math.PI * 1.92);
       ctx.stroke();
       ctx.restore();
       return;
@@ -327,192 +331,367 @@
     return { n: n, orange: orange };
   }
 
-  function storeGeom(w, horizon) {
-    var W = Math.max(84, Math.min(196, w * 0.13));
-    var p = Math.max(1, Math.round(W / 64));
-    W = Math.round(W / p) * p;
-    var H = Math.round(W * 0.5 / p) * p;
-    return { W: W, H: H, p: p, bx: Math.round(w * 0.5 - W * 0.5), by: Math.round(horizon - H) };
+  // ---- Pixel-art helpers: sprites are painted at 1 logical px, then scaled up crisp ----
+  var FONT = {
+    K: ["1.1", "1.1", "11.", "1.1", "1.1"],
+    L: ["1..", "1..", "1..", "1..", "111"],
+    I: ["111", ".1.", ".1.", ".1.", "111"],
+    C: [".11", "1..", "1..", "1..", ".11"],
+    Y: ["1.1", "1.1", ".1.", ".1.", ".1."],
+    M: ["1...1", "11.11", "1.1.1", "1...1", "1...1"],
+    A: [".1.", "1.1", "111", "1.1", "1.1"],
+    R: ["11.", "1.1", "11.", "1.1", "1.1"],
+    T: ["111", ".1.", ".1.", ".1.", ".1."],
+    O: [".11.", "1..1", "1..1", "1..1", ".11."],
+    P: ["11.", "1.1", "11.", "1..", "1.."],
+    E: ["111", "1..", "11.", "1..", "111"],
+    N: ["1..1", "11.1", "1.11", "1..1", "1..1"],
+  };
+  function textWidth(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) n += FONT[s[i]][0].length + (i ? 1 : 0);
+    return n;
   }
+  function pixText(c, s, x, y, color, rows) {
+    c.fillStyle = color;
+    for (var i = 0; i < s.length; i++) {
+      var g = FONT[s[i]];
+      for (var r = 0; r < (rows || 5); r++) for (var k = 0; k < g[r].length; k++) if (g[r][k] === "1") c.fillRect(x + k, y + r, 1, 1);
+      x += g[0].length + 1;
+    }
+  }
+  function offscreen(w, h) {
+    var c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    return c;
+  }
+
+  // Logical store sprite: side wall (6) + front (66) + gap (3) + canopy (36); ground at row SH-1.
+  var SW = 111, SH = 50, SIDE = 6, FRONT = 66, CAN_X = SIDE + FRONT + 3, CAN_W = 36;
+  var storeCache = { key: "", canvas: null };
+
+  function buildStoreSprite(lit, litPanes, openOn, light) {
+    var cv = offscreen(SW, SH);
+    var c = cv.getContext("2d");
+    function R(x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
+    var G = SH - 1; // ground row
+    var fx = SIDE, top = 4; // front face x, roof top
+    var wall = light ? "#3a3160" : "#2a2350";
+    var wallHi = light ? "#4a4078" : "#3a3168";
+    var wallLo = light ? "#2a2348" : "#1b1636";
+
+    // Side wall in perspective (receding to the left/back)
+    for (var i = 0; i < SIDE; i++) {
+      var yTop = top + 2 + Math.round(((SIDE - i) / SIDE) * 3);
+      R(i, yTop, 1, G - yTop, wallLo);
+      R(i, yTop, 1, 1, "#8f86b8");
+    }
+    R(1, top + 22, 3, 4, "#0d0b1c"); // side window
+    R(1, top + 22, 3, 1, "rgba(255,233,168," + (0.15 + lit * 0.5) + ")");
+    R(1, G - 2, SIDE, 2, "#151229");
+
+    // Parapet / flat roof edge with highlight and shadow rows
+    R(fx - 1, top, FRONT + 2, 1, "#f4f0ff");
+    R(fx - 1, top + 1, FRONT + 2, 1, "#c9c2e0");
+    R(fx - 1, top + 2, FRONT + 2, 1, "#8a82aa");
+    // Rooftop details: AC box + vent, give a silhouette
+    R(fx + 6, top - 3, 8, 3, "#6d6690"); R(fx + 6, top - 3, 8, 1, "#a39cc4"); R(fx + 8, top - 2, 1, 1, "#3b3560"); R(fx + 10, top - 2, 1, 1, "#3b3560");
+    R(fx + FRONT - 10, top - 2, 3, 2, "#6d6690"); R(fx + FRONT - 11, top - 3, 5, 1, "#a39cc4");
+
+    // Sign band
+    var sy = top + 3, sh = 11;
+    R(fx, sy, FRONT, sh, "#120f2a");
+    R(fx, sy, FRONT, 1, "#2c2558");
+    R(fx + 1, sy + 1, FRONT - 2, 1, "rgba(110,243,255," + (0.25 + lit * 0.55) + ")");
+    R(fx + 1, sy + sh - 2, FRONT - 2, 1, "rgba(110,243,255," + (0.25 + lit * 0.55) + ")");
+    var label = "KLICKYMART", tw = textWidth(label);
+    var tx = fx + Math.floor((FRONT - tw) / 2), ty = sy + 3;
+    pixText(c, label, tx, ty + 1, "#05343c"); // drop shadow
+    var a = 0.45 + lit * 0.55;
+    pixText(c, label, tx, ty, "rgba(110,243,255," + a + ")");
+    // hot-white core on the top row of each glyph when bright
+    if (lit > 0.5) {
+      pixText(c, label, tx, ty, "rgba(230,255,255," + ((lit - 0.5) * 1.6) + ")", 1);
+    }
+    // little star bullets either side of the name
+    R(fx + 5, sy + 5, 1, 1, "#ff4f9a"); R(fx + 4, sy + 5, 3, 1, "rgba(255,79,154,0.6)"); R(fx + 5, sy + 4, 1, 3, "rgba(255,79,154,0.6)");
+    R(fx + FRONT - 6, sy + 5, 1, 1, "#ff4f9a"); R(fx + FRONT - 7, sy + 5, 3, 1, "rgba(255,79,154,0.6)"); R(fx + FRONT - 6, sy + 4, 1, 3, "rgba(255,79,154,0.6)");
+
+    // Facade below sign
+    var fy = sy + sh;
+    R(fx, fy, FRONT, G - fy, wall);
+    R(fx, fy, 1, G - fy, wallHi);
+    R(fx + FRONT - 1, fy, 1, G - fy, wallLo);
+
+    // Awning: stripes, highlight row, scalloped edge, shadow
+    var ay = fy, ah = 4;
+    for (var x = fx - 1; x < fx + FRONT + 1; x++) {
+      var s = Math.floor((x - fx + 1) / 4) % 2;
+      var col = s ? "#f4ead8" : "#ff4f9a";
+      var dark = s ? "#cdbfa8" : "#c0306f";
+      R(x, ay, 1, ah, col);
+      R(x, ay, 1, 1, s ? "#ffffff" : "#ff8cc0");
+      R(x, ay + ah - 1, 1, 1, dark);
+      if ((x - fx + 1) % 4 === 1 || (x - fx + 1) % 4 === 2) R(x, ay + ah, 1, 1, dark);
+    }
+    R(fx, ay + ah + 1, FRONT, 1, wallLo);
+
+    // Windows + door
+    var wy = ay + ah + 3, wb = G - 4; // window top/bottom
+    var doorW = 12, doorX = fx + Math.floor((FRONT - doorW) / 2);
+    var paneW = 7;
+    var panes = [];
+    for (var k = 0; k < 3; k++) panes.push(fx + 3 + k * (paneW + 1));
+    for (k = 0; k < 3; k++) panes.push(doorX + doorW + 2 + k * (paneW + 1));
+    var order = [2, 3, 1, 4, 0, 5];
+    // window frames
+    R(panes[0] - 1, wy - 1, 3 * (paneW + 1) + 1, wb - wy + 2, "#0b0918");
+    R(panes[3] - 1, wy - 1, 3 * (paneW + 1) + 1, wb - wy + 2, "#0b0918");
+    var shelfCols = ["#ff4f9a", "#6ef3ff", "#3df29a", "#f7a128", "#c9c2e0"];
+    for (k = 0; k < 6; k++) {
+      var px0 = panes[k], on = order.indexOf(k) < litPanes;
+      var ph = wb - wy;
+      if (on) {
+        R(px0, wy, paneW, ph, "#ffe9a8");
+        R(px0, wy, paneW, 2, "#fff6d6");
+        R(px0, wy + ph - 3, paneW, 3, "#f0cf80");
+      } else {
+        R(px0, wy, paneW, ph, "#17133a");
+        R(px0, wy, paneW, 1, "#221d4e");
+      }
+      // shelf silhouettes with products
+      for (var sr = 0; sr < 3; sr++) {
+        var ly = wy + 5 + sr * 4;
+        if (ly >= wb - 1) break;
+        R(px0, ly, paneW, 1, on ? "#8a6a3c" : "#0e0b24");
+        for (var pi = 0; pi < paneW; pi += 2) {
+          var pc = shelfCols[(pi + sr * 2 + k) % shelfCols.length];
+          R(px0 + pi, ly - 2, 1, 2, on ? pc : "#100d28");
+        }
+      }
+      // glass glint
+      R(px0 + 1, wy + 1, 1, 3, on ? "rgba(255,255,255,0.8)" : "rgba(140,130,200,0.25)");
+    }
+    // posters taped in windows
+    R(panes[2] + 1, wy + 1, 5, 4, "#ff4f9a"); R(panes[2] + 2, wy + 2, 3, 1, "#fff"); R(panes[2] + 2, wy + 3, 2, 1, "#ffd0e4");
+    R(panes[3] + 1, wy + 1, 5, 4, "#3df29a"); R(panes[3] + 3, wy + 2, 1, 2, "#0b3a26"); R(panes[3] + 2, wy + 2, 3, 1, "#0b3a26");
+    R(panes[5] + 1, wy + 1, 5, 4, "#f7a128"); R(panes[5] + 2, wy + 2, 3, 2, "#7a3d00");
+    // glass door
+    R(doorX - 1, wy - 1, doorW + 2, G - wy + 1, "#c9c2e0");
+    R(doorX, wy, doorW, G - wy, "#0b0918");
+    var doorLit = litPanes >= 3;
+    R(doorX + 1, wy + 1, doorW / 2 - 1, G - wy - 1, doorLit ? "#ffe0a0" : "#1a1640");
+    R(doorX + doorW / 2 + 1, wy + 1, doorW / 2 - 2, G - wy - 1, doorLit ? "#ffe0a0" : "#1a1640");
+    R(doorX + 2, wy + 2, 1, 4, "rgba(255,255,255,0.7)");
+    R(doorX + doorW / 2 - 2, wy + 9, 1, 3, "#e9e4f2"); R(doorX + doorW / 2 + 2, wy + 9, 1, 3, "#e9e4f2");
+    R(doorX + 2, wy + 6, doorW - 4, 1, doorLit ? "#c08a40" : "#2a2350"); // push bar
+    // kickplate bricks + curb
+    for (x = fx; x < fx + FRONT; x++) if (x < doorX - 1 || x > doorX + doorW) {
+      R(x, wb + 1, 1, 3, (x % 4 === 0) ? wallLo : "#4a2a4a");
+    }
+    R(fx - 1, G - 0, FRONT + 2, 1, "#6d6690");
+    R(fx, wb + 1, FRONT, 1, "#5e3658");
+
+    // Neon OPEN sign hanging in the left window (2 px tube with dark backing)
+    var ow = textWidth("OPEN"), ox = panes[0] + Math.floor((3 * (paneW + 1) - ow) / 2), oy = wy + 6;
+    R(ox - 2, oy - 2, ow + 4, 9, "#1a0610");
+    R(ox - 2, oy - 2, ow + 4, 1, "#3a1424");
+    if (openOn > 0) {
+      pixText(c, "OPEN", ox, oy, "rgba(255,70,110," + (0.45 + openOn * 0.55) + ")");
+      if (openOn > 0.6) {
+        pixText(c, "OPEN", ox, oy, "rgba(255,220,230," + (openOn - 0.4) + ")", 1);
+      }
+    } else {
+      pixText(c, "OPEN", ox, oy, "#4a2234");
+    }
+
+    // ---- Gas canopy + pumps ----
+    var cx0 = CAN_X, cTop = top + 14, cH = 5;
+    R(cx0 + 4, cTop + cH, 2, G - cTop - cH, "#2a2346"); R(cx0 + 4, cTop + cH, 1, G - cTop - cH, "#4a4270");
+    R(cx0 + CAN_W - 6, cTop + cH, 2, G - cTop - cH, "#2a2346"); R(cx0 + CAN_W - 6, cTop + cH, 1, G - cTop - cH, "#4a4270");
+    R(cx0, cTop, CAN_W, cH, "#e9e4f2");
+    R(cx0, cTop, CAN_W, 1, "#ffffff");
+    R(cx0, cTop + 2, CAN_W, 2, "#ff4f9a");
+    R(cx0, cTop + 3, CAN_W, 1, "#c0306f");
+    R(cx0 + 1, cTop + cH, CAN_W - 2, 1, "rgba(255,246,214," + (0.3 + lit * 0.7) + ")"); // underside lights
+    [9, 21].forEach(function (off) {
+      var px = cx0 + off, py = G - 11;
+      R(px - 1, G - 1, 8, 1, "#3b3560"); // island
+      R(px, py, 6, 10, "#2e2650");
+      R(px, py, 6, 1, "#c9c2e0");
+      R(px + 5, py + 1, 1, 9, "#1c1736");
+      R(px + 1, py + 2, 4, 3, reach > 0.3 ? "rgba(110,243,255," + (0.4 + lit * 0.6) + ")" : "#12101f");
+      R(px + 1, py + 6, 4, 1, "#ff4f9a");
+      R(px + 6, py + 3, 1, 5, "#0c0a16"); R(px + 7, py + 7, 1, 2, "#0c0a16"); // hose
+    });
+    // price board on a post at the far right (no brand, just a glyph)
+    R(cx0 + CAN_W - 2, G - 22, 1, 22, "#3b3560");
+    R(cx0 + CAN_W - 5, G - 27, 7, 6, "#120f2a");
+    R(cx0 + CAN_W - 5, G - 27, 7, 1, "#c9c2e0");
+    R(cx0 + CAN_W - 4, G - 25, 2, 1, "rgba(61,242,154," + (0.4 + lit * 0.6) + ")");
+    R(cx0 + CAN_W - 4, G - 23, 4, 1, "rgba(247,161,40," + (0.4 + lit * 0.6) + ")");
+    return cv;
+  }
+
+  function storeGeom(w, horizon) {
+    // integer pixel scale: ~2 on phones, 3 on laptops, 4 on wide screens
+    var p = w < 520 ? 2 : w < 1500 ? 3 : 4;
+    var W = SW * p, H = SH * p;
+    var frontCx = (SIDE + FRONT / 2) * p;
+    return { W: W, H: H, p: p, bx: Math.round(w * 0.5 - frontCx), by: Math.round(horizon - H + p) };
+  }
+
   function drawStore(w, horizon, light) {
     var g = storeGeom(w, horizon);
-    var W = g.W, H = g.H, p = g.p, bx = g.bx, by = g.by;
     var lit = 0.25 + reach * 0.75;
+    var litPanes = Math.max(0, Math.min(6, Math.round(reach * 6 + 0.15)));
+    var openOn = Math.max(0, Math.min(1, (reach - 0.4) / 0.25));
+    var key = [lit.toFixed(2), litPanes, openOn.toFixed(2), light ? 1 : 0].join("|");
+    if (storeCache.key !== key) {
+      storeCache.key = key;
+      storeCache.canvas = buildStoreSprite(lit, litPanes, openOn, light);
+    }
+    var p = g.p;
     ctx.save();
-
-    // Gas canopy + two pumps, right of the building
-    var cw = Math.round(W * 0.62), cx0 = bx + W + p * 3, ch = Math.round(H * 0.82);
-    var ctop = horizon - ch;
-    ctx.fillStyle = "#1a1530";
-    ctx.fillRect(cx0 + p * 3, ctop + p * 3, p * 2, ch - p * 3);
-    ctx.fillRect(cx0 + cw - p * 5, ctop + p * 3, p * 2, ch - p * 3);
-    ctx.fillStyle = "#e9e4f2";
-    ctx.fillRect(cx0, ctop, cw, p * 3);
-    ctx.fillStyle = "#ff4f9a";
-    ctx.fillRect(cx0, ctop + p * 2, cw, p);
-    var dl = ctx.createLinearGradient(0, ctop + p * 3, 0, horizon);
-    dl.addColorStop(0, "rgba(255,240,200," + (0.08 + reach * 0.32) + ")");
-    dl.addColorStop(1, "rgba(255,240,200,0)");
-    ctx.fillStyle = dl;
-    ctx.fillRect(cx0 + p, ctop + p * 3, cw - p * 2, ch - p * 3);
-    [0.3, 0.62].forEach(function (f) {
-      var px = Math.round(cx0 + cw * f);
-      var ph = p * 8;
-      ctx.fillStyle = "#2a2346";
-      ctx.fillRect(px, horizon - ph, p * 4, ph);
-      ctx.fillStyle = "#c9c2e0";
-      ctx.fillRect(px, horizon - ph, p * 4, p);
-      ctx.fillStyle = reach > 0.3 ? "rgba(110,243,255," + lit + ")" : "#12101f";
-      ctx.fillRect(px + p, horizon - ph + p * 2, p * 2, p * 2);
-      ctx.fillStyle = "#0c0a16";
-      ctx.fillRect(px + p * 4, horizon - ph + p * 3, p, p * 3);
-    });
-
-    // Building body, flat roof, sign band
-    ctx.fillStyle = light ? "#2b2445" : "#1c1830";
-    ctx.fillRect(bx, by, W, H);
-    var signH = Math.round(H * 0.26 / p) * p;
-    ctx.fillStyle = "#e9e4f2";
-    ctx.fillRect(bx - p, by - p, W + p * 2, p);
-    ctx.fillStyle = "#14112a";
-    ctx.fillRect(bx - p, by, W + p * 2, signH);
-    var fs = Math.max(8, Math.floor(signH * 0.72));
-    ctx.font = "bold " + fs + "px ui-monospace, Menlo, Consolas, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.shadowColor = "#6ef3ff";
-    ctx.shadowBlur = 2 + reach * 16;
-    ctx.fillStyle = "rgba(110,243,255," + (0.3 + reach * 0.7) + ")";
-    var label = "KLICKYMART";
-    var tw = ctx.measureText(label).width;
-    var sx = tw > W - p * 2 ? (W - p * 2) / tw : 1;
-    ctx.save();
-    ctx.translate(bx + W / 2, by + signH / 2 + p * 0.5);
-    ctx.scale(sx, 1);
-    ctx.fillText(label, 0, 0);
-    ctx.restore();
-    ctx.shadowBlur = 0;
-
-    // Striped awning with a scalloped edge
-    var ay = by + signH, ah = p * 3, stripes = 12, sw = (W + p * 2) / stripes;
-    for (var i = 0; i < stripes; i++) {
-      ctx.fillStyle = i % 2 ? "#f4ead8" : "#ff4f9a";
-      ctx.fillRect(Math.round(bx - p + i * sw), ay, Math.ceil(sw), ah);
+    // sign glow behind the sprite
+    var signCx = g.bx + (SIDE + FRONT / 2) * p, signCy = g.by + 12 * p;
+    var sg = ctx.createRadialGradient(signCx, signCy, 2, signCx, signCy, FRONT * p * 0.7);
+    sg.addColorStop(0, "rgba(110,243,255," + (0.05 + reach * 0.3) + ")");
+    sg.addColorStop(1, "rgba(110,243,255,0)");
+    ctx.fillStyle = sg;
+    ctx.fillRect(signCx - FRONT * p, signCy - FRONT * p, FRONT * p * 2, FRONT * p * 2);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(storeCache.canvas, g.bx, g.by, g.W, g.H);
+    ctx.globalCompositeOperation = "lighter";
+    // soft neon bloom on the sign band and OPEN sign
+    ctx.globalAlpha = 0.06 + reach * 0.16;
+    ctx.fillStyle = "rgb(110,243,255)";
+    ctx.fillRect(g.bx + (SIDE + 1) * p, g.by + 8 * p, (FRONT - 2) * p, 9 * p);
+    ctx.globalAlpha = 1;
+    if (openOn > 0) {
+      var og = ctx.createRadialGradient(g.bx + 18 * p, g.by + 31 * p, 1, g.bx + 18 * p, g.by + 31 * p, 16 * p);
+      og.addColorStop(0, "rgba(255,60,110," + (openOn * 0.45) + ")");
+      og.addColorStop(1, "rgba(255,60,110,0)");
+      ctx.fillStyle = og;
+      ctx.fillRect(g.bx, g.by + 15 * p, 36 * p, 32 * p);
+    }
+    // forecourt light spill: trapezoid from the storefront fanning toward the viewer
+    if (reach > 0.12) {
+      var gy = horizon + 1;
+      var fl = g.bx + SIDE * p, fr = fl + FRONT * p;
+      var depthPx = Math.min(70, 18 + reach * 50) * (p / 3);
+      var spill = ctx.createLinearGradient(0, gy, 0, gy + depthPx);
+      spill.addColorStop(0, "rgba(255,226,150," + (reach * 0.42) + ")");
+      spill.addColorStop(1, "rgba(255,226,150,0)");
+      ctx.fillStyle = spill;
       ctx.beginPath();
-      ctx.arc(bx - p + i * sw + sw / 2, ay + ah, sw / 2, 0, Math.PI);
+      ctx.moveTo(fl + 2 * p, gy);
+      ctx.lineTo(fr - 2 * p, gy);
+      ctx.lineTo(fr + depthPx * 0.9, gy + depthPx);
+      ctx.lineTo(fl - depthPx * 0.9, gy + depthPx);
+      ctx.closePath();
+      ctx.fill();
+      var cl = g.bx + CAN_X * p, cr = cl + CAN_W * p;
+      var cs = ctx.createLinearGradient(0, gy, 0, gy + depthPx * 0.6);
+      cs.addColorStop(0, "rgba(255,246,214," + (reach * 0.3) + ")");
+      cs.addColorStop(1, "rgba(255,246,214,0)");
+      ctx.fillStyle = cs;
+      ctx.beginPath();
+      ctx.moveTo(cl + 3 * p, gy);
+      ctx.lineTo(cr - 3 * p, gy);
+      ctx.lineTo(cr + depthPx * 0.5, gy + depthPx * 0.6);
+      ctx.lineTo(cl - depthPx * 0.2, gy + depthPx * 0.6);
+      ctx.closePath();
       ctx.fill();
     }
-    // Big windows either side of the door; they light up with reach
-    var wy = ay + ah + p * 2;
-    var wh = horizon - wy - p;
-    var doorW = Math.round(W * 0.14 / p) * p;
-    var doorX = Math.round(bx + W / 2 - doorW / 2);
-    var sideW = (W - doorW - p * 6) / 2;
-    var paneW = (sideW - p * 2) / 3;
-    var order = [2, 3, 1, 4, 0, 5];
-    var litPanes = Math.round(reach * 6 + 0.15);
-    for (var k = 0; k < 6; k++) {
-      var idx = k % 3;
-      var x = k < 3 ? bx + p * 2 + idx * (paneW + p) : doorX + doorW + p * 2 + idx * (paneW + p);
-      var on = order.indexOf(k) < litPanes;
-      ctx.fillStyle = "#0a0816";
-      ctx.fillRect(Math.round(x) - p, wy - p, Math.round(paneW) + p * 2, wh + p);
-      if (on) {
-        ctx.shadowColor = "#ffe9a8";
-        ctx.shadowBlur = 4 + reach * 10;
-        ctx.fillStyle = "rgba(255,233,168," + (0.65 + reach * 0.35) + ")";
-      } else {
-        ctx.fillStyle = "#151231";
-      }
-      ctx.fillRect(Math.round(x), wy, Math.round(paneW), wh - p);
-      ctx.shadowBlur = 0;
-      if (on) {
-        ctx.fillStyle = "rgba(160,110,60,0.45)";
-        ctx.fillRect(Math.round(x), wy + Math.round(wh * 0.5), Math.round(paneW), p);
-      }
-    }
-    ctx.fillStyle = "#0a0816";
-    ctx.fillRect(doorX - p, wy - p, doorW + p * 2, horizon - wy + p);
-    ctx.fillStyle = reach > 0.5 ? "rgba(255,233,168,0.55)" : "#151231";
-    ctx.fillRect(doorX, wy, doorW, horizon - wy);
-    ctx.fillStyle = "#c9c2e0";
-    ctx.fillRect(doorX + doorW - p * 2, wy + Math.round((horizon - wy) / 2), p, p * 2);
-
-    // Neon OPEN sign in the left window
-    var openOn = Math.max(0, Math.min(1, (reach - 0.4) / 0.25));
-    ctx.font = "bold " + Math.max(6, Math.floor(wh * 0.3)) + "px ui-monospace, Menlo, Consolas, monospace";
-    var ox = bx + p * 2 + paneW * 1.5 + p;
-    var oy = wy + wh * 0.26;
-    if (openOn > 0) {
-      ctx.shadowColor = "#ff3b6b";
-      ctx.shadowBlur = 6 + openOn * 12;
-      ctx.fillStyle = "rgba(255,90,120," + (0.4 + openOn * 0.6) + ")";
-    } else {
-      ctx.fillStyle = "rgba(120,60,80,0.55)";
-    }
-    ctx.fillText("OPEN", ox, oy);
-    ctx.shadowBlur = 0;
+    ctx.restore();
     canvas2d.dataset.storeOpen = openOn > 0 ? "1" : "0";
     canvas2d.dataset.storeLitWindows = String(litPanes);
-
-    if (reach > 0.15) {
-      var pool = ctx.createRadialGradient(w / 2, horizon, 2, w / 2, horizon, W * 0.9);
-      pool.addColorStop(0, "rgba(255,233,168," + (reach * 0.22) + ")");
-      pool.addColorStop(1, "rgba(255,233,168,0)");
-      ctx.fillStyle = pool;
-      ctx.fillRect(w / 2 - W, horizon, W * 2, W * 0.5);
-    }
-    ctx.restore();
   }
-  var SHOPPER_A = [
-    ".....o......",
-    ".....a......",
-    "...hhhhh....",
-    "..hhvhhhh...",
-    "..hvhhhhh...",
-    "..hhhhhhh...",
-    "...hhhhh....",
-    "....nnn.....",
-    "..bbbbbbb...",
-    ".rbbbbbbbr..",
-    ".rbbbbbbbr..",
-    ".rbbbbbbbGGG",
-    "..bbbbbbbGGG",
-    "...l...l.GGG",
-    "...l...l....",
-    "..ll...ll...",
-  ];
-  var SHOPPER_B = SHOPPER_A.slice(0, 13).concat(["....l.l..GGG", "....l.l.....", "...ll.ll...."]);
 
-  function drawShopper(x, y, px, frame, orange, alpha) {
-    var map = frame ? SHOPPER_B : SHOPPER_A;
-    var pal = {
-      o: orange ? "#ffb347" : "#6ef3ff",
-      a: "#8c86a8",
-      h: orange ? "#ffd29a" : "#cfd3ef",
-      v: "#ffffff",
-      n: "#5d577a",
-      b: orange ? "#f7931a" : "#9aa0c8",
-      r: orange ? "#c96f0c" : "#6f7499",
-      G: "#c8a070",
-      l: "#4a4466",
-    };
-    var ox = Math.round(x - 6 * px);
-    var oy = Math.round(y - 16 * px);
+  // ---- Bot shoppers: 13x18 logical sprites, front (leaving with a bag) and back (heading in with a basket) ----
+  // o antenna tip, a stem, H outline, h head, s head highlight, v visor, e eye, b body, d body shade, k chest light,
+  // r arm, l leg, f foot, g bag, G bag shade, w handle, c basket
+  var BOT_FRONT_TOP = [
+    "......o......",
+    "......a......",
+    "..HHHHHHHHH..",
+    "..HsshhhhhH..",
+    "..HvvvvvvvH..",
+    "..HveevveeH..",
+    "..HvvvvvvvH..",
+    "..HhhhhhhhH..",
+    "..HHHHHHHHH..",
+    ".....HdH.....",
+    "..rbbbbbbbr..",
+    "..rbbbkbbbrw.",
+    "..rbbbbbbbgGg",
+    "...ddddddd.gG",
+  ];
+  var BOT_BACK_TOP = [
+    "......o......",
+    "......a......",
+    "..HHHHHHHHH..",
+    "..HsshhhhhH..",
+    "..HhhhhhhhH..",
+    "..HhdhdhdhH..",
+    "..HhhhhhhhH..",
+    "..HhhhhhhhH..",
+    "..HHHHHHHHH..",
+    ".....HdH.....",
+    "c.rbbbbbbbr..",
+    "cccbdddddbr..",
+    "cccbdbdbdbr..",
+    "ccc.ddddddd..",
+  ];
+  var BOT_LEGS = [
+    ["...l....l....", "...l....l....", "..ff....ff..."], // stand / contact
+    ["....l..l.....", "....l..l.....", "...ff.ff....."], // passing (bob)
+    ["..l......l...", "..l.....l....", ".ff.....ff..."], // stride
+    ["....l..l.....", "....l..l.....", "...ff.ff....."],
+  ];
+  var botCache = {};
+  function botSprite(facing, frame, orange) {
+    var key = facing + frame + (orange ? "o" : "g");
+    if (botCache[key]) return botCache[key];
+    var pal = orange
+      ? { o: "#ffd27a", a: "#8c86a8", H: "#3a1d06", h: "#ffb347", s: "#ffe2b0", v: "#2a1404", e: "#fff3c4", b: "#f7931a", d: "#b8620a", k: "#fff3c4", r: "#c96f0c", l: "#4a2a10", f: "#2a1404", g: "#f4ead8", G: "#c8b898", w: "#8c86a8", c: "#c9c2e0" }
+      : { o: "#6ef3ff", a: "#8c86a8", H: "#262245", h: "#c3c7e3", s: "#eef0ff", v: "#14122a", e: "#6ef3ff", b: "#9aa0c8", d: "#6a6f96", k: "#6ef3ff", r: "#7d82aa", l: "#3c3858", f: "#22203a", g: "#f4ead8", G: "#c8b898", w: "#8c86a8", c: "#c9c2e0" };
+    var bob = frame % 2 === 1 ? 1 : 0;
+    var top = facing === "f" ? BOT_FRONT_TOP : BOT_BACK_TOP;
+    var map = top.concat(BOT_LEGS[frame]);
+    var cv = offscreen(13, 18);
+    var c = cv.getContext("2d");
+    for (var r = 0; r < map.length; r++) {
+      var dy = r < top.length ? bob : 0;
+      for (var k = 0; k < 13; k++) {
+        var ch = map[r].charAt(k);
+        if (ch === "." || !ch) continue;
+        c.fillStyle = pal[ch];
+        c.fillRect(k, r + dy, 1, 1);
+      }
+    }
+    if (bob) { c.fillStyle = pal.l; c.fillRect(4, 14, 1, 1); c.fillRect(7, 14, 1, 1); }
+    botCache[key] = cv;
+    return cv;
+  }
+
+  function drawShopper(x, y, px, frame, orange, alpha, facing) {
+    var spr = botSprite(facing, frame, orange);
+    var ox = Math.round(x - 6.5 * px);
+    var oy = Math.round(y - 17 * px);
     ctx.save();
+    ctx.globalAlpha = alpha * 0.45;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(ox + 2 * px, Math.round(y), 9 * px, Math.max(1, Math.round(px * 0.7)));
     ctx.globalAlpha = alpha;
     if (orange) {
       ctx.shadowColor = "#f7931a";
-      ctx.shadowBlur = 6 + px * 3;
+      ctx.shadowBlur = 4 + px * 3;
     }
-    for (var r = 0; r < map.length; r++) {
-      for (var c = 0; c < map[r].length; c++) {
-        var ch = map[r].charAt(c);
-        if (ch === ".") continue;
-        ctx.fillStyle = pal[ch];
-        ctx.fillRect(ox + c * px, oy + r * px, px, px);
-      }
-    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(spr, ox, oy, 13 * px, 18 * px);
     ctx.restore();
   }
 
@@ -524,23 +703,29 @@
     var floorH = h - horizon;
     var roadW = 0.2 + reach * 0.05;
     var still = pauseMotion || reduced;
+    var list = [];
     for (var i = 0; i < counts.n; i++) {
+      // left lane heads in (back view), right lane comes out with a bag (front view)
       var side = i % 2 === 0 ? -1 : 1;
       var slot = Math.floor(i / 2);
-      // Walk between the store (d=0.16) and just above the hero card (d=0.55).
       var span = 0.39;
       var base = 0.53 - slot * 0.095 - (side > 0 ? 0.047 : 0);
-      var travel = still ? 0 : (t || 0) * 0.0000045;
+      var travel = still ? 0 : (t || 0) * 0.0000045 * (side < 0 ? 1 : -1);
       var d = 0.16 + ((((base - 0.16 - travel * span) % span) + span) % span);
-      var depth = d * d;
-      var y = horizon + floorH * depth;
-      var x = w * 0.5 + side * (roadW * w * 0.95 * depth + 8 + 14 * depth);
-      var px = Math.max(1, Math.round(1 + depth * 5));
-      var alpha = Math.max(0, Math.min(1, (d - 0.16) / 0.06, (0.55 - d) / 0.02 + 0.2));
-      var frame = still ? 0 : Math.floor((t || 0) / 420 + i) % 2;
-      drawShopper(x, y, px, frame, i < counts.orange, alpha);
+      list.push({ i: i, d: d, side: side });
     }
+    list.sort(function (a, b) { return a.d - b.d; }); // far first
+    list.forEach(function (s) {
+      var depth = s.d * s.d;
+      var y = horizon + floorH * depth;
+      var x = w * 0.5 + s.side * (roadW * w * 0.95 * depth + 10 + 16 * depth);
+      var px = Math.max(1, Math.round(depth * (floorH / 30)));
+      var alpha = Math.max(0, Math.min(1, (s.d - 0.16) / 0.04, (0.55 - s.d) / 0.02 + 0.2));
+      var frame = still ? (s.i % 2 ? 2 : 0) : Math.floor((t || 0) / 180 + s.i) % 4;
+      drawShopper(x, y, px, frame, s.i < counts.orange, alpha, s.side < 0 ? "b" : "f");
+    });
   }
+
 
   var glActive = false;
   var running2d = false;
