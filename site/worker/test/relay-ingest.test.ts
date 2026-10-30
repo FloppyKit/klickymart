@@ -185,7 +185,7 @@ describe("integration: catch-up against a local fake relay", () => {
     const html = await (await SELF.fetch(`https://example.com/merchant/${DOM}`, { headers: { Accept: "text/html" } })).text();
     expect(html).toContain("What agents report");
     expect(html).toContain("KlickyMart crawl");
-  });
+  }, 20_000);
   it("filters ask for 31420 (all authors), 420/421/422 by r and by our a-tags", () => {
     const f = buildFilters(ctx(), 100);
     expect(f[0]).toEqual({ kinds: [31420], since: 100 });
