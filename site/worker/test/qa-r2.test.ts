@@ -133,3 +133,16 @@ describe("shipping policy + indirect BTC (data v5)", () => {
     expect(cm.stage).toBe("checkout"); expect(cm.first_blocker.needs).toContain("email"); expect(cm.steps.length).toBe(5);
   });
 });
+describe("r2 production fixes", () => {
+  it("live search sends price filter + page size to the catalog", async () => {
+    const { liveCatalogSearch } = await import("../src/ucp-live");
+    let sent: any = null;
+    await liveCatalogSearch("coffee grinder", null, "https://x", (async (_u: unknown, init: any) => { sent = JSON.parse(init.body); return new Response(JSON.stringify({ result: { structuredContent: { products: [] } } })); }) as typeof fetch, undefined, { maxMinor: 15000, pageSize: 25 });
+    expect(sent.params.arguments.catalog.filters.price.max).toBe(15000);
+    expect(sent.params.arguments.catalog.pagination.limit).toBe(25);
+  });
+  it("brand on the brand's own store is ok; same title+price on one store dedupes", () => {
+    expect(brandCheck("Bose QuietComfort", "QuietComfort Headphones + Airfly SE", "www.bose.com").brand_match).toBe("ok");
+    expect(dedupe([{ domain: "u.com", url: "https://u.com/p/a-1", title: "QC Ultra", price: 199.99 }, { domain: "u.com", url: "https://u.com/p/a-2", title: "QC Ultra", price: 199.99 }]).removed).toBe(1);
+  });
+});

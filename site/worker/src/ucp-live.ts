@@ -23,7 +23,7 @@ export interface LiveOpts { maxMinor?: number; condition?: string[]; cursor?: st
 export async function liveCatalogSearch(query: string, zip: string | null, origin: string, fetcher: typeof fetch = fetch, domain?: string, o: LiveOpts = {}) {
   const body = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search_catalog", arguments: {
     meta: { "ucp-agent": { profile: `${origin}/.well-known/ucp` } },
-    catalog: { query, context: { address_country: "US", ...(zip ? { postal_code: zip } : {}), currency: "USD" }, filters: { available: true } } } } };
+    catalog: { query, context: { address_country: "US", ...(zip ? { postal_code: zip } : {}), currency: "USD" }, filters: { available: true, ...(o.maxMinor ? { price: { max: o.maxMinor } } : {}), ...(o.condition?.length ? { condition: o.condition } : {}) }, pagination: { limit: o.pageSize ?? 25, ...(o.cursor ? { cursor: o.cursor } : {}) } } } } };
   try {
     const r = await fetcher(GLOBAL_CATALOG, { method: "POST", headers: { "content-type": "application/json", accept: "application/json", "User-Agent": "FloppyKitMapBot/0.2 Agent/KlickyBot (+https://klickymart.com/bot)" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
     const j = (await r.json()) as { result?: { structuredContent?: unknown; content?: { text?: string }[] }; error?: { message: string; data?: unknown } };

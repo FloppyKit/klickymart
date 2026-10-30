@@ -35,12 +35,13 @@ export function productTypes(text: string): string[] {
 
 const fold = (s: string) => s.toLowerCase().replace(/0/g, "o").replace(/[1|]/g, "l").replace(/5/g, "s").replace(/3/g, "e").replace(/4/g, "a").replace(/@/g, "a");
 /** Flags a title that spells a query brand with look-alike characters (e.g. "B0SE" for "Bose"), or omits the brand. */
-export function brandCheck(query: string | undefined, title: string): { brand_match: "ok" | "lookalike" | "absent" | null; brand_note?: string } {
+export function brandCheck(query: string | undefined, title: string, domain = ""): { brand_match: "ok" | "lookalike" | "absent" | null; brand_note?: string } {
   if (!query) return { brand_match: null };
   const brand = query.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
   if (!/^[a-z][a-z&-]{2,}$/.test(brand) || STOP.has(brand)) return { brand_match: null };
   const words = title.split(/[^A-Za-z0-9&|@-]+/).filter(Boolean);
   if (words.some((w) => w.toLowerCase() === brand)) return { brand_match: "ok" };
+  if (domain.replace(/^www\./, "").split(".").some((p) => p === brand)) return { brand_match: "ok", brand_note: "sold on the brand's own store" };
   const look = words.find((w) => fold(w) === brand && w.toLowerCase() !== brand);
   if (look) return { brand_match: "lookalike", brand_note: `title spells the brand "${look}" (look-alike characters for "${brand}"); likely not genuine` };
   return { brand_match: "absent", brand_note: `"${brand}" does not appear in the title` };
@@ -65,8 +66,9 @@ export function dedupe<T extends Record<string, any>>(rows: T[]): { rows: T[]; r
     let k = "";
     try { k = r.url ? new URL(String(r.url)).pathname.replace(/\/$/, "") : ""; } catch { /* */ }
     const key = `${d}|${k || String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${r.variant ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key); out.push(r);
+    const key2 = `${d}|${String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${r.price ?? ""}`;
+    if (seen.has(key) || seen.has(key2)) continue;
+    seen.add(key); seen.add(key2); out.push(r);
   }
   return { rows: out, removed: rows.length - out.length };
 }
@@ -77,7 +79,7 @@ export function annotate<T extends Record<string, any>>(row: T, q: string | unde
   const text = `${title} ${row.variant ?? ""} ${row.url ?? ""}`;
   const c = conditionOf(text, String(row.domain ?? row.d ?? ""));
   const mm = modelMatch(q, text);
-  return { ...row, ...c, product_type: productTypes(`${title} ${row.url ?? ""}`), ...brandCheck(q, title), ...(mm ? { match: { by: "model", token: mm } } : {}) };
+  return { ...row, ...c, product_type: productTypes(`${title} ${row.url ?? ""}`), ...brandCheck(q, title, String(row.domain ?? row.d ?? "")), ...(mm ? { match: { by: "model", token: mm } } : {}) };
 }
 
 export function applyProductFilters<T extends Record<string, any>>(rows: T[], f: { condition?: string; type?: string; brand_strict?: boolean }) {
