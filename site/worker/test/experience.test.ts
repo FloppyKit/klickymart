@@ -87,3 +87,57 @@ describe("routes", () => {
     expect(await storeExperience(env.DB, r.value, {}, { source: "relay", relays: "wss://x" })).toBe("duplicate");
   });
 });
+
+describe("r3 note fixes", () => {
+  const T = (a: Record<string, unknown>) => experienceTemplate({ domain: D, ...a }, null);
+  const tagsOf = (r: ReturnType<typeof T>) => (r.ok ? ((r.value.unsigned_event as { tags: string[][] }).tags) : []);
+  it("carries shown_before_payment, tri-state, incl. none and unknown", () => {
+    expect(tagsOf(T({ depth: "payment", shown_before_payment: "tax" }))).toContainEqual(["shown_before_payment", "tax", "true"]);
+    expect(tagsOf(T({ depth: "payment", shown_before_payment: "tax" }))).toContainEqual(["shown_before_payment", "shipping", "unknown"]);
+    expect(tagsOf(T({ depth: "payment", shown_before_payment: "none" }))).toContainEqual(["shown_before_payment", "tax", "false"]);
+    const p = parseExperience(sign(422, [["r", D], ["depth", "payment"], ["shown_before_payment", "tax", "false"], ["shown_before_payment", "shipping", "unknown"]]), known);
+    expect(p.ok && [p.value.tax_before, p.value.ship_before]).toEqual(["no", null]);
+  });
+  it("validates guest; same boolean on web and MCP", async () => {
+    expect(T({ depth: "cart", guest: "1" })).toMatchObject({ ok: false, code: "bad_guest" });
+    const r = T({ depth: "cart", guest: "yes" }); expect(r.ok && (r.value.fields as { guest: boolean }).guest).toBe(true);
+    expect(tagsOf(r)).toContainEqual(["guest", "true"]);
+    const web = await SELF.fetch(`https://example.com/report/template?domain=${D}&depth=cart&guest=1`);
+    expect(web.status).toBe(400);
+    const ok = await (await SELF.fetch(`https://example.com/report/template?domain=${D}&depth=cart&guest=true`)).json<{ fields: { guest: unknown } }>();
+    expect(ok.fields.guest).toBe(true);
+    const mcp = await (await SELF.fetch("https://example.com/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "build_experience_note", arguments: { domain: D, depth: "cart", guest: "1" } } }) })).text();
+    expect(mcp).toContain("-32602");
+  });
+  it("rating 1-5 and attempt filled automatically; attempt accepted as alias", () => {
+    const r = T({ depth: "payment", rating: "4" });
+    expect(tagsOf(r)).toContainEqual(["rating", "4", "5"]);
+    expect(tagsOf(r)).toContainEqual(["attempt", "checkout"]);
+    expect(T({ depth: "cart", rating: "9" })).toMatchObject({ ok: false, code: "bad_rating" });
+    const a = T({ attempt: "cart" }); expect(a.ok && (a.value.warnings as string[]).join()).toMatch(/alias/);
+  });
+  it("depth lines up with checkout-map stages", () => {
+    expect(tagsOf(T({ depth: "product" }))).toContainEqual(["depth", "product"]);
+    expect(tagsOf(T({ depth: "shipform" }))).toContainEqual(["depth", "shipping"]);
+  });
+  it("keeps product, warns on unknown fields, uses vocab pay codes", () => {
+    const r = T({ depth: "cart", product: "https://x.com/p/1", colour: "red", pay_used: "lightning" });
+    expect(tagsOf(r)).toContainEqual(["product", "https://x.com/p/1"]);
+    expect(tagsOf(r)).toContainEqual(["pay_used", "ln"]);
+    expect(r.ok && (r.value.warnings as string[]).join()).toMatch(/colour/);
+    const p = parseExperience(sign(422, [["r", D], ["depth", "cart"], ["mystery", "x"]]), known);
+    expect(p.ok && p.value.warnings.join()).toMatch(/mystery/);
+  });
+  it("directory and secondhand notes never count toward aggregates", async () => {
+    const D2 = "store.google.com";
+    const base = await loadAggregates(env.DB, [D2]); const k0 = base.get(D2)?.keys ?? 0;
+    for (const b of ["directory", "secondhand", "directory"]) {
+      const res = await SELF.fetch("https://example.com/reviews", { method: "POST", body: JSON.stringify(sign(422, exp([["basis", b]]))), headers: { "Content-Type": "application/json" } });
+      expect(res.status).toBe(201);
+      expect((await res.json<{ counts_toward_chart: boolean }>()).counts_toward_chart).toBe(false);
+    }
+    const after = await loadAggregates(env.DB, [D2]);
+    expect(after.get(D2)?.keys ?? 0).toBe(k0);
+    expect(T({ depth: "cart", basis: "hearsay" })).toMatchObject({ ok: false, code: "bad_basis" });
+  });
+});
