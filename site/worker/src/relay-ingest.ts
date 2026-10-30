@@ -15,6 +15,8 @@ import { lnurlNostrPubkey, lud16Of, type Fetcher, checkPreimage, checkZapReceipt
 
 export const ZAP_RECEIPT_KIND = 9735;
 export const DELETION_KIND = 5;
+/** KIMI-008: frame and buffer bounds applied when a frame is received, before it is buffered. */
+export const BUFFER_LIMITS = { maxFrameBytes: 65536 + 1024, liveMaxEvents: 2000, liveMaxBytes: 4 * 1024 * 1024, catchupMaxEvents: 5000, catchupMaxBytes: 8 * 1024 * 1024 };
 export const INGEST_LIMITS = { perPubkeyPerDay: 200, receiptsPerSignerPerDay: 1000, suggestionsPerDay: 50, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
 /** KM-007: relay-ingested notes/reviews older than this are rejected (was ~10 years), and nothing more than
  * MAX_FUTURE_S ahead of our clock is accepted. Key age is judged on first_seen (ingest time), never on created_at. */
@@ -315,8 +317,8 @@ export const workerConnect: Connect = async (url) => {
 };
 
 /** Parse one relay frame into an event (or null). */
-export function parseFrame(data: unknown): { type: "EVENT"; sub: string; ev: unknown } | { type: "EOSE" | "CLOSED" | "NOTICE"; sub?: string; msg?: string } | null {
-  if (typeof data !== "string") return null;
+export function parseFrame(data: unknown, maxBytes = BUFFER_LIMITS.maxFrameBytes): { type: "EVENT"; sub: string; ev: unknown } | { type: "EOSE" | "CLOSED" | "NOTICE"; sub?: string; msg?: string } | null {
+  if (typeof data !== "string" || data.length > maxBytes) return null; // KIMI-008: oversize frames are dropped unparsed
   try {
     const m = JSON.parse(data) as unknown[];
     if (!Array.isArray(m)) return null;
@@ -366,7 +368,7 @@ export async function catchUp(db: D1Database, relays: string[], ctx: IngestCtx, 
     const since = Math.max(0, (state[relay]?.last_seen ?? 0) - INGEST_LIMITS.catchupOverlapS);
     const filters = buildFilters(ctx, since, fulIds, authors);
     const events: { ev: unknown; relay: string }[] = [];
-    let error: string | undefined;
+    let error: string | undefined; let bytes = 0;
     try {
       const ws = await connect(relay);
       await new Promise<void>((resolve) => {
@@ -375,7 +377,13 @@ export async function catchUp(db: D1Database, relays: string[], ctx: IngestCtx, 
         ws.addEventListener("message", (e) => {
           const f = parseFrame(e.data);
           if (!f) return;
-          if (f.type === "EVENT") events.push({ ev: f.ev, relay });
+          if (f.type === "EVENT") {
+            bytes += String(e.data).length;
+            if (events.length >= BUFFER_LIMITS.catchupMaxEvents || bytes > BUFFER_LIMITS.catchupMaxBytes) { // KIMI-008
+              error = `catch-up cap reached (${events.length} events, ${bytes} bytes); rest on the next pass`; clearTimeout(t); resolve(); return;
+            }
+            events.push({ ev: f.ev, relay });
+          }
           else if ((f.type === "EOSE" || f.type === "CLOSED") && f.sub) {
             if (f.type === "CLOSED") error = `CLOSED ${f.sub}: ${f.msg ?? ""}`;
             pending.delete(f.sub);

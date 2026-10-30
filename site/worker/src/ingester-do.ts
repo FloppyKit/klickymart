@@ -3,7 +3,7 @@ import { SELFTEST_DOMAIN } from "./experience";
 /** RelayIngester Durable Object: keeps live WebSocket subscriptions to RELAY_URLS with exponential backoff, buffers
  * events and flushes them to D1. An alarm every 30 s re-establishes dropped sockets and flushes; the 5-minute cron
  * runs a separate `since`-based catch-up so nothing is lost while a socket is down. */
-import { buildFilters, ingestEvents, parseFrame, relayList, saveState, workerConnect, type IngestCtx, type SocketLike } from "./relay-ingest";
+import { BUFFER_LIMITS, buildFilters, ingestEvents, parseFrame, relayList, saveState, workerConnect, type IngestCtx, type SocketLike } from "./relay-ingest";
 import { loadSnapshot, type Env } from "./router";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 
@@ -21,7 +21,8 @@ interface RelayLive { ws: SocketLike | null; state: "connecting" | "open" | "dow
 
 export class RelayIngester {
   private live = new Map<string, RelayLive>();
-  private buffer: { ev: unknown; relay: string }[] = [];
+  private buffer: { ev: unknown; relay: string; bytes: number }[] = [];
+  private bufferBytes = 0;
   private flushing: Promise<void> | null = null;
 
   constructor(private state: DurableObjectState, private env: Env) {}
@@ -56,7 +57,13 @@ export class RelayIngester {
         ws.addEventListener("message", (e) => {
           const f = parseFrame(e.data);
           if (f?.type === "EVENT") {
-            r.events++; this.buffer.push({ ev: f.ev, relay: url });
+            // KIMI-008: bounded buffer. When full, close this relay (backpressure) and let the since-based catch-up recover.
+            const bytes = String(e.data).length;
+            if (this.buffer.length >= BUFFER_LIMITS.liveMaxEvents || this.bufferBytes + bytes > BUFFER_LIMITS.liveMaxBytes) {
+              try { ws.close(1013, "try again later"); } catch { /* */ }
+              down("buffer full: closed for backpressure"); return;
+            }
+            r.events++; this.buffer.push({ ev: f.ev, relay: url, bytes }); this.bufferBytes += bytes;
             if (this.buffer.length >= FLUSH_AT) void this.flush();
           } else if (f?.type === "EOSE") { r.attempts = 0; }
           else if (f?.type === "CLOSED") r.last_error = `CLOSED: ${f.msg ?? ""}`;
@@ -84,13 +91,21 @@ export class RelayIngester {
     if (this.flushing) return this.flushing;
     const batch = this.buffer.splice(0);
     if (!batch.length) return;
+    this.bufferBytes -= batch.reduce((a, b) => a + b.bytes, 0);
     this.flushing = (async () => {
       const ctx = await ingestCtx(this.env);
       const byRelay = new Map<string, typeof batch>();
       for (const b of batch) byRelay.set(b.relay, [...(byRelay.get(b.relay) ?? []), b]);
       for (const [relay, items] of byRelay) {
-        const r = await ingestEvents(this.env.DB, items, ctx);
-        await saveState(this.env.DB, relay, { maxCreated: r.maxCreated, events: r.accepted + r.duplicate, rejected: r.rejected, ok: true });
+        try {
+          const r = await ingestEvents(this.env.DB, items, ctx);
+          await saveState(this.env.DB, relay, { maxCreated: r.maxCreated, events: r.accepted + r.duplicate, rejected: r.rejected, ok: true });
+        } catch (e) {
+          // KIMI-008: a failed D1 write is not silently dropped: requeue within the buffer bounds, else rely on catch-up.
+          const room = BUFFER_LIMITS.liveMaxEvents - this.buffer.length;
+          if (room > 0) { const back = items.slice(0, room); this.buffer.unshift(...back); this.bufferBytes += back.reduce((a, b) => a + b.bytes, 0); }
+          try { await saveState(this.env.DB, relay, { error: `flush failed: ${(e as Error).message}`.slice(0, 200) }); } catch { /* */ }
+        }
       }
     })().finally(() => { this.flushing = null; });
     return this.flushing;
