@@ -1,3 +1,8 @@
+import { queryTokens } from "./search-terms";
+import { CATEGORY_MAP } from "./category-map";
+import { resolveCategory } from "./alternatives";
+const qCache = new Map<string, string | null>();
+const qCategory = (q: string) => { if (!qCache.has(q)) qCache.set(q, /\s|-/.test(q) || resolveCategory(q) ? resolveCategory(q) : null); return qCache.get(q)!; };
 import type { IndexRow, Snapshot } from "./index-mem";
 import {
   AR_CODES,
@@ -282,7 +287,14 @@ function payMaskForScope(row: IndexRow, scope: QueryParams["scope"]): number {
 function matches(row: IndexRow, p: QueryParams): boolean {
   if (p.q) {
     const hay = `${row.d} ${row.name ?? ""}`.toLowerCase();
-    if (!hay.includes(p.q)) return false;
+    if (!hay.includes(p.q)) {
+      const qt = queryTokens(p.q);
+      const ht = new Set(queryTokens(hay.replace(/\./g, " ")));
+      const byWords = qt.length > 0 && qt.every((w) => ht.has(w));
+      const qcat = qCategory(p.q);
+      const byCat = qcat !== null && (CATEGORY_MAP.map[row.d] ?? []).includes(qcat);
+      if (!byWords && !byCat) return false;
+    }
   }
 
   if (p.reachable) {

@@ -10,7 +10,7 @@ export function parseOffers(ndjson: string): Offer[] {
   if (parsedFrom === ndjson) return parsed;
   parsed = ndjson.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Offer); parsedFrom = ndjson; return parsed;
 }
-const tok = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 1);
+import { queryTokens, offerTokens, coverage } from "./search-terms";
 const normGtin = (g: string) => g.replace(/\D/g, "").replace(/^0+/, "");
 
 export interface OfferQuery { gtin?: string; mpn?: string; q?: string; zip?: string | null; domain?: string; in_stock?: boolean; max_price?: number; limit?: number }
@@ -18,7 +18,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   const limit = Math.min(Math.max(qy.limit ?? 20, 1), 100);
   const g = qy.gtin ? normGtin(qy.gtin) : null;
   const m = qy.mpn ? qy.mpn.toLowerCase().replace(/[^a-z0-9]/g, "") : null;
-  const qt = qy.q ? tok(qy.q) : [];
+  const qt = qy.q ? queryTokens(qy.q) : [];
   if (!g && !m && !qt.length && !qy.domain) return { ok: false as const, message: "give gtin, mpn, q or domain" };
   const rows = new Map(snap.rows.map((r) => [r.d, r]));
   const scored: { o: Offer; conf: number; how: string }[] = [];
@@ -28,8 +28,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
     if (g && o.g && normGtin(o.g) === g) { conf = 1; how = "gtin"; }
     else if (m && o.m && o.m.toLowerCase().replace(/[^a-z0-9]/g, "") === m) { conf = 0.95; how = "mpn"; }
     else if (qt.length) {
-      const nt = new Set(tok(`${o.b ?? ""} ${o.n}`));
-      const hit = qt.filter((w) => nt.has(w)).length;
+      const hit = coverage(qt, offerTokens(o.n, o.b));
       if (hit === qt.length) { conf = 0.8; how = "name-all-words"; } else if (hit / qt.length >= 0.6 && qt.length >= 3) { conf = 0.5; how = "name-most-words"; }
     } else if (qy.domain && !g && !m) { conf = 0.1; how = "domain"; }
     if (!conf) continue;
