@@ -1,3 +1,5 @@
+import { storeFacts } from "./explain";
+const pickAlt = (f: ReturnType<typeof storeFacts>) => ({ agent_access: f.agent_access, checkout: f.checkout, guest: f.guest, btc_grade: f.btc_grade });
 /** CASCADE GO 5.6: "Where else can my agent buy this?" Index-only; never crawls. */
 import type { IndexRow, Snapshot } from "./index-mem";
 import { parseRaw } from "./records-api";
@@ -37,7 +39,7 @@ const SYNONYMS: [RegExp, string][] = [
   [/noise.?cancel|\banc\b|over.?ear|headphone|earbud|laptop|phone|tv|camera|electronic|speaker|monitor/i, "electronics"],
   [/gift ?card|voucher|top.?up|refill/i, "gift-cards"],
   [/grocer|food|snack/i, "groceries"],
-  [/shirt|shoe|cloth|apparel|jacket|hoodie|fashion/i, "apparel"],
+  [/shirt|shoe|cloth|apparel|jacket|hoodie|fashion|hand ?bag|purse|tote|wallet bag|designer/i, "apparel"],
   [/tool|hardware store|lumber|drill|paint|auto part/i, "hardware"],
   [/book/i, "books"],
   [/flight|hotel|travel|ticket/i, "travel"],
@@ -70,7 +72,9 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   }
   if (p.category && !cats.length) {
     const c = resolveCategory(p.category);
-    if (!c) return { ok: false as const, message: `unknown category; use one of ${COARSE_CATEGORIES.join(", ")} or a product word like headphones` };
+    if (!c) return { ok: true as const, body: { from: p.domain ?? null, categories: [] as string[], sub: null, filters: { pay: p.pay ?? null, guest: !!p.guest }, count: 0, total: 0, items: [] as never[], turned_away: [] as never[], turned_away_note: "",
+      note: `We have no category for "${p.category}" yet, so there are no alternatives to list. Use one of valid_categories or a product word like headphones.`,
+      valid_categories: [...COARSE_CATEGORIES], valid_subs: [...SUBCATEGORIES] } };
     cats = [c];
   }
   if (p.domain) {
@@ -122,7 +126,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       d: row.d, name: row.name, url: `https://${row.d}/`, categories: categoriesFor(row.d, raw),
       sub: subsFor(raw), sub_match: sub ? (subRank === 2 ? "main line" : subRank === 1 ? "carries it" : "unknown") : null, major_retailer: MAJOR_RETAILERS.has(row.d),
       agent_ordering: raw.agent_policy ? (raw.agent_policy as { v: string }).v : null,
-      agent_access: row.ag, checkout: row.co, guest: row.guest === null ? null : row.guest === 1, btc_grade: row.btc, ease: row.ease,
+      ...pickAlt(storeFacts(row)), ease: row.ease,
       pay: pays, evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
     };
   });
