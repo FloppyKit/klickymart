@@ -156,10 +156,12 @@ export function cleanCategory(c: unknown): string | null {
 export function ipHash(ip: string | null, salt: string, now = Date.now()): string | null {
   if (!ip) return null;
   const week = Math.floor(now / (7 * 86400_000));
-  return bytesToHex(hmac(sha256, utf8ToBytes(salt || EPHEMERAL_SALT), utf8ToBytes(`km-submit:${week}:${ip}`))).slice(0, 24);
+  return bytesToHex(hmac(sha256, utf8ToBytes(salt || ephemeralSalt()), utf8ToBytes(`km-submit:${week}:${ip}`))).slice(0, 24);
 }
 /** Random per-isolate key used only when no SUBMIT_SALT secret is configured (KM-013: no committed default salt). */
-export const EPHEMERAL_SALT = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+let ephemeral: string | null = null;
+/** Per-isolate random salt, created lazily (random values are not allowed at Worker global scope). */
+export function ephemeralSalt(): string { return (ephemeral ??= bytesToHex(crypto.getRandomValues(new Uint8Array(32)))); }
 export function agentId(name: string, salt: string): string {
   return "agent:" + bytesToHex(sha256(utf8ToBytes(`km-agent:${salt}:${name.trim().toLowerCase().slice(0, 64)}`))).slice(0, 16);
 }

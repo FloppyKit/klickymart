@@ -41,7 +41,7 @@ import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
-import { EPHEMERAL_SALT } from "./submissions";
+import { ephemeralSalt } from "./submissions";
 import { take, takeAll } from "./ratelimit";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
@@ -320,7 +320,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const t = await allTiers();
     return { ...snap, rows: snap.rows.filter((r) => meetsMinTrust(t.get(r.d)?.trust_tier, minTrust)) };
   };
-  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || EPHEMERAL_SALT, ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
+  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
   const handleSubmit = async (body: Record<string, unknown>, via: "post" | "mcp", dryRun: boolean) => {
     const evIn = body.event ?? (typeof body.kind === "number" ? body : null);
     if (evIn) {
