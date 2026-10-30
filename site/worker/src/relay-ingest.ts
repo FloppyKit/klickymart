@@ -10,11 +10,12 @@ import type { NostrEventLine } from "./nostr-record-source";
 import { verifyNostrEvent } from "./nostr-verify";
 import { parseReviewEvent, storeReview } from "./reviews";
 import { KIND_NOTE, NOTE_HASHTAG, parseExperience, storeExperience } from "./experience";
+import { take } from "./ratelimit";
 import { lnurlNostrPubkey, lud16Of, type Fetcher, checkPreimage, checkZapReceipt, NO_BINDINGS, storeBindings, type StoreBindings } from "./pay-binding";
 
 export const ZAP_RECEIPT_KIND = 9735;
 export const DELETION_KIND = 5;
-export const INGEST_LIMITS = { perPubkeyPerDay: 200, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
+export const INGEST_LIMITS = { perPubkeyPerDay: 200, receiptsPerSignerPerDay: 1000, suggestionsPerDay: 50, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
 /** KM-007: relay-ingested notes/reviews older than this are rejected (was ~10 years), and nothing more than
  * MAX_FUTURE_S ahead of our clock is accepted. Key age is judged on first_seen (ingest time), never on created_at. */
 export const RELAY_NOTE_MAX_AGE_S = 60 * 86400;
@@ -100,6 +101,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   const d = eventDomain(ev, ctx);
   if (ev.kind === NOSTR_KIND_CRAWL_RECORD) {
     if (!d) return { ok: false, reason: "31420 without valid d tag" };
+    if (!ctx.domains.has(d)) return { ok: false, reason: "31420 for a domain not in the index" }; // KM-009
     try { JSON.parse(ev.content); } catch { return { ok: false, reason: "31420 content is not JSON" }; }
     return { ok: true, d };
   }
@@ -209,6 +211,15 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     const { results } = await db.prepare(`SELECT pubkey, COUNT(*) AS n FROM nostr_events WHERE first_seen > ? AND pubkey IN (${chunk.map(() => "?").join(",")}) GROUP BY pubkey`).bind(nowS - 86400, ...chunk).all<{ pubkey: string; n: number }>();
     for (const r of results ?? []) pkCount.set(r.pubkey, r.n);
   }
+  // KM-009: zap receipts are kept only when they point at a note/421 we hold (or one in this batch).
+  const heldTargets = new Set(valid.filter((x) => x.ev.kind !== ZAP_RECEIPT_KIND).map((x) => x.ev.id));
+  const rTargets = [...new Set(valid.filter((x) => x.ev.kind === ZAP_RECEIPT_KIND).map((x) => tagv(x.ev.tags, "e")).filter((x): x is string => !!x && /^[0-9a-f]{64}$/.test(x)))];
+  for (let k = 0; k < rTargets.length; k += 30) {
+    const chunk = rTargets.slice(k, k + 30); const q = chunk.map(() => "?").join(",");
+    for (const sql of [`SELECT id FROM nostr_events WHERE id IN (${q}) AND kind != ${ZAP_RECEIPT_KIND}`, `SELECT id FROM experiences WHERE id IN (${q})`, `SELECT id FROM reviews WHERE id IN (${q})`]) {
+      try { for (const r of (await db.prepare(sql).bind(...chunk).all<{ id: string }>()).results ?? []) heldTargets.add(r.id); } catch { /* table missing */ }
+    }
+  }
   const stmts: D1PreparedStatement[] = [];
   const reviews: Ev[] = [];
   const suggestions: Ev[] = [];
@@ -224,9 +235,14 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
       }
       res.duplicate++; continue;
     }
-    if (ev.pubkey !== ctx.ourPubkey && ev.kind !== ZAP_RECEIPT_KIND) { // receipts are signed by LNURL servers on behalf of many payers
+    if (ev.kind === ZAP_RECEIPT_KIND) { // KM-009: receipts only for notes/421s we hold, and capped per signer (LNURL servers sign for many payers)
+      const target = tagv(ev.tags, "e");
+      if (!target || !(heldTargets.has(target))) { reject("zap receipt for an event we do not hold"); continue; }
+    }
+    if (ev.pubkey !== ctx.ourPubkey) {
       const n = pkCount.get(ev.pubkey) ?? 0;
-      if (n >= INGEST_LIMITS.perPubkeyPerDay) { reject("rate-limited pubkey"); continue; }
+      const cap = ev.kind === ZAP_RECEIPT_KIND ? INGEST_LIMITS.receiptsPerSignerPerDay : INGEST_LIMITS.perPubkeyPerDay;
+      if (n >= cap) { reject("rate-limited pubkey"); continue; }
       pkCount.set(ev.pubkey, n + 1);
     }
     existing.set(ev.id, relay);
@@ -254,6 +270,8 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   for (const ev of suggestions) {
     const p = parseSuggestionEvent(ev, now, 365 * 86400);
     if (ev.tags.some((t) => t[0] === "claim")) continue; // claims need a live DNS check: POST /claim/dns
+    // KM-009: a global daily cap on relay-sourced crawl-queue suggestions (fresh keys are free to mint).
+    if (p.ok) { try { if (!(await take(db, { k: `sug:g:${new Date(now).toISOString().slice(0, 10)}`, limit: INGEST_LIMITS.suggestionsPerDay, ttlS: 2 * 86400 }))) continue; } catch { /* migration pending */ } }
     if (p.ok) { try { await submitStore({}, { db, indexed: ctx.domains, salt: "", ip: null, via: "nostr", signed: p.value, now, origin: "https://klickymart.com" }); } catch { /* migration pending */ } }
   }
   for (const ev of reviews) {
