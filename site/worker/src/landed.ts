@@ -30,7 +30,8 @@ export function zipToState(zip: string): string | null {
 export function validZip(z: string | null | undefined): string | null { return z && /^\d{5}$/.test(z) && zipToState(z) ? z : null; }
 
 /** Landed-cost view of one record for a ZIP (and optional item price). Unknown stays null. */
-export function landedFor(raw: Record<string, unknown>, zip: string, price?: number | null) {
+export type OfferShip = { usd: number; n?: number; src?: string; me?: string; note?: string };
+export function landedFor(raw: Record<string, unknown>, zip: string, price?: number | null, offerShip?: OfferShip | null) {
   const st = zipToState(zip);
   const s = shipOf(raw);
   const t = st ? STATE_TAX[st] : undefined;
@@ -45,13 +46,20 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
     free_ship_min_usd: s.free_min_usd,
     ship_quote: quote,
   };
-  if (typeof price === "number" && t) {
-    const ship = freeShip ? 0 : quote ? quote.amount : null;
+  if (typeof price === "number") {
+    // Shipping, best evidence first: the product page's own structured data, then the store's free-shipping threshold, then a ZIP quote.
+    let ship: number | null = null; let shipSrc: Record<string, unknown> | null = null;
+    if (offerShip && typeof offerShip.usd === "number") { ship = offerShip.usd; shipSrc = { method: offerShip.me ?? "jsonld-shippingDetails", src: offerShip.src ?? null, note: offerShip.note ?? null }; }
+    else if (freeShip === true) { ship = 0; shipSrc = { method: "free-shipping-threshold", threshold_usd: s.free_min_usd }; }
+    else if (quote) { ship = quote.amount; shipSrc = { method: quote.method ?? "ship-quote", src: quote.src ?? null }; }
     out.item_price = price;
     out.free_shipping_applies = freeShip;
-    out.est_tax = Math.round(price * t[1]) / 100;
-    out.est_total = ship === null ? null : Math.round((price + ship + (price * t[1]) / 100) * 100) / 100;
-    if (ship === null) out.est_total_note = "shipping cost not known for this store; total excludes shipping";
+    out.shipping = { usd: ship, source: shipSrc, ...(ship === null ? { note: "unknown: no public structured shipping cost or free-shipping threshold for this store/item" } : {}) };
+    out.est_tax = t ? Math.round(price * t[1]) / 100 : null;
+    const known = ship !== null && t !== undefined;
+    out.est_total = known ? Math.round((price + ship! + (price * t![1]) / 100) * 100) / 100 : null;
+    if (!known) out.est_total_note = `no total: ${[ship === null ? "shipping" : null, t ? null : "tax rate"].filter(Boolean).join(" and ")} unknown; parts are given separately`;
+    else out.est_total_note = "price + shipping + estimated tax (state + average local rate; exact tax depends on the street address)";
   }
   return out;
 }

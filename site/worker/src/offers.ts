@@ -1,10 +1,11 @@
+import { storeFacts } from "./explain";
 /** GO D1: product offers observed by KlickyBot (deterministic: schema.org JSON-LD and Shopify /products.json only).
  * Shopify catalog (UCP) results are never stored: its usage guidelines forbid caching, so /offers can add them live (live=1). */
 import type { Snapshot } from "./index-mem";
 import { parseRaw } from "./records-api";
 import { landedFor } from "./landed";
 
-export interface Offer { d: string; n: string; b?: string | null; g?: string | null; m?: string | null; s?: string | null; p: number; c: string; st?: string | null; cd?: string | null; sl?: string | null; u: string; me: string; src: string; t: string }
+export interface Offer { d: string; n: string; b?: string | null; g?: string | null; m?: string | null; s?: string | null; p: number; c: string; st?: string | null; cd?: string | null; sl?: string | null; u: string; me: string; src: string; t: string; sh?: import("./landed").OfferShip | null; dn?: { face_usd: number; range?: (number | null)[]; count?: number | null; fee?: number | null; note?: string } | null }
 let parsedFrom: string | null = null; let parsed: Offer[] = [];
 export function parseOffers(ndjson: string): Offer[] {
   if (parsedFrom === ndjson) return parsed;
@@ -46,8 +47,10 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
       domain: o.d, name: o.n, brand: o.b ?? null, gtin: o.g ?? null, mpn: o.m ?? null, sku: o.s ?? null,
       price: o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
-      store: row ? { verdict: row.status === "crawled" ? "reachable" : row.status, checkout_depth: row.co, guest: row.guest === null ? null : row.guest === 1, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
-      ...(zip && o.c === "USD" ? { landed: landedFor(raw, zip, o.p) } : {}),
+      ...(o.dn ? { denomination: o.dn } : {}),
+      shipping: o.sh ? { usd: o.sh.usd, method: o.sh.me ?? "jsonld-shippingDetails", src: o.sh.src ?? null, note: o.sh.note ?? null } : { usd: null, note: "unknown for this item; see landed (with zip) for store-level free-shipping thresholds" },
+      store: row ? { verdict: row.status === "crawled" ? "reachable" : row.status, checkout_depth: storeFacts(row).co, guest: storeFacts(row).guest, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
+      ...(zip && o.c === "USD" ? { landed: landedFor(raw, zip, o.p, o.sh ?? null) } : {}),
     };
   });
   return { ok: true as const, body: { query: qy, count: items.length, total: scored.length, items,
