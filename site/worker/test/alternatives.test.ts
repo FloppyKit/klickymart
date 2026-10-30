@@ -15,8 +15,8 @@ type Alt = { categories: string[]; items: { d: string; checkout: number | null; 
 const get = async (q: string) => (await SELF.fetch(`https://example.com/alternatives?${q}`)).json<Alt>();
 
 describe("alternatives (GO 5.6)", () => {
-  it("maps all 250 domains to coarse categories", () => {
-    expect(Object.keys(CATEGORY_MAP.map).length).toBe(250);
+  it("maps all 324 domains to coarse categories", () => {
+    expect(Object.keys(CATEGORY_MAP.map).length).toBe(324);
     expect(CATEGORY_MAP.map["amazon.com"]).toContain("electronics");
     expect(resolveCategory("headphones")).toBe("electronics");
     expect(resolveCategory("gift card")).toBe("gift-cards");
