@@ -27,10 +27,13 @@ export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
   return {
     domain: row.d, indexed: true, verdict: row.status === "crawled" ? "reachable" : row.status,
     ...storeFacts(row),
-    pay, pay_shop_pay: has("spay"), pay_link: pay.includes("link") ? true : null, pay_btc_onchain: has("btc"), pay_lightning: pay.length ? pay.includes("ln") || pay.includes("lnurl") : null,
+    pay, pay_shop_pay: has("spay"), pay_link: pay.includes("link") ? true : (raw.link_checked ? false : null), pay_btc_onchain: has("btc"), pay_lightning: pay.length ? pay.includes("ln") || pay.includes("lnurl") : null,
     btc_indirect: (raw.btc_indirect as unknown[] | undefined) ?? null,
     ships_us: sh.ships_us, free_ship_min_usd: sh.free_min_usd, tax_shown_before_payment: sh.pre_pay,
     checkout_stage: cm?.stage ?? null, first_blocker: cm?.first_blocker?.kind ?? null,
+    shipping_policy: (raw.ship_policy as unknown) ?? null,
+    ...(row.status === "blocked-tos" ? { tos: "bans-automation", tos_quote: (raw.tos_q as string | undefined) ?? null, tos_url: (raw.tos_url as string | undefined) ?? null,
+      tos_note: "The store's terms ban automated access, so KlickyBot recorded that fact and did not crawl it; pay/checkout/shipping facts stay unknown." } : {}),
     pay_note: "pay_link is null unless the store's own pages name Link; null = not observed",
     record: `${origin}/records/${encodeURIComponent(row.d)}`,
   };
