@@ -215,12 +215,12 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, stored: false } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
-      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart" } };
+      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
     } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
   }
   if (!p.ok) return { status: 400, body: { ok: false, error: { code: p.code, message: p.message } } };
@@ -410,11 +410,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     for (const k of ["pay_offered", "walls", "steps"]) if (typeof args[k] === "string") args[k] = String(args[k]).split(",");
     const d = String(args.domain ?? "").toLowerCase().replace(/^www\./, "");
     const t = experienceTemplate(args, aTagFor(d));
-    if (!t.ok) return err400(t.code === "region_too_precise" ? "region" : t.code === "bad_depth" ? "depth" : "domain", t.message);
+    if (!t.ok) return err400(t.code === "region_too_precise" ? "region" : t.code === "missing_domain" ? "domain" : t.code.replace(/^bad_/, ""), t.message);
     return Response.json(t.value, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   }
   if (path === "/report" && request.method === "GET") {
-    const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "yes", account_required: "no", pay_used: "lightning", pay_offered: ["card", "lightning", "spay"], btc_route: "native", tax_shown_before_payment: "yes", shipping_shown_before_payment: "yes", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
+    const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "true", account_required: "false", basis: "visit", pay_used: "ln", pay_offered: ["card", "ln", "spay"], btc_route: "native", shown_before_payment: "tax,shipping", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
     return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
   if (path === "/pending.json" && request.method === "GET") {
