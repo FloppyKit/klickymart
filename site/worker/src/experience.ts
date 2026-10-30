@@ -4,18 +4,29 @@
 import { NOSTR_KIND_ACCEPTANCE, NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
 import { verifyNostrEvent } from "./nostr-verify";
 import { utcDay } from "./agent-visits";
-import { canonPay } from "./vocab";
+import { canonPay, isPayCode } from "./vocab";
 
-export const EXP_DEPTHS = ["browse", "cart", "checkout", "payment", "paid", "delivered"] as const;
+/** Depth stages, aligned with the checkout-map stages (home/category -> browse, product, cart, checkout, shipform -> shipping, paypage -> payment). */
+export const EXP_DEPTHS = ["browse", "product", "cart", "checkout", "shipping", "payment", "paid", "delivered"] as const;
+/** Checkout-map stage names and legacy names accepted as depth aliases (with a warning). */
+export const DEPTH_ALIASES: Record<string, string> = { home: "browse", category: "browse", shop: "browse", sitemap: "browse", price_tile: "product", add_to_cart: "cart", cart_reload: "cart", checkout_click: "checkout", checkout_direct: "checkout", continue: "checkout", shipform: "shipping", paypage: "payment", bought: "paid" };
+export function canonDepth(v: string | undefined): { depth: string | null; alias: boolean; bad: boolean } {
+  if (!v) return { depth: null, alias: false, bad: false };
+  const k = v.trim().toLowerCase();
+  if ((EXP_DEPTHS as readonly string[]).includes(k)) return { depth: k, alias: false, bad: false };
+  if (DEPTH_ALIASES[k]) return { depth: DEPTH_ALIASES[k]!, alias: true, bad: false };
+  return { depth: null, alias: false, bad: true };
+}
 export const EXP_WALLS = ["captcha", "login", "bot-wall", "geo", "age-gate", "phone-verify", "none"] as const;
 export const EXP_BTC_ROUTES = ["native", "indirect"] as const;
 export const PROOF_TAGS = ["zap", "preimage", "cashu", "order_hash"] as const;
 export const KIND_NOTE = 1;
+/** basis: visit = the agent went to the store itself; directory = written from KlickyMart data; secondhand = relayed from someone else's account. Only "visit" counts toward aggregates. */
+export const EXP_BASIS = ["visit", "directory", "secondhand"] as const;
 export const NOTE_HASHTAG = "klickymart";
-const LEGACY_ATTEMPT: Record<string, string> = { browse: "browse", cart: "cart", checkout: "checkout", paid: "paid" };
 /** Experience tag names, documented in llms.txt / NIP-DRAFT. All optional except the store reference. */
 export const EXP_TAGS = ["a", "r", "product", "gtin", "depth", "step", "steps", "blocker", "wall", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
-  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", ...PROOF_TAGS] as const;
+  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", ...PROOF_TAGS] as const;
 
 export interface Experience {
   id: string; kind: number; d: string; pubkey: string; created_at: number; structured: boolean;
@@ -23,11 +34,14 @@ export interface Experience {
   tax_before: string | null; ship_before: string | null; price: number | null; shipping: number | null; tax: number | null; total: number | null; currency: string | null;
   region: string | null; steps_n: number | null; duration_s: number | null; blocker: string | null; walls: string[]; agent: string | null;
   delivered: string | null; delivery_days: number | null; rating5: number | null; product: string | null; proof: string | null; content: string;
+  basis: "visit" | "directory" | "secondhand"; warnings: string[];
 }
 type Res<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 const fail = (code: string, message: string) => ({ ok: false as const, code, message });
 const tv = (tags: string[][], n: string) => tags.find((t) => t[0] === n);
 const yn = (v: string | undefined) => (v === "yes" || v === "true" ? "yes" : v === "no" || v === "false" ? "no" : null);
+/** Tri-state: true|false|unknown (yes|no accepted). null = unknown/absent; "bad" = invalid. */
+export const tri = (v: string | undefined): "yes" | "no" | null | "bad" => { if (v === undefined || v === "" || v === "unknown") return null; return yn(v.toLowerCase()) ?? "bad"; };
 const num = (v: string | undefined) => { const n = Number(v); return v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? n : null; };
 
 /** Store reference from ["a","31420:<pk>:<domain>"] or ["r","<domain or url>"]. */
@@ -64,8 +78,19 @@ export function parseExperience(input: unknown, knownDomain: (d: string) => bool
   if (!knownDomain(d)) return fail("unknown_domain", `${d} is not in the index`);
   const structured = ev.kind === NOSTR_KIND_ACCEPTANCE;
   if (!structured && !tags.some((t) => t[0] === "t" && t[1]?.toLowerCase() === NOTE_HASHTAG)) return fail("missing_hashtag", 'kind 1 notes need ["t","klickymart"]');
-  const depth = tv(tags, "depth")?.[1] ?? LEGACY_ATTEMPT[tv(tags, "attempt")?.[1] ?? ""] ?? null;
-  if (depth && !(EXP_DEPTHS as readonly string[]).includes(depth)) return fail("bad_depth", `depth must be one of ${EXP_DEPTHS.join("|")}`);
+  const warnings: string[] = [];
+  const unknownTags = [...new Set(tags.map((t) => t[0]!).filter((n) => !(EXP_TAGS as readonly string[]).includes(n)))];
+  if (unknownTags.length) warnings.push(`ignored unknown tags: ${unknownTags.join(", ")}`);
+  const flags: Record<string, "yes" | "no" | null> = {};
+  for (const k of ["guest", "account_required"]) { const v = tri(tv(tags, k)?.[1]); if (v === "bad") return fail(`bad_${k}`, `["${k}", true|false|unknown] (got "${tv(tags, k)?.[1]}")`); flags[k] = v; }
+  const basisT = tv(tags, "basis")?.[1];
+  if (basisT && !(EXP_BASIS as readonly string[]).includes(basisT)) return fail("bad_basis", 'basis must be "visit" (you went to the store), "directory" (written from KlickyMart data, no visit) or "secondhand" (relayed from someone else)');
+  if (structured && !basisT) warnings.push('no ["basis",...] tag: treated as "visit". Use ["basis","directory"] if you did not visit the store.');
+  if (!tv(tags, "depth") && tv(tags, "attempt")) warnings.push('"attempt" is the legacy name; use ["depth",...] (attempt accepted as an alias)');
+  const cd = canonDepth(tv(tags, "depth")?.[1] ?? tv(tags, "attempt")?.[1]);
+  if (cd.bad) return fail("bad_depth", `depth must be one of ${EXP_DEPTHS.join("|")} (checkout-map stage names like ${Object.keys(DEPTH_ALIASES).slice(0, 6).join(", ")} are accepted as aliases)`);
+  if (cd.alias) warnings.push(`depth "${tv(tags, "depth")?.[1] ?? tv(tags, "attempt")?.[1]}" mapped to "${cd.depth}"`);
+  const depth = cd.depth;
   const rg = coarseRegion(tv(tags, "region")?.[1]); if (!rg.ok) return rg;
   if (/\b\d{5}(-\d{4})?\b/.test(tags.filter((t) => t[0] === "region").flat().join(" "))) return fail("region_too_precise", "never put a full ZIP in tags");
   const r = tv(tags, "rating"); let rating5: number | null = null;
@@ -73,9 +98,12 @@ export function parseExperience(input: unknown, knownDomain: (d: string) => bool
   if (structured && !depth && rating5 === null) return fail("not_an_experience", 'a 422 experience needs at least ["depth",...] or ["rating",...]');
   const amt = (k: string) => { const t = tags.find((x) => x[0] === "amount" && x[1] === k); return t ? { v: num(t[2]), c: t[3] ?? null } : null; };
   const price = amt("price"), ship = amt("shipping"), tax = amt("tax"), total = amt("total");
-  const sbp = (k: string) => yn(tags.find((x) => x[0] === "shown_before_payment" && x[1] === k)?.[2]);
+  const sbpNone = tags.some((x) => x[0] === "shown_before_payment" && x[1] === "none");
+  const sbp = (k: string) => { const t = tags.find((x) => x[0] === "shown_before_payment" && x[1] === k); if (t) { const v = tri(t[2]); if (v === "bad") warnings.push(`shown_before_payment ${k}: "${t[2]}" is not true|false|unknown; ignored`); return v === "bad" ? null : v; } return sbpNone ? "no" : null; };
+  for (const t of tags) if (t[0] === "shown_before_payment" && !["tax", "shipping", "none"].includes(t[1] ?? "")) warnings.push(`shown_before_payment "${t[1]}" ignored (use tax, shipping or none)`);
   const payUsed = tv(tags, "pay_used")?.[1] ?? tv(tags, "pay")?.[1] ?? null;
   const pay_offered = [...new Set(tags.filter((t) => t[0] === "pay_offered").flatMap((t) => t.slice(1)).map((x) => canonPay(x.toLowerCase())).filter((x): x is string => !!x))];
+  for (const c of [payUsed, ...tags.filter((t) => t[0] === "pay_offered").flatMap((t) => t.slice(1))]) if (c && !isPayCode(canonPay(c))) warnings.push(`pay code "${c}" not in /vocab.json pay_codes; kept as given`);
   const br = tv(tags, "btc_route")?.[1] ?? null;
   if (br && !(EXP_BTC_ROUTES as readonly string[]).includes(br)) return fail("bad_btc_route", "btc_route must be native or indirect");
   const steps = tags.filter((t) => t[0] === "step");
@@ -84,28 +112,28 @@ export function parseExperience(input: unknown, knownDomain: (d: string) => bool
   if (tv(tags, "order_hash") && !/^[0-9a-f]{64}$/i.test(tv(tags, "order_hash")![1] ?? "")) return fail("bad_order_hash", "order_hash must be a 64-hex sha256 of the order confirmation (never the confirmation itself)");
   return { ok: true, value: {
     id: ev.id.toLowerCase(), kind: ev.kind, d, pubkey: ev.pubkey.toLowerCase(), created_at: ev.created_at, structured,
-    depth, guest: yn(tv(tags, "guest")?.[1]), account_required: yn(tv(tags, "account_required")?.[1]),
+    depth, guest: flags.guest!, account_required: flags.account_required!,
     pay_used: payUsed ? canonPay(payUsed.toLowerCase()) ?? payUsed.toLowerCase().slice(0, 40) : null, pay_offered, btc_route: br,
     tax_before: sbp("tax"), ship_before: sbp("shipping"), price: price?.v ?? null, shipping: ship?.v ?? null, tax: tax?.v ?? null, total: total?.v ?? null,
     currency: (total?.c ?? price?.c ?? ship?.c ?? tax?.c ?? null)?.toUpperCase().slice(0, 3) ?? null, region: rg.value,
     steps_n: num(tv(tags, "steps")?.[1]) ?? (steps.length || null), duration_s: num(tv(tags, "duration_s")?.[1]),
     blocker: tv(tags, "blocker")?.[1]?.slice(0, 40) ?? null, walls: tags.filter((t) => t[0] === "wall").map((t) => t[1]!).filter((w) => (EXP_WALLS as readonly string[]).includes(w)),
     agent: tv(tags, "agent")?.[1]?.slice(0, 60) ?? null, delivered: del ? yn(del[1]) : null, delivery_days: del ? num(del[2]) : null,
-    rating5, product: (tv(tags, "product")?.[1] ?? (tv(tags, "gtin") ? `gtin:${tv(tags, "gtin")![1]}` : null))?.slice(0, 300) ?? null, proof, content: ev.content,
+    basis: (basisT as Experience["basis"] | undefined) ?? "visit", warnings, rating5, product: (tv(tags, "product")?.[1] ?? (tv(tags, "gtin") ? `gtin:${tv(tags, "gtin")![1]}` : null))?.slice(0, 300) ?? null, proof, content: ev.content,
   } };
 }
 
 export async function storeExperience(db: D1Database, x: Experience, raw: unknown, src: { source: "post" | "relay"; relays?: string | null; proof_status?: string | null }, now = Date.now()) {
-  const r = await db.prepare(`INSERT OR IGNORE INTO experiences (id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,raw_json,source,relays,received_day)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+  const r = await db.prepare(`INSERT OR IGNORE INTO experiences (id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,raw_json,source,relays,received_day,basis)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
     x.id, x.kind, x.d, x.pubkey, x.created_at, x.structured ? 1 : 0, x.depth, x.guest, x.account_required, x.pay_used, JSON.stringify(x.pay_offered), x.btc_route, x.tax_before, x.ship_before,
     x.price, x.shipping, x.tax, x.total, x.currency, x.region, x.steps_n, x.duration_s, x.blocker, JSON.stringify(x.walls), x.agent, x.delivered, x.delivery_days, x.rating5, x.product, x.proof,
-    src.proof_status ?? (x.proof ? "proof-attached" : null), x.content, JSON.stringify(raw), src.source, src.relays ?? null, utcDay(now)).run();
+    src.proof_status ?? (x.proof ? "proof-attached" : null), x.content, JSON.stringify(raw), src.source, src.relays ?? null, utcDay(now), x.basis ?? "visit").run();
   return (r.meta?.changes ?? 0) > 0 ? "stored" : "duplicate";
 }
 
 export const MIN_KEYS = 2;
-const DEPTH_RANK: Record<string, number> = { browse: 0, cart: 1, checkout: 2, payment: 3, paid: 4, delivered: 5 };
+const DEPTH_RANK: Record<string, number> = { browse: 0, product: 0.5, cart: 1, checkout: 2, shipping: 2.5, payment: 3, paid: 4, delivered: 5 };
 /** Weight of one key's evidence: 1 by default, 2 with a proof attached, 3 when the proof was checked. */
 export const proofWeight = (proof: string | null, status: string | null) => (status?.startsWith("verified") ? 3 : proof ? 2 : 1);
 type Row = Experience & { proof_status: string | null; walls_json?: string };
@@ -118,7 +146,7 @@ export interface StoreAggregate {
   guest_yes_keys: number; guest_no_keys: number; account_required_keys: number;
   tax_before: { yes: number; no: number }; ship_before: { yes: number; no: number };
   observed: { shipping_usd: { median: number | null; n: number; keys: number; corroborated: boolean }; tax_rate_pct: { median: number | null; n: number; keys: number; corroborated: boolean } };
-  verified_purchase_share: number; proof_keys: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
+  verified_purchase_share: number; proof_keys: number; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
 }
 const med = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : Math.round(((s[m - 1]! + s[m]!) / 2) * 100) / 100; };
 
@@ -163,7 +191,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now()): StoreAggreg
   };
 }
 
-const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content";
+const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
 const fromDb = (r: Record<string, any>): Row => ({ ...r, structured: r.structured === 1, pay_offered: JSON.parse(r.pay_offered || "[]"), walls: JSON.parse(r.walls || "[]") }) as Row;
 export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now()): Promise<Map<string, StoreAggregate>> {
   const out = new Map<string, StoreAggregate>();
@@ -173,38 +201,71 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
-    for (const [d, rows] of by) out.set(d, aggregate(d, rows, now));
+    // Directory-based and second-hand notes never count toward aggregates or corroboration.
+    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
   } catch { /* migration pending */ }
   return out;
 }
 
 /** Unsigned event template for the agent to sign and publish itself. */
+export const TEMPLATE_PARAMS = ["domain", "depth", "attempt", "basis", "product", "product_url", "gtin", "steps", "steps_n", "blocker", "walls", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
+  "shown_before_payment", "tax_shown_before_payment", "shipping_shown_before_payment", "price", "shipping", "tax", "total", "currency", "region", "duration_s", "agent", "delivered", "delivery_days", "rating", "rating_max", "narrative", ...PROOF_TAGS] as const;
+const REVIEW_ATTEMPT_OF: Record<string, string> = { browse: "browse", product: "browse", cart: "cart", checkout: "checkout", shipping: "checkout", payment: "checkout", paid: "paid", delivered: "paid" };
 export function experienceTemplate(a: Record<string, unknown>, aTag: string | null, nowS = Math.floor(Date.now() / 1000)): Res<Record<string, unknown>> {
   const s = (k: string) => (a[k] === undefined || a[k] === null || a[k] === "" ? undefined : String(a[k]));
+  const list = (k: string) => (Array.isArray(a[k]) ? (a[k] as unknown[]).map(String) : s(k)?.split(",").map((x) => x.trim()).filter(Boolean) ?? []);
+  const warnings: string[] = [];
+  const unknown = Object.keys(a).filter((k) => !(TEMPLATE_PARAMS as readonly string[]).includes(k));
+  if (unknown.length) warnings.push(`ignored unknown fields: ${unknown.join(", ")} (known: ${TEMPLATE_PARAMS.join(", ")})`);
   const d = s("domain")?.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   if (!d) return fail("missing_domain", "domain is required");
-  const depth = s("depth"); if (depth && !(EXP_DEPTHS as readonly string[]).includes(depth)) return fail("bad_depth", `depth must be one of ${EXP_DEPTHS.join("|")}`);
+  if (!s("depth") && s("attempt")) warnings.push('"attempt" is the legacy name; use depth (accepted as an alias)');
+  const cd = canonDepth(s("depth") ?? s("attempt"));
+  if (cd.bad) return fail("bad_depth", `depth must be one of ${EXP_DEPTHS.join("|")} (checkout-map stage names like home, add_to_cart, shipform, paypage are accepted as aliases)`);
+  if (cd.alias) warnings.push(`depth "${s("depth") ?? s("attempt")}" mapped to "${cd.depth}"`);
+  const depth = cd.depth ?? undefined;
+  const basis = s("basis");
+  if (basis && !(EXP_BASIS as readonly string[]).includes(basis)) return fail("bad_basis", `basis must be one of ${EXP_BASIS.join("|")}`);
+  if (!basis) warnings.push('basis not given: set to "visit". Use basis=directory if you are writing from KlickyMart data, or basis=secondhand if relaying someone else\'s experience; those notes never count toward the chart.');
+  const flags: Record<string, boolean | null> = {};
+  for (const k of ["guest", "account_required", "delivered"]) { const v = tri(s(k)); if (v === "bad") return fail(`bad_${k}`, `${k} must be true, false or unknown (got "${s(k)}")`); flags[k] = v === null ? null : v === "yes"; }
+  const sbp: Record<string, boolean | null> = { tax: null, shipping: null };
+  const sbpAll = list("shown_before_payment").map((x) => x.toLowerCase());
+  for (const x of sbpAll) { if (x === "none") { sbp.tax = false; sbp.shipping = false; } else if (x === "tax" || x === "shipping") sbp[x] = true; else if (x !== "unknown") warnings.push(`shown_before_payment "${x}" ignored (use tax, shipping, none or unknown)`); }
+  for (const k of ["tax", "shipping"]) { const raw = s(`${k}_shown_before_payment`); const v = tri(raw); if (v === "bad") return fail(`bad_${k}_shown_before_payment`, `${k}_shown_before_payment must be true, false or unknown (got "${raw}")`); if (raw !== undefined && v !== null) sbp[k] = v === "yes"; }
+  const r = s("rating"); let rating: number | null = null;
+  if (r !== undefined) { rating = Number(r); if (!Number.isInteger(rating) || rating < 1 || rating > 5) return fail("bad_rating", `rating must be an integer 1-5 (got "${r}")`); }
   const rg = coarseRegion(s("region")); if (!rg.ok) return rg;
+  const canonP = (c: string) => { const k = canonPay(c); if (!isPayCode(k)) warnings.push(`pay code "${c}" not in /vocab.json pay_codes; kept as given`); else if (k !== c.toLowerCase()) warnings.push(`pay code "${c}" written as "${k}" (vocab code)`); return k; };
   const tags: string[][] = [];
   if (aTag) tags.push(["a", aTag]);
   tags.push(["r", d], ["t", NOTE_HASHTAG], ["L", "klickymart.experience"], ["l", "shopping-experience", "klickymart.experience"]);
   const push = (...t: (string | undefined)[]) => { if (t.slice(1).every((x) => x !== undefined)) tags.push(t as string[]); };
-  push("product", s("product_url")); push("gtin", s("gtin")); push("depth", depth);
-  for (const [i, st] of ((a.steps as unknown[]) ?? []).entries()) tags.push(["step", String(i + 1), String(st).slice(0, 80)]);
-  push("steps", s("steps_n") ?? (Array.isArray(a.steps) && a.steps.length ? String(a.steps.length) : undefined));
-  push("blocker", s("blocker")); for (const w of ((a.walls as string[]) ?? [])) push("wall", w);
-  push("guest", s("guest")); push("account_required", s("account_required"));
-  push("pay_used", s("pay_used")); const po = (a.pay_offered as string[]) ?? []; if (po.length) tags.push(["pay_offered", ...po.map(String)]);
+  tags.push(["basis", basis ?? "visit"]);
+  push("product", s("product") ?? s("product_url")); push("gtin", s("gtin")); push("depth", depth);
+  if (depth) tags.push(["attempt", REVIEW_ATTEMPT_OF[depth]!]);
+  const steps = list("steps");
+  for (const [i, st] of steps.entries()) tags.push(["step", String(i + 1), st.slice(0, 80)]);
+  push("steps", s("steps_n") ?? (steps.length ? String(steps.length) : undefined));
+  push("blocker", s("blocker")); for (const w of list("walls")) push("wall", w);
+  const tf = (b: boolean | null) => (b === null ? undefined : b ? "true" : "false");
+  push("guest", tf(flags.guest!)); push("account_required", tf(flags.account_required!));
+  const pu = s("pay_used") ? canonP(s("pay_used")!) : undefined; push("pay_used", pu);
+  const po = list("pay_offered").map(canonP); if (po.length) tags.push(["pay_offered", ...po]);
   push("btc_route", s("btc_route"));
-  push("shown_before_payment", "tax", s("tax_shown_before_payment")); push("shown_before_payment", "shipping", s("shipping_shown_before_payment"));
+  for (const k of ["tax", "shipping"]) tags.push(["shown_before_payment", k, sbp[k] === null ? "unknown" : sbp[k] ? "true" : "false"]);
   const cur = s("currency") ?? "USD";
   for (const k of ["price", "shipping", "tax", "total"]) push("amount", k, s(k), cur);
   push("region", rg.value ?? undefined); push("duration_s", s("duration_s")); push("agent", s("agent"));
-  if (s("delivered")) tags.push(["delivered", s("delivered")!, ...(s("delivery_days") ? [s("delivery_days")!] : [])]);
-  if (s("rating")) tags.push(["rating", s("rating")!, s("rating_max") ?? "5"]);
+  if (flags.delivered !== null) tags.push(["delivered", tf(flags.delivered!)!, ...(s("delivery_days") ? [s("delivery_days")!] : [])]);
+  if (rating !== null) tags.push(["rating", String(rating), "5"]);
+  const fields = { domain: d, basis: basis ?? "visit", depth: depth ?? null, guest: flags.guest, account_required: flags.account_required, pay_used: pu ?? null, pay_offered: po,
+    shown_before_payment: sbp, rating, region: rg.value, delivered: flags.delivered, product: s("product") ?? s("product_url") ?? null };
   for (const p of PROOF_TAGS) push(p, s(p));
+  if (rating === null) warnings.push("no rating given; add rating=1..5 so the note also counts as a review");
   return { ok: true, value: {
     unsigned_event: { kind: NOSTR_KIND_ACCEPTANCE, created_at: nowS, tags, content: s("narrative") ?? "" },
+    fields, warnings,
     instructions: [
       "Sign this event yourself (NIP-01) with a site-specific key used only for shopping notes; never send KlickyMart a secret key.",
       "Consider delaying publication by a few hours to days so the note can't be matched to the order time.",
