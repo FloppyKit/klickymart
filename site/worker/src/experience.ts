@@ -36,7 +36,7 @@ export const NOTE_HASHTAG = "klickymart";
 export const SELFTEST_DOMAIN = "klickymart-selftest.invalid";
 /** Experience tag names, documented in llms.txt / NIP-DRAFT. All optional except the store reference. */
 export const EXP_TAGS = ["a", "r", "product", "gtin", "depth", "step", "steps", "blocker", "wall", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
-  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", "lud16", ...PROOF_TAGS] as const;
+  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", "lud16", "shipping_source", "price_source", ...PROOF_TAGS] as const;
 
 export interface Experience {
   id: string; kind: number; d: string; pubkey: string; created_at: number; structured: boolean;
@@ -227,7 +227,7 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
 /** Unsigned event template for the agent to sign and publish itself. */
 export const TEMPLATE_PARAMS = ["domain", "depth", "attempt", "basis", "product", "product_url", "gtin", "steps", "steps_n", "blocker", "walls", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
   "shown_before_payment", "tax_shown_before_payment", "shipping_shown_before_payment", "price", "shipping", "tax", "total", "currency", "region", "duration_s", "agent", "delivered", "delivery_days", "rating", "rating_max", "narrative", "lud16", ...PROOF_TAGS] as const;
-export const TEMPLATE_EXTRA = ["price_seen", "price_paid", "fee", "estimated"] as const;
+export const TEMPLATE_EXTRA = ["price_seen", "price_paid", "fee", "estimated", "shipping_source", "price_source", "strict"] as const;
 const REVIEW_ATTEMPT_OF: Record<string, string> = { browse: "browse", product: "browse", cart: "cart", checkout: "checkout", shipping: "checkout", payment: "checkout", paid: "paid", delivered: "paid" };
 export function experienceTemplate(a: Record<string, unknown>, aTag: string | null, nowS = Math.floor(Date.now() / 1000)): Res<Record<string, unknown>> {
   const s = (k: string) => (a[k] === undefined || a[k] === null || a[k] === "" ? undefined : String(a[k]));
@@ -235,6 +235,8 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   const warnings: string[] = [];
   const known = [...TEMPLATE_PARAMS, ...TEMPLATE_EXTRA] as readonly string[];
   const unknown = Object.keys(a).filter((k) => !known.includes(k));
+  const strictMode = a.strict === true || /^(1|true)$/i.test(String(a.strict ?? ""));
+  if (unknown.length && strictMode) return fail("unknown_field", `strict=1: unknown fields ${unknown.join(", ")} (known: ${known.join(", ")})`);
   if (unknown.length) warnings.push(`ignored unknown fields: ${unknown.join(", ")} (known: ${known.join(", ")})`);
   const d = s("domain")?.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   if (!d) return fail("missing_domain", "domain is required");
@@ -262,6 +264,12 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   tags.push(["r", d], ["t", NOTE_HASHTAG], ["L", "klickymart.experience"], ["l", "shopping-experience", "klickymart.experience"]);
   const push = (...t: (string | undefined)[]) => { if (t.slice(1).every((x) => x !== undefined)) tags.push(t as string[]); };
   tags.push(["basis", basis ?? "unknown"]);
+  // where the shipping figure and the price came from
+  for (const [k, allowed] of [["shipping_source", ["policy", "checkout", "unknown"]], ["price_source", ["klickymart", "store"]]] as const) {
+    const v = s(k)?.toLowerCase(); if (v === undefined) continue;
+    if (!(allowed as readonly string[]).includes(v)) return fail(`bad_${k}`, `${k} must be one of ${allowed.join("|")} (got "${v}")`);
+    tags.push([k, v]);
+  }
   const lud = s("lud16"); if (lud) { if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(lud)) tags.push(["lud16", lud.toLowerCase()]); else warnings.push("lud16 ignored: expected name@domain lightning address"); }
   push("product", s("product") ?? s("product_url")); push("gtin", s("gtin")); push("depth", depth);
   if (depth) tags.push(["attempt", REVIEW_ATTEMPT_OF[depth]!]);

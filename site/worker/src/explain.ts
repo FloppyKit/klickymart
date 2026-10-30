@@ -35,8 +35,10 @@ export function checkoutOf(row: IndexRow, raw: Record<string, unknown>) {
   const probe = raw.checkout_probe as { step_reached?: string; n?: string; ts?: number; pm_visible?: string } | undefined;
   return {
     // steps = stages the checkout probe walked (checkout_map). The record's older numeric `steps` counted crawl pages, not checkout steps.
-    co: row.co, steps: (raw.checkout_map as { steps?: unknown[] } | undefined)?.steps?.length ?? null,
-    step_list: ((raw.checkout_map as { steps?: { n: number; stage: string; url?: string | null; action?: string | null; status?: unknown }[] } | undefined)?.steps ?? []).map((x) => ({ n: x.n, stage: x.stage, url: x.url ?? null, action: x.action ?? null, status: x.status ?? null })),
+    co: row.co,
+    // steps is always the LIST of stages walked (same shape on every path); steps_count is its length.
+    steps_count: (raw.checkout_map as { steps?: unknown[] } | undefined)?.steps?.length ?? null,
+    steps: ((raw.checkout_map as { steps?: { n: number; stage: string; url?: string | null; action?: string | null; status?: unknown }[] } | undefined)?.steps ?? []).map((x) => ({ n: x.n, stage: x.stage, url: x.url ?? null, action: x.action ?? null, status: x.status ?? null })),
     steps_src: raw.checkout_map ? "checkout_map (probe)" : null,
     ...(raw.checkout_map ? {} : { steps_note: probe?.step_reached ? `the probe reached "${probe.step_reached}" but no per-step map was recorded for this store yet` : "no checkout probe recorded for this store" }),
     guest: row.guest === null ? null : row.guest === 1,
@@ -104,7 +106,7 @@ export function renderCheckoutDetail(row: IndexRow, raw: Record<string, unknown>
   const guestEv = c.guest_evidence ? ` — <q>${e(c.guest_evidence.q)}</q> ${link(c.guest_evidence.url)}` : "";
   const probe = c.probe ? `<li>Guest checkout probe (${e(c.probe.date)}): reached <code>${e(c.probe.step_reached)}</code>${c.probe.stopped_at ? `, stopped at <code>${e(c.probe.stopped_at)}</code>` : ""}${c.probe.note ? ` — ${e(c.probe.note)}` : ""}. The probe never submits an order.</li>` : "";
   return `<section id="checkout" data-testid="checkout"><h2>Checkout</h2><ul>
-<li>Checkout depth (co): <strong>${e(c.co ?? "unknown")}</strong>${c.steps !== null ? ` · ${e(c.steps)} page(s) to the payment screen` : ""}</li>
+<li>Checkout depth (co): <strong>${e(c.co ?? "unknown")}</strong>${c.steps_count !== null ? ` · ${e(c.steps_count)} step(s) to the payment screen` : ""}</li>
 <li>Guest checkout: <strong>${yn(c.guest)}</strong>${c.guest_source ? ` <span class="km-muted">(${e(c.guest_source)})</span>` : ""}${guestEv}</li>
 ${probe}
 <li>Shows shipping and tax before payment: <strong>${yn(s.pre_pay)}</strong></li>

@@ -35,7 +35,7 @@ describe("r5 BTC filter semantics", () => {
 describe("r5 row flags", () => {
   it("blocked-tos rows are not usable, demoted, and the text line says so", () => {
     const blocked = { domain: "wacaco.com", price: 79.9, store: { indexed: true, verdict: "blocked-tos" } };
-    const ok = { domain: "kaffeproducts.com", price: 29.99, store: { indexed: true, verdict: "reachable" } };
+    const ok = { domain: "kaffeproducts.com", price: 29.99, store: { indexed: true, verdict: "reachable", checkout_stage: "checkout" } };
     expect(flagRow(blocked)).toBe(3); expect(flagRow(ok)).toBe(0);
     expect((blocked as any).agent_usable).toBe(false);
     expect(flagPrefix(blocked)).toMatch(/DO NOT USE: blocked-tos/);

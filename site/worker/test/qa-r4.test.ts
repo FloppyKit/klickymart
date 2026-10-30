@@ -101,7 +101,7 @@ describe("r4 check + docs", () => {
     const { checkoutOf } = await import("../src/explain");
     const snap = await realSnap(); const row = snap.rows.find((r) => r.d === "cryptocloaks.com")!;
     const c = checkoutOf(row, JSON.parse(row.raw_json));
-    expect(c.steps).toBe(c.step_list.length); expect(c.steps).toBeGreaterThan(3);
+    expect(c.steps_count).toBe(c.steps.length); expect(Array.isArray(c.steps)).toBe(true); expect(c.steps.length).toBeGreaterThan(3);
   });
   it("llms.txt describes every stop reason", async () => {
     const t = await (await SELF.fetch("https://example.com/llms.txt")).text();

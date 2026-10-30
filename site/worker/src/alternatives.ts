@@ -21,12 +21,13 @@ const SUB_SYNONYMS: [RegExp, string, string][] = [
   [/vacuum|appliance|fridge|refrigerator|washer|dryer|microwave|air purifier|dishwasher/i, "appliances", "electronics"],
   [/router|wi-?fi|mesh|modem|network/i, "networking", "electronics"],
   [/charger|cable|power ?bank|adapter|case\b/i, "accessories", "electronics"],
+  [/hand ?bags?|purses?|\btotes?\b|clutch|crossbody|designer bag|luxury bag|birkin|satchel/i, "handbags", "apparel"],
 ];
 export const MAJOR_RETAILERS = new Set(["amazon.com", "walmart.com", "target.com", "costco.com", "samsclub.com", "bestbuy.com", "newegg.com", "bhphotovideo.com", "ebay.com", "homedepot.com", "lowes.com", "macys.com", "kohls.com", "staples.com", "officedepot.com"]);
 
 export function resolveSub(input: string): { sub: string; category: string } | null {
   const s = input.trim().toLowerCase();
-  if ((SUBCATEGORIES as readonly string[]).includes(s)) return { sub: s, category: s === "gift-cards" ? "gift-cards" : "electronics" };
+  if ((SUBCATEGORIES as readonly string[]).includes(s)) return { sub: s, category: s === "gift-cards" ? "gift-cards" : s === "handbags" ? "apparel" : "electronics" };
   for (const [rx, sub, category] of SUB_SYNONYMS) if (rx.test(input)) return { sub, category };
   return null;
 }
@@ -39,7 +40,7 @@ const SYNONYMS: [RegExp, string][] = [
   [/noise.?cancel|\banc\b|over.?ear|headphone|earbud|laptop|phone|tv|camera|electronic|speaker|monitor/i, "electronics"],
   [/gift ?card|voucher|top.?up|refill/i, "gift-cards"],
   [/grocer|food|snack/i, "groceries"],
-  [/shirt|shoe|cloth|apparel|jacket|hoodie|fashion|hand ?bag|purse|tote|wallet bag|designer/i, "apparel"],
+  [/shirt|shoe|cloth|apparel|jacket|hoodie|fashion|designer/i, "apparel"],
   [/tool|hardware store|lumber|drill|paint|auto part/i, "hardware"],
   [/book/i, "books"],
   [/flight|hotel|travel|ticket/i, "travel"],
@@ -142,6 +143,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     ok: true as const,
     body: {
       from, categories: cats, sub, filters: { pay: p.pay ?? null, guest: !!p.guest, ...(wantsBtc ? { include_indirect: !!p.include_indirect } : {}) }, count: items.length, total: rows.length,
+      ...(sub && !rows.some((r) => r.subRank > 0) ? { sub_note: `No indexed store is tagged as selling ${sub} yet. ${rows.length ? `These are ${cats.join("/")} stores whose product families are not recorded; they may not carry ${sub}.` : ""}${sub === "handbags" ? " Luxury and designer resale stores are not indexed yet (many ban automated access in their terms)." : ""}`.trim() } : {}),
       ...(wantsBtc ? { btc_semantics: "pay filters match native acceptance (the store's own checkout takes bitcoin/Lightning). Stores where bitcoin works only through a third-party processor or a gift card are excluded unless include_indirect=1, then labelled btc_route=indirect and ranked last.",
         indirect_excluded: p.include_indirect ? [] : indirectExcluded, ...(indirectExcluded.length && !p.include_indirect ? { indirect_hint: `${indirectExcluded.length} store(s) take bitcoin only indirectly (${indirectExcluded.join(", ")}); add include_indirect=1 to list them` } : {}) } : {}),
       ranking: "checkout reached (co) desc, terms-restricted stores after equals, major retailer first among equals, product family is the store's main line, agent access (ag) desc, guest confirmed (if guest=1), BTC grade desc, ease desc",

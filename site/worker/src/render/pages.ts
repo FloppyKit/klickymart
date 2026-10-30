@@ -624,7 +624,7 @@ export function renderChart(origin: string, shell: PageShell, chart: { items: { 
 
 /** SRI hashes for the /report signing scripts (worker/test/report-sign.test.ts checks them against public/). */
 export const NOSTR_TOOLS_SRI = "sha384-x/Q9a1/oiBraMvfi4OiwWB6magWUVbgXQlkWwpEoxeiILzwqe2oaGOQrllDnZUVP";
-export const REPORT_SIGN_SRI = "sha384-RU27Fg8Cq2dCrG8bIfKQliWFnailJd4ltO2rdGB8FI4bn5qb+u12MNJCax812kO2";
+export const REPORT_SIGN_SRI = "sha384-xl0HuV4+GjENMXT5Pf2GDJgYFo0NPUEeGP1fLH2q1qyFs34LuhCgnAo0OcXaKN/F";
 /** Relays the /report page may connect to (also its CSP connect-src). */
 export const REPORT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
 export function renderReport(origin: string, shell: PageShell, example: string): string {
@@ -657,7 +657,11 @@ export function renderReport(origin: string, shell: PageShell, example: string):
 <p id="km-warn" class="km-muted" aria-live="polite"></p>
 <pre id="km-signed" data-testid="km-signed"></pre>
 <p><button type="button" id="km-dry">Test with /reviews?dry_run=1</button>
-<label>Relays <input id="km-relays" value="${REPORT_RELAYS.join(" ")}" data-allowed="${REPORT_RELAYS.join(" ")}" size="60"></label> <button type="button" id="km-publish">Review before publishing</button></p>
+<label>Relays <input id="km-relays" value="" placeholder="none yet: add one below" data-allowed="${REPORT_RELAYS.join(" ")}" size="60"></label>
+${REPORT_RELAYS.map((r) => `<button type="button" data-add-relay="${r}">+ ${r.replace("wss://", "")}</button>`).join(" ")}</p>
+<p><label>Publish timing <select id="km-delay"><option value="0-0">right after I confirm</option><option value="1-6">random 1 to 6 hours later</option><option value="6-48">random 6 to 48 hours later</option></select></label>
+<span class="km-muted">created_at is public; waiting makes it harder to line a note up with a purchase. The tab must stay open; the note is re-signed with the publish time.</span> <button type="button" id="km-cancel-delay" hidden>Cancel scheduled publish</button>
+<button type="button" id="km-publish">Review before publishing</button></p>
 <div id="km-confirm-box" data-testid="km-confirm" hidden><p class="km-bad"><strong>Check before publishing.</strong> Relay notes are public and hard to take back (a deletion request is only a request).</p>
 <p>Relays:</p><pre id="km-confirm-relays"></pre><p>Signed event:</p><pre id="km-confirm-event"></pre>
 <p><label><input type="checkbox" id="km-confirm-ok"> I reviewed the relays and the signed event above</label> <button type="button" id="km-confirm-publish" disabled>Confirm publish</button></p></div>

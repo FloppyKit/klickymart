@@ -1,11 +1,14 @@
 import { WALLET_GUIDE } from "./wallet";
 const TEMPLATE_HELP = {
   estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
+  shipping_source: "policy | checkout | unknown (where the shipping figure came from)",
+  price_source: "klickymart | store (copied from KlickyMart data, or read on the store page)",
+  strict: "1 = reject unknown fields with a 400 instead of ignoring them with a warning",
   amounts: "price, price_seen, price_paid, fee, shipping, tax, total: a non-negative number, or unknown / not-observed when the store did not show it (not zero)",
 };
 import { flagSummary, readFlagCache, refreshFlagCache, buildFlagStatic, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
 import { facilitate, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
-import { curators, loadTips, perReviewer, summarize } from "./tips";
+import { curators, loadTips, perReviewer, summarize, TIP_BONUS_RULES } from "./tips";
 import { mcpToolsList } from "./mcp";
 import { addKnownBrands } from "./product-quality";
 import { experienceTemplate, loadAggregates, parseExperience, storeExperience } from "./experience";
@@ -335,7 +338,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const body = path === "/curators.json"
       ? { curators: curators(t), note: "Curator record: who tipped which agent notes (public NIP-57 zap receipts). Self-zaps excluded." }
       : { domain: d ?? null, per_review: [...t.byNote].map(([id, x]) => ({ id, d: t.noteDomain.get(id) ?? null, author: t.author.get(id) ?? null, ...summarize(x) })), per_reviewer: perReviewer(t),
-          weight_rule: "note weight x (1 + min(0.5, 0.1 x distinct validated tippers)); self-zaps ignored" };
+          weight_rule: "note weight x (1 + min(0.5, 0.1 x bonus tippers)); self-zaps ignored; flagged tip rings / tip-only keys add nothing",
+          bonus_rules: { min_sats_per_zap: TIP_BONUS_RULES.MIN_SATS, tipper_history: `a visit note, other public activity we hold, or a key first seen ${TIP_BONUS_RULES.MIN_AGE_S / 86400}+ days ago`, distinct: "each tipper counts once per note", cap: "+50% per note at most", display: "every tip is shown (count, sats); only bonus tippers add weight" } };
     return Response.json({ ...licenseMetaBlock(), ...body }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
 
@@ -462,14 +466,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const pf = applyProductFilters(rows.map((i) => (i.source === "klickymart-observed" ? annotate(i, q.q) : i)), { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
     const dd = dedupe(pf.rows); rows = dd.rows;
     const outliers = flagPriceOutliers(rows);
-    const tier = new Map(rows.map((i) => [i, flagRow(i)]));
+    const tier = new Map(rows.map((i) => [i, flagRow(i, { usZip: !!(q.zip && validZip(String(q.zip))) })]));
     const key = (i: Record<string, any>) => [tier.get(i)! * 10 + (i.brand_match === "lookalike" ? 2 : 0) + (i.landed?.est_total == null ? 1 : 0), i.landed?.est_total ?? i.price ?? 1e9];
     rows.sort((x, y) => { const a = key(x), c = key(y); return a[0] - c[0] || a[1] - c[1]; });
     const blocked = rows.filter((i) => i.agent_usable === false).length;
     const lvb = b.live_shopify_catalog as Record<string, any> | undefined;
     const condUnknown = pf.condition_unknown_dropped + Number(lvb?.condition_unknown_dropped ?? 0);
     return { ok: true as const, body: { query: { ...q, live }, zip, state: zipToState(zip), count: rows.length, items: rows,
-      ranking: "stores an agent can use first (agent_usable true), then stores not checked yet, then price outliers, then stores an agent must not use (blocked-tos, agents-not-welcome, error) last; within each, rows with a known landed total first (cheapest first), then by item price; brand look-alikes (e.g. 'B0SE') after their group. est_total is null unless price, shipping and tax are all known",
+      ranking: "stores an agent can use first (agent_usable true: our probe confirmed add-to-cart or reached the payment step), then stores not checked or not confirmed yet, then stores that may not ship to the US (with a US ZIP), then price outliers, then stores an agent must not use (blocked-tos, agents-not-welcome, error) last; within each, rows with a known landed total first (cheapest first), then by item price; brand look-alikes (e.g. 'B0SE') after their group. est_total is null unless price, shipping and tax are all known",
       agent_usable_note: "Every row has agent_usable (true / false / null = store not checked yet), store_status and flags[]. Rows with agent_usable=false are listed so you know they exist, not as options.",
       not_usable_rows: blocked, price_outliers: outliers,
       deduped: dd.removed, dropped_by_product_filters: pf.dropped, scanned_rows: before,

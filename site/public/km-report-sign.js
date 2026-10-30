@@ -55,14 +55,27 @@
   };
   $("km-use-nsec").onclick = function () {
     var v = $("km-paste").value.trim(); $("km-paste").value = "";
-    try { var d = NT.nip19.decode(v); if (d.type !== "nsec") throw new Error(); setKey(d.data); state.mode = "nsec"; say("km-key-status", "Using your key " + NT.nip19.npubEncode(state.pk) + " (kept in this page's memory only)."); }
+    try { var d = NT.nip19.decode(v); if (d.type !== "nsec") throw new Error(); setKey(d.data); state.mode = "nsec"; ownKeyLoaded(); say("km-key-status", "Using your key " + NT.nip19.npubEncode(state.pk) + " (kept in this page's memory only)."); }
     catch (e) { say("km-key-status", "That is not an nsec.", true); }
   };
   $("km-use-nip07").onclick = function () {
     if (!window.nostr) return say("km-key-status", "No NIP-07 signer (window.nostr) in this browser.", true);
-    window.nostr.getPublicKey().then(function (pk) { setKey(null); state.pk = pk; state.mode = "nip07"; say("km-key-status", "Using your NIP-07 signer: " + NT.nip19.npubEncode(pk)); });
+    window.nostr.getPublicKey().then(function (pk) { setKey(null); state.pk = pk; state.mode = "nip07"; ownKeyLoaded(); say("km-key-status", "Using your NIP-07 signer: " + NT.nip19.npubEncode(pk)); });
   };
+  // Key choice is explicit: per-store mode never silently replaces a pasted key or a NIP-07 signer.
+  $("km-per-store").onchange = function () {
+    if ($("km-per-store").checked && (state.mode === "nsec" || state.mode === "nip07"))
+      say("km-key-status", "You loaded your own " + (state.mode === "nip07" ? "NIP-07 signer" : "key") + ". Notes will be signed with NEW per-store keys instead only if you keep this box ticked; untick it to sign with your own key.", true);
+    if ($("km-per-store").checked) $("km-per-store").setAttribute("data-confirmed", "1"); else $("km-per-store").removeAttribute("data-confirmed");
+  };
+  function ownKeyLoaded() { if ($("km-per-store").checked) { $("km-per-store").checked = false; $("km-per-store").removeAttribute("data-confirmed"); } }
+  function signerLabel(domain) {
+    if ($("km-per-store").checked) return "a per-store key for " + domain;
+    return state.mode === "nip07" ? "your NIP-07 signer" : state.mode === "nsec" ? "your pasted key" : state.mode === "create" ? "the agent key created here" : "no key";
+  }
   function signer(domain) {
+    if ($("km-per-store").checked && (state.mode === "nsec" || state.mode === "nip07") && !$("km-per-store").getAttribute("data-confirmed"))
+      throw new Error("Per-store keys are ticked but you loaded your own " + (state.mode === "nip07" ? "NIP-07 signer" : "key") + ". Untick 'Per-store key' to sign with it, or tick it again to confirm new per-store keys.");
     if ($("km-per-store").checked) {
       if (!state.perStore[domain]) { var sk = NT.generateSecretKey(); state.perStore[domain] = sk; showNsecOnce(sk, "klickymart-" + domain + "-key"); }
       var s = state.perStore[domain];
@@ -77,12 +90,17 @@
     Array.prototype.forEach.call(document.querySelectorAll("#km-sign [data-field]"), function (el) { f[el.getAttribute("data-field")] = el.value.trim(); });
     return f;
   }
-  var signed = null;
+  var signed = null, lastDomain = null, timer = null;
+  // relays start empty; the three suggestions are one click each
+  Array.prototype.forEach.call(document.querySelectorAll("[data-add-relay]"), function (b) {
+    b.onclick = function () { var u = b.getAttribute("data-add-relay"), cur = $("km-relays").value.split(/[\s,]+/).filter(Boolean); if (cur.indexOf(u) < 0) cur.push(u); $("km-relays").value = cur.join(" "); cancelReview(); };
+  });
   $("km-build").onclick = function () {
     var f = fields(); signed = null; $("km-signed").textContent = ""; cancelReview();
     fetch("/report/template?" + templateQuery(f)).then(function (r) { return r.json(); }).then(function (t) {
       if (t.error || !t.unsigned_event) throw new Error((t.error && t.error.message) || "template error");
-      say("km-warn", (t.warnings || []).join(" | ") || "No warnings. counts_toward_chart: " + t.fields.counts_toward_chart);
+      say("km-warn", "Signing with " + signerLabel(t.fields.domain) + ". " + ((t.warnings || []).join(" | ") || "No warnings. counts_toward_chart: " + t.fields.counts_toward_chart));
+      lastDomain = t.fields.domain;
       return signer(t.fields.domain)(t.unsigned_event);
     }).then(function (ev) {
       signed = publicEvent(ev);
@@ -116,10 +134,27 @@
   $("km-confirm-publish").onclick = function () {
     if (!review || !$("km-confirm-ok").checked) return say("km-result", "Review the relays and event, tick the box, then confirm.", true);
     var relays = review.relays, ev = review.ev; cancelReview();
+    // Optional random delay (our timing advice: created_at is public, so publish hours or days after the purchase).
+    var range = ($("km-delay").value || "0-0").split("-").map(Number), ms = Math.round((range[0] + Math.random() * (range[1] - range[0])) * 3600 * 1000);
+    if (ms > 0) {
+      var at = new Date(Date.now() + ms);
+      say("km-result", "Scheduled: this page will re-sign the same note with the then-current time and publish it at about " + at.toLocaleString() + ". Keep this tab open. ");
+      $("km-cancel-delay").hidden = false;
+      timer = setTimeout(function () {
+        timer = null; $("km-cancel-delay").hidden = true;
+        var tmpl = { kind: ev.kind, created_at: Math.floor(Date.now() / 1000), tags: ev.tags, content: ev.content };
+        Promise.resolve(signer(lastDomain)(tmpl)).then(function (fresh) { send(relays, publicEvent(fresh)); }).catch(function (e) { say("km-result", "Delayed publish failed: " + (e.message || e), true); });
+      }, ms);
+      return;
+    }
+    send(relays, ev);
+  };
+  $("km-cancel-delay").onclick = function () { if (timer) clearTimeout(timer); timer = null; $("km-cancel-delay").hidden = true; say("km-result", "Scheduled publish cancelled. Nothing was sent."); };
+  function send(relays, ev) {
     var pool = new NT.SimplePool();
     Promise.allSettled(pool.publish(relays, ev)).then(function (rs) {
       say("km-result", "Published from your browser: " + rs.map(function (r, i) { return relays[i] + " " + (r.status === "fulfilled" ? "ok" : "failed (" + r.reason + ")"); }).join("; ") + ". Event id " + ev.id);
       pool.close(relays);
     });
-  };
+  }
 })();

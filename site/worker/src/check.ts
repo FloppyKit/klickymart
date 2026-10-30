@@ -41,8 +41,8 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       ...checkExtras(row, raw),
       checkout_depth: checkoutOf(row, raw),
       // steps = the step list the checkout probe walked (stage, url, action, status); steps_count = its length.
-      steps: checkoutOf(row, raw).step_list,
-      steps_count: checkoutOf(row, raw).steps,
+      steps: checkoutOf(row, raw).steps,
+      steps_count: checkoutOf(row, raw).steps_count,
       pay: c.pay,
       ...walletFacts(raw, (c.pay as unknown as { all?: string[] }).all),
       btc_grade: row.btc,

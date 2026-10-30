@@ -71,8 +71,8 @@ describe("validation, vocab and docs", () => {
     const snap = rowsToSnapshot([...rows.values()], report.version, report.source);
     const row = snap.rows.find((r) => r.d === "bose.com")!;
     const c = checkoutOf(row, parseRaw(row.raw_json)) as any;
-    expect(c.step_list.length).toBeGreaterThan(0);
-    expect(c.steps).toBe(c.step_list.length);
+    expect(c.steps.length).toBeGreaterThan(0);
+    expect(c.steps_count).toBe(c.steps.length);
   });
 });
 

@@ -3,7 +3,7 @@ import { PAY_CODES, CAT_CODES, STATUS_VALUES, PAY_GROUPS } from "./codes";
 import { V1_CATEGORIES } from "./category";
 
 export const COARSE_CATEGORIES = ["electronics", "gift-cards", "groceries", "apparel", "hardware", "books", "travel", "crypto-hardware", "other"] as const;
-export const SUBCATEGORIES = ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale"] as const;
+export const SUBCATEGORIES = ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale", "handbags"] as const;
 export { PAY_CODES, CAT_CODES, STATUS_VALUES, V1_CATEGORIES };
 export const PAY_GROUP_NAMES = Object.keys(PAY_GROUPS) as string[];
 /** Friendly names agents use -> canonical pay code. */
