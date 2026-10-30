@@ -36,3 +36,24 @@
     el.insertBefore(b, el.firstChild);
   });
 })();
+
+/* "Can my agent shop here?" inline check (progressive enhancement; the form works without JS). */
+(function () {
+  var form = document.querySelector('[data-testid="check-form"]');
+  var out = document.getElementById("check-result");
+  if (!form || !out) return;
+  form.addEventListener("submit", function (e) {
+    var d = form.querySelector("input[name=domain]").value;
+    if (!d) return;
+    e.preventDefault();
+    out.textContent = "Checking…";
+    fetch("/check?format=html&domain=" + encodeURIComponent(d), { headers: { Accept: "text/html" } })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var res = doc.querySelector('[data-testid="check-result"]');
+        out.innerHTML = res ? res.innerHTML : "Check failed.";
+      })
+      .catch(function () { out.textContent = "Check failed."; });
+  });
+})();

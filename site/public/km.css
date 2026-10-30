@@ -235,3 +235,11 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 @media(max-width:640px){.km-page-home .km-home-scene-gap{min-height:min(44vh,370px)}}
 @media(max-width:640px){.km-page-home .km-home-scene-gap{min-height:min(55vh,470px)}}
 @media(max-width:640px){.km-page-home .km-home-scene-gap{flex-shrink:0}}
+
+.km-check { margin-top: .75rem; flex-wrap: wrap; }
+.km-check label:not(.km-sr-only) { flex: 0 0 100%; display: block; font-weight: 600; margin-bottom: .25rem; text-align: left; }
+.km-check input { min-height: 0; }
+.km-check-card { text-align: left; }
+.km-check-result { display: block; margin-top: .5rem; }
+.km-check-card { padding: .6rem .8rem; border: 1px solid var(--km-border, #444); border-radius: 6px; background: var(--km-surface, rgba(0,0,0,.35)); }
+.km-check-card ul { margin: .4rem 0 0; padding-left: 1.1rem; }

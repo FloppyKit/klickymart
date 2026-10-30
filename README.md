@@ -13,6 +13,48 @@ Status: draft. No crawl data is published in this repository yet.
 - `site/bot/index.html`: the crawler info and opt-out page, served at https://klickymart.com/bot.
 - `site/`: KlickyMart web app (Worker, API, dashboard). See [site/README.md](site/README.md).
 
+## Use it from an agent (MCP)
+
+Agents should start at https://klickymart.com/llms.txt. MCP endpoint: `https://klickymart.com/mcp`. It uses a minimal, stateless Streamable HTTP transport: one JSON-RPC message per POST, answered with a single `application/json` body. It negotiates protocol versions 2024-11-05, 2025-03-26 or 2025-06-18 (tools only). There is no SSE stream and no session ID, and `GET /mcp` returns 405. Tools: `search_merchants`, `get_record`, `check_domain`. No key needed.
+
+Claude Desktop (`claude_desktop_config.json` launches stdio servers, so this goes through the `mcp-remote` bridge, which needs Node.js):
+
+```json
+{
+  "mcpServers": {
+    "klickymart": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://klickymart.com/mcp"
+      ]
+    }
+  }
+}
+```
+
+Cursor (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "klickymart": {
+      "url": "https://klickymart.com/mcp"
+    }
+  }
+}
+```
+
+Any Streamable HTTP client:
+
+```sh
+curl -s https://klickymart.com/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check_domain","arguments":{"domain":"example.com"}}}'
+```
+
+Plain HTTP: `GET /check?domain=example.com` answers "can my agent shop here?" from the index only. It never starts a live crawl.
+
 ## Crawler guardrails
 - Honest user agent: `FloppyKitMapBot/0.2 (+https://klickymart.com/bot)`. No stealth plugins or fingerprint changes, no proxies or IP rotation.
 - robots.txt is read first; an error, 401, 403 or timeout means the whole site is treated as disallowed.

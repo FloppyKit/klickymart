@@ -102,24 +102,38 @@ export function mcpToolsList(): unknown {
           properties: { domain: { type: "string" } },
         },
       },
+      {
+        name: "check_domain",
+        description: "Can my agent shop here? Verdict for one domain from the index (reachable, agents-not-welcome, blocked-tos, error, not-in-index), with checkout depth, pay methods, BTC grade, record time and evidence URL. Never triggers a live crawl.",
+        inputSchema: {
+          type: "object",
+          required: ["domain"],
+          properties: { domain: { type: "string", description: "Hostname, e.g. example.com" } },
+        },
+      },
     ],
   };
 }
+
+/** Versions whose basic tools/list + tools/call over plain JSON responses we serve. */
+export const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 
 export type McpHandler = (method: string, params: unknown, id: unknown) => Promise<{ jsonrpc: "2.0"; id: unknown; result?: unknown; error?: { code: number; message: string } }>;
 
 export function createMcpHandler(deps: {
   runQuery: (sp: URLSearchParams) => Promise<{ body: unknown; filter_ms: number }>;
   getRecord: (domain: string) => Promise<{ body: unknown } | null>;
+  checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
 }): McpHandler {
   return async (method, params, id) => {
     const base = { jsonrpc: "2.0" as const, id };
     if (method === "ping") return { ...base, result: {} };
     if (method === "initialize") {
+      const asked = (params as { protocolVersion?: string } | undefined)?.protocolVersion;
       return {
         ...base,
         result: {
-          protocolVersion: "2024-11-05",
+          protocolVersion: asked && SUPPORTED_PROTOCOLS.includes(asked) ? asked : "2024-11-05",
           capabilities: { tools: {} },
           serverInfo: { name: "klickymart", version: "1.0.0" },
         },
@@ -151,17 +165,23 @@ export function createMcpHandler(deps: {
         if (!rec) return { ...base, error: { code: -32001, message: "not found" } };
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(rec.body) }], structuredContent: rec.body } };
       }
+      if (p.name === "check_domain" && deps.checkDomain) {
+        const r = await deps.checkDomain(String(p.arguments?.domain ?? ""));
+        if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
+        const b = r.body as { domain: string; verdict: string };
+        return { ...base, result: { content: [{ type: "text", text: `${b.domain}: ${b.verdict}\n${JSON.stringify(r.body)}` }], structuredContent: r.body } };
+      }
       return { ...base, error: { code: -32601, message: "unknown tool" } };
     }
     return { ...base, error: { code: -32601, message: `method not found: ${method}` } };
   };
 }
 
-export function parseMcpRequest(body: string): { method: string; params: unknown; id: unknown } | null {
+export function parseMcpRequest(body: string): { method: string; params: unknown; id: unknown; isNotification: boolean } | null {
   try {
     const j = JSON.parse(body) as { method?: string; params?: unknown; id?: unknown };
     if (!j.method) return null;
-    return { method: j.method, params: j.params, id: j.id ?? null };
+    return { method: j.method, params: j.params, id: j.id ?? null, isNotification: !("id" in j) };
   } catch {
     return null;
   }

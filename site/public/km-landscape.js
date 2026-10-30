@@ -323,7 +323,17 @@
   var reachOverride = params.has("reach") && !Number.isNaN(parseFloat(params.get("reach") || ""));
   var btcOverride = params.has("btc") && !Number.isNaN(parseFloat(params.get("btc") || ""));
 
+  var dataVisitsAttr = canvas2d.getAttribute("data-agent-visits");
+  var dataShoppersReal = parseInt(canvas2d.getAttribute("data-shoppers-real") || "0", 10) || 0;
+  var dataShoppersSim = parseInt(canvas2d.getAttribute("data-shoppers-simulated") || "0", 10) || 0;
+
   function shopperCounts() {
+    // Live: one walking shopper per few real agent requests today, plus a small labeled floor of simulated ones.
+    if (dataVisitsAttr !== null && !reachOverride && !btcOverride) {
+      var nLive = Math.max(0, Math.min(8, dataShoppersReal + dataShoppersSim));
+      var orangeLive = dataTotal ? Math.min(nLive, Math.ceil(nLive * (dataPrivReach / Math.max(1, dataReachable)))) : 0;
+      return { n: nLive, orange: orangeLive, real: dataShoppersReal, simulated: dataShoppersSim };
+    }
     var total = dataTotal || 250;
     var reachableN = reachOverride || !dataTotal ? Math.round(reach * total) : dataReachable;
     var n = Math.max(0, Math.min(8, Math.round(reachableN / 20)));
@@ -682,6 +692,7 @@
     var counts = shopperCounts();
     canvas2d.dataset.shoppers = String(counts.n);
     canvas2d.dataset.shoppersOrange = String(counts.orange);
+    if (counts.real !== undefined) { canvas2d.dataset.shoppersLiveReal = String(counts.real); canvas2d.dataset.shoppersLiveSimulated = String(counts.simulated); }
     if (!counts.n) return;
     var floorH = h - horizon;
     var roadW = 0.2 + reach * 0.05;

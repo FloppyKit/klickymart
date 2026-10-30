@@ -1,3 +1,4 @@
+import { shopperSplit } from "../agent-visits";
 export function esc(s: string | null | undefined): string {
   if (s == null) return "";
   return s
@@ -21,6 +22,7 @@ export interface LayoutOpts {
   landscapeTier?: number;
   sceneOnly?: boolean;
   story?: { total: number; reachable: number; private_btc: number; private_btc_reachable: number };
+  agentVisitsToday?: number;
 }
 
 export function layout(o: LayoutOpts): string {
@@ -32,6 +34,9 @@ export function layout(o: LayoutOpts): string {
   const tierAttr = typeof o.landscapeTier === "number" ? ` data-tier="${o.landscapeTier}"` : "";
   const storyAttr = o.story
     ? ` data-total="${o.story.total}" data-reachable="${o.story.reachable}" data-private-btc="${o.story.private_btc}" data-private-btc-reachable="${o.story.private_btc_reachable}"`
+    : "";
+  const visitsAttr = typeof o.agentVisitsToday === "number"
+    ? (() => { const s = shopperSplit(o.agentVisitsToday); return ` data-agent-visits="${o.agentVisitsToday}" data-shoppers-real="${s.real}" data-shoppers-simulated="${s.simulated}"`; })()
     : "";
   const previewBadge = o.previewData
     ? `<span class="km-preview-badge" role="status">Preview data</span>`
@@ -50,7 +55,7 @@ export function layout(o: LayoutOpts): string {
 <body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}${o.sceneOnly ? " km-scene-only" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>
 <div class="km-landscape-wrap" aria-hidden="true">
-  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}${storyAttr}></canvas>
+  <canvas id="km-landscape" class="km-landscape-canvas" data-reach="${reach}" data-btc="${btc}"${tierAttr}${storyAttr}${visitsAttr}></canvas>
   <canvas id="km-landscape-gl" class="km-landscape-canvas km-landscape-gl" hidden aria-hidden="true"></canvas>
 </div>
 <header class="km-header" role="banner">

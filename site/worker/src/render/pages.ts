@@ -1,3 +1,5 @@
+import { MCP_SNIPPETS } from "../llms";
+import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
 import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
@@ -39,6 +41,7 @@ function pageLayout(
     landscapeTier: shell.landscapeTier,
     sceneOnly: shell.sceneOnly,
     story: shell.story,
+    agentVisitsToday: shell.agentVisitsToday,
   });
 }
 
@@ -74,6 +77,13 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     <input id="q" name="q" value="${esc(q ?? "")}" placeholder="Search merchants or domains">
     <button type="submit">Search</button>
   </form>
+  <form class="km-search km-check" method="get" action="/check" data-testid="check-form">
+    <label for="check-domain">Can my agent shop here?</label>
+    <input id="check-domain" name="domain" placeholder="example.com" autocomplete="off" required>
+    <input type="hidden" name="format" value="html">
+    <button type="submit">Check</button>
+  </form>
+  <output id="check-result" class="km-check-result" data-testid="check-result" aria-live="polite"></output>
 </section>
 <div class="km-store">
 ${awning("On the shelves", "Which stores a software agent can reach, how checkout works, and every way they let you pay. Bitcoin graded 0–4 for privacy; every record links to the page it came from.")}
@@ -321,6 +331,17 @@ export function renderAbout(origin: string, snap: Snapshot, shell: PageShell): s
 <li><strong>Fidelity tiers</strong> — reach maps to continuous fidelity <code>0–3</code> (wireframe → flat poly → textured PS2-ish → Switch-ish). The live site uses the <strong>2D synthwave canvas</strong> by default; add <code>?gl=1</code> to preview the WebGL tier upgrade path.</li>
 <li><strong>Reduced motion</strong> — with <code>prefers-reduced-motion</code>, one static frame is drawn (no animation).</li>
 </ul></section>
+<section id="agents"><h2>For agents</h2>
+<p>Start with <a href="/llms.txt">/llms.txt</a>: a plain-text guide to the endpoints, record schema, relays and licenses. Check one site with <code>GET /check?domain=example.com</code>.</p>
+<h3 id="mcp">Install the MCP server</h3>
+<p>The Worker speaks MCP over a minimal, stateless <strong>Streamable HTTP</strong> transport: <code>POST ${esc(origin)}/mcp</code> with one JSON-RPC message, answered with a single <code>application/json</code> response (no SSE stream, no session IDs, protocol versions <code>2024-11-05</code>, <code>2025-03-26</code> or <code>2025-06-18</code>, tools only; <code>GET /mcp</code> returns 405). Tools: <code>search_merchants</code>, <code>get_record</code>, <code>check_domain</code>. No key needed.</p>
+<div class="km-codeblock"><span class="km-code-label">Claude Desktop</span><pre><code>${esc(MCP_SNIPPETS.claude)}</code></pre></div>
+<p class="km-muted">Claude Desktop's config file launches local (stdio) servers, so this uses the <code>mcp-remote</code> bridge (needs Node.js). Custom connectors in Claude's settings can take the URL directly.</p>
+<div class="km-codeblock"><span class="km-code-label">Cursor (~/.cursor/mcp.json)</span><pre><code>${esc(MCP_SNIPPETS.cursor)}</code></pre></div>
+<div class="km-codeblock"><span class="km-code-label">Any Streamable HTTP client</span><pre><code>${esc(MCP_SNIPPETS.http)}</code></pre></div>
+<h3 id="agent-visits">Agent shoppers on the road</h3>
+<p>The bot shoppers walking the landscape are <strong>partly simulated</strong>. We count requests to <code>/mcp</code>, <code>/q</code>, <code>/check</code>, <code>/llms.txt</code> and <code>/export.ndjson</code> as daily totals per coarse agent family (claude, openai, cursor, curl, python, other…), with no IP addresses or full user agents stored. One walking shopper stands for ${VISITS_PER_SHOPPER} agent requests today; until real traffic exists, at least ${SIMULATED_SHOPPER_FLOOR} simulated shoppers are shown. Live counts: <a href="/stats/agents.json">/stats/agents.json</a>.</p>
+</section>
 <section id="limits"><h2>Limits</h2><p>All requests come from one datacenter IP address. Sites often treat datacenter traffic differently from home connections, so a block here may not be a block for you.</p></section>
 <section id="unknowns"><h2>Unknowns</h2><p>Fields we could not observe stay null and display as unknown. We do not infer.</p></section>
 <section id="ease"><h2>Checkout ease</h2><p>Derived: when status is crawled, ease equals co when set; else 0 when ag is 0; else null.</p></section>
@@ -477,3 +498,34 @@ export function renderDocsRelayFilters(origin: string, shell: PageShell): string
 }
 
 export { renderTableRow };
+
+export function checkSummaryHtml(b: Record<string, unknown>): string {
+  const verdict = String(b.verdict);
+  const label: Record<string, string> = {
+    reachable: "Yes: an agent could reach this store",
+    "agents-not-welcome": "No: this store turns agents away",
+    "blocked-tos": "No: its terms ban automated access",
+    error: "Unknown: our crawler could not load it",
+    "not-in-index": "Not in index yet",
+  };
+  if (verdict === "not-in-index") {
+    return `<div class="km-check-card" data-verdict="not-in-index"><strong>${esc(String(b.domain))}</strong>: not in index yet. We don't crawl on request; <a href="${esc(String(b.suggest))}">suggest it</a>.</div>`;
+  }
+  const pay = b.pay as { online: string[]; instore: string[]; unscoped: string[] };
+  const labels = uniquePayLabels([...pay.online, ...pay.instore, ...pay.unscoped]);
+  const cd = b.checkout_depth as { co: number | null; guest: boolean | null };
+  const ev = b.evidence ? `<a href="${esc(String(b.evidence))}" rel="nofollow noopener">evidence</a>` : "no evidence URL";
+  return `<div class="km-check-card" data-verdict="${esc(verdict)}"><strong>${esc(String(b.domain))}</strong>: ${esc(label[verdict] ?? verdict)}
+<ul><li>Checkout ease: ${cd.co ?? "unknown"}${cd.guest === null ? "" : cd.guest ? " · guest checkout" : " · account needed"}</li>
+<li>Pay: ${labels.length ? labels.map(esc).join(", ") : "not observed"}</li>
+<li>BTC grade: ${b.btc_grade ?? "ungraded"}</li>
+<li>Recorded ${esc(String(b.record_time).slice(0, 10))} · ${ev} · <a href="${esc(String(b.record))}">record</a></li></ul></div>`;
+}
+
+export function renderCheckResult(origin: string, b: Record<string, unknown>, shell: PageShell): string {
+  const body = `<h1>Can my agent shop here?</h1>
+<form class="km-search km-check" method="get" action="/check"><label class="km-sr-only" for="check-domain">Domain</label><input id="check-domain" name="domain" value="${esc(String(b.domain))}" required><input type="hidden" name="format" value="html"><button type="submit">Check</button></form>
+<output class="km-check-result" data-testid="check-result">${checkSummaryHtml(b)}</output>
+<p class="km-muted">JSON: <code>GET /check?domain=${esc(String(b.domain))}</code> · MCP tool <code>check_domain</code></p>`;
+  return pageLayout({ title: "Check a store", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/check" }, shell);
+}

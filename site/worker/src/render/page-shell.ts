@@ -8,6 +8,8 @@ export interface PageShell {
   landscapeTier?: number;
   sceneOnly?: boolean;
   story?: StoryCounts;
+  /** Today's counted agent requests (from D1 aggregates); undefined when unknown. */
+  agentVisitsToday?: number;
 }
 
 export function isPreviewDataMode(env: { PREVIEW_DATA?: string }): boolean {

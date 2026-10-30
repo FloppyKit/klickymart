@@ -9,6 +9,9 @@ import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
 import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
 import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilities";
 import { buildSummaryJson } from "./summary-json";
+import { buildLlmsTxt } from "./llms";
+import { checkDomain } from "./check";
+import { agentStats, recordAgentVisit, visitsToday } from "./agent-visits";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
@@ -24,6 +27,7 @@ import {
   renderDocsNostrTags,
   renderDocsRelayFilters,
   renderQueryResults,
+  renderCheckResult,
 } from "./render/pages";
 
 export interface Env {
@@ -178,8 +182,27 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" } });
   }
 
+  await recordAgentVisit(env.DB, path, request.headers.get("User-Agent"));
+
   const snap = await loadSnapshot(env);
   const shell = buildPageShell(snap, env, url);
+  const accept0 = request.headers.get("Accept") ?? "";
+  if (request.method === "GET" && (accept0.includes("text/html") || !accept0) && !path.includes(".")) {
+    shell.agentVisitsToday = await visitsToday(env.DB);
+  }
+
+  if (path === "/check" && request.method === "GET") {
+    const res = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
+    if (!res.ok) return err400("domain", res.message);
+    if (url.searchParams.get("format") === "html") {
+      return new Response(renderCheckResult(origin, res.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    return Response.json({ ...licenseMetaBlock(), ...res.body }, { headers: apiHeaders(snap.version, 0) });
+  }
+
+  if (path === "/stats/agents.json" && request.method === "GET") {
+    return Response.json(await agentStats(env.DB), { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=30" } });
+  }
 
   if (path === "/q" && request.method === "GET") {
     const validated = validateQueryParams(url.searchParams);
@@ -310,13 +333,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/llms.txt") {
-    const text = `KlickyMart: a signed map of where software agents can shop.
-Endpoints: GET ${origin}/q, GET ${origin}/export.ndjson, POST ${origin}/mcp
-Codes: ${origin}/docs/api#codes
-Licenses: code MIT (see ${origin}/LICENSE via GitHub); data CC0-1.0 (${origin}/DATA-LICENSE)
-Contact: ${env.CONTACT}
-`;
-    return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const relays = (env.RELAY_URLS ?? "").replace(/[\[\]"]/g, "").split(",").map((x) => x.trim()).filter(Boolean);
+    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/llms-full.txt") {
@@ -334,7 +352,7 @@ Contact: ${env.CONTACT}
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", tools: ["search_merchants", "get_record"] }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -343,7 +361,7 @@ Contact: ${env.CONTACT}
   }
 
   if (path === "/robots.txt") {
-    return new Response(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, { headers: { "Content-Type": "text/plain" } });
+    return new Response(`# Agents: start at ${origin}/llms.txt (endpoints, MCP, record schema). About: ${origin}/about\nUser-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, { headers: { "Content-Type": "text/plain" } });
   }
 
   if (path === "/sitemap.xml") {
@@ -351,10 +369,15 @@ Contact: ${env.CONTACT}
     return new Response(`<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`, { headers: { "Content-Type": "application/xml" } });
   }
 
+  if (path === "/mcp" && request.method === "GET") {
+    return new Response("MCP endpoint: POST JSON-RPC here (stateless Streamable HTTP, JSON responses; no SSE stream).", { status: 405, headers: { Allow: "POST, OPTIONS", "Access-Control-Allow-Origin": "*" } });
+  }
+
   if (path === "/mcp" && request.method === "POST") {
     const body = await request.text();
     const parsed = parseMcpRequest(body);
     if (!parsed) return Response.json({ jsonrpc: "2.0", error: { code: -32700, message: "parse error" }, id: null });
+    if (parsed.isNotification) return new Response(null, { status: 202, headers: { "Access-Control-Allow-Origin": "*" } });
     const handler = createMcpHandler({
       runQuery: async (sp) => {
         const v = validateQueryParams(sp);
@@ -363,6 +386,7 @@ Contact: ${env.CONTACT}
         const items = result.items.map((r) => rowToCompact(r, origin));
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
+      checkDomain: async (domain) => checkDomain(snap, domain, origin),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());
         if (!row) return null;
