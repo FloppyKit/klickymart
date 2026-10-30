@@ -2,6 +2,8 @@
 """Sign each record as kind 31420 (addressable, d=domain). Writes out/events.jsonl. Does NOT publish."""
 import json, os, sys
 from nostr_sdk import Keys, EventBuilder, Kind, Tag, Event, NostrSigner
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from url_redact import redact  # KM-N01: strip captured session/auth tokens and query strings before signing
 HERE = os.path.dirname(os.path.abspath(__file__))
 keys = Keys.parse(open(os.path.join(HERE, "..", "secrets", "crawler.nsec")).read().strip())
 src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "out", "records.jsonl")
@@ -22,7 +24,7 @@ n = 0
 with open(dst, "w") as out:
     for line in open(src):
         if not line.strip(): continue
-        r = json.loads(line)
+        r = redact(json.loads(line))
         ev = EventBuilder(Kind(31420), json.dumps(r, separators=(",", ":"))).tags([Tag.parse(x) for x in tags_for(r)]).finalize_unsigned(keys.public_key()).sign(SIGNER)
         out.write(ev.as_json() + "\n"); n += 1
 # verify from disk

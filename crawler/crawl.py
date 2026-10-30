@@ -8,6 +8,8 @@ import json, re, sys, time, hashlib, argparse, os, urllib.robotparser
 from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
 from extract import extract_payments, scope_split
+from egress import egress_check, install as _egress_install
+_egress_install()  # KIMI-007: every Playwright context/goto in crawl.py and tos.py goes through the egress guard
 
 UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)"   # bot info + opt-out page (site/bot/index.html)
 UA_TOKEN = "FloppyKitMapBot"
@@ -48,6 +50,7 @@ HIDDEN_JS = """() => { const out = []; const ugcSel = %s;
 def load_robots(ctx, base):
     rp = urllib.robotparser.RobotFileParser(); info = {"status": None, "ai_rules": []}
     try:
+        egress_check(base + "/robots.txt")  # KIMI-007: refused -> err status -> treated as Disallow
         r = ctx.request.get(base + "/robots.txt", timeout=20000, max_redirects=5)
         info["status"] = r.status; txt = r.text() if r.ok else ""
     except Exception as e:
