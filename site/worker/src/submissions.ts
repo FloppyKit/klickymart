@@ -1,3 +1,4 @@
+import { BIG_NIP05_PROVIDERS } from "./nip05";
 /** Path 3: community store submission + trust ladder (trust_tier). Separate from the record's `trust` (domain-age) object.
  * Submitters only give a domain, a category hint and a note: facts come from the gated crawl, which the box crawler runs
  * (crawler/gate.py) after reading GET /submit/queue.ndjson. Nothing is ever hidden; every tier is a label.
@@ -307,7 +308,12 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     try { for (const r of (await db.prepare("SELECT id, weight, reasons_json FROM note_flags").all<{ id: string; weight: number; reasons_json: string }>()).results ?? []) if (r.reasons_json !== "[]") flagW.set(r.id, r.weight); } catch { /* */ }
     try { for (const r of (await db.prepare("SELECT pubkey, MIN(created_at) AS t FROM nostr_events GROUP BY pubkey").all<{ pubkey: string; t: number }>()).results ?? []) firstSeen.set(r.pubkey, r.t); } catch { /* */ }
     try { for (const r of (await db.prepare("SELECT domain, pubkey FROM store_claims WHERE status = 'active'").all<{ domain: string; pubkey: string }>()).results ?? []) dnsClaims.set(r.domain, r.pubkey); } catch { /* migration pending */ }
-    try { for (const r of (await db.prepare("SELECT n.domain AS d, n.pubkey AS pk FROM nip05_checks n JOIN site_records s ON s.pubkey = n.pubkey AND s.d = n.domain WHERE n.status = 'verified'").all<{ d: string; pk: string }>()).results ?? []) claims.add(`${r.d}|${r.pk}`); } catch { /* */ }
+    // KM-005: a NIP-05 store claim needs the domain identity "_@<store domain>" (not any user name), the NIP-05 domain must
+    // equal the record's d, and open NIP-05 providers never count (a user handle there says nothing about owning the store).
+    try { for (const r of (await db.prepare("SELECT n.domain AS d, n.pubkey AS pk, n.nip05 AS nip05 FROM nip05_checks n JOIN site_records s ON s.pubkey = n.pubkey AND s.d = n.domain WHERE n.status = 'verified'").all<{ d: string; pk: string; nip05: string | null }>()).results ?? []) {
+      const id = String(r.nip05 ?? "").toLowerCase(); const dd = String(r.d).toLowerCase();
+      if ((id === `_@${dd}` || id === dd) && !BIG_NIP05_PROVIDERS.has(dd)) claims.add(`${r.d}|${r.pk}`);
+    } } catch { /* */ }
   }
   for (const n of notes) { const t = firstSeen.get(n.pubkey); if (t === undefined || n.created_at < t) firstSeen.set(n.pubkey, n.created_at); }
   const strongKeys = new Set(notes.filter((n) => flagW.get(n.id) === 0).map((n) => n.pubkey));

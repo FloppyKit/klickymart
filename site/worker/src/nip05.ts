@@ -5,7 +5,8 @@ export const NIP05_UA = "KlickyMartBot/1.0 (+https://klickymart.com/bot; bot@kli
 export const NIP05_LIMITS = { perPass: 10, recheckS: 7 * 86400, timeoutMs: 5000 };
 /** Large public NIP-05 providers: many unrelated people share these, so they never give more than a weak flag. */
 export const BIG_NIP05_PROVIDERS = new Set(["primal.net", "iris.to", "snort.social", "nostrplebs.com", "nostr.com", "getalby.com", "damus.io", "nostrcheck.me", "zaps.lol",
-  "current.fyi", "nostr.band", "habla.news", "coinos.io", "minibits.cash", "npub.cash", "nostr.wine", "stacker.news", "nostriches.net", "bitcoiner.chat", "nos.social", "yakihonne.com", "nostur.com", "highlighter.com", "x.com"]);
+  "current.fyi", "nostr.band", "habla.news", "coinos.io", "minibits.cash", "npub.cash", "nostr.wine", "stacker.news", "nostriches.net", "bitcoiner.chat", "nos.social", "yakihonne.com", "nostur.com", "highlighter.com", "x.com",
+  "strike.me", "fountain.fm", "geyser.fund", "walletofsatoshi.com", "blink.sv", "zbd.gg", "nostrich.house", "lnbits.com"]);
 const REFUSE = new Set(["blocked-tos", "agents-not-welcome", "robots-disallowed"]);
 
 export function parseNip05(s: unknown): { name: string; domain: string } | null {

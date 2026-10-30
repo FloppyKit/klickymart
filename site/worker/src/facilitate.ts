@@ -6,7 +6,7 @@ import * as secp from "@noble/secp256k1";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { verifyBolt11 } from "./bolt11";
-import { checkZapReceipt } from "./pay-binding";
+import { checkZapReceipt, claimedKeys } from "./pay-binding";
 import { nostrEventId, verifyNostrEvent } from "./nostr-verify";
 import { NOSTR_KIND_FULFILLMENT } from "./nostr-kinds";
 
@@ -85,8 +85,9 @@ export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILI
   if (need !== null && !HEX64.test(need)) return bad("bad_param", "need_id must be a 64-hex event id");
   if (env.DB) {
     try {
-      const c = await env.DB.prepare("SELECT pubkey FROM claims WHERE d = ? LIMIT 1").bind(d).first<{ pubkey: string }>();
-      if (c) return bad("store_claimed", `This store claimed its listing (key ${c.pubkey}); only the store's own 421s count now. Ask the store to sign.`, 409);
+      // KIMI-004: NIP-05 claims AND active DNS store_claims both stop facilitation.
+      const c = (await claimedKeys(env.DB, d))[0];
+      if (c) return bad("store_claimed", `This store claimed its listing (key ${c}); only the store's own 421s count now. Ask the store to sign.`, 409);
     } catch { /* claims table missing */ }
   }
   const pr = checkFacilitationProof(input.proof);
@@ -112,8 +113,8 @@ export const HISTORY_STATUS = "facilitated-history";
  * verified payment). Idempotent; call after a claim and after storing notes/reviews for a claimed domain. */
 export async function markFacilitatedHistory(db: D1Database, d: string): Promise<number> {
   try {
-    const claim = await db.prepare("SELECT MIN(checked_at) AS t FROM claims WHERE d = ?").bind(d).first<{ t: number | null }>();
-    if (claim?.t == null) return 0;
+    // KIMI-004: any claim (NIP-05 claims table or an active DNS store_claims row) turns facilitated 421s into history.
+    if (!(await claimedKeys(db, d)).length) return 0;
     const { results } = await db.prepare("SELECT id FROM nostr_events WHERE kind = ? AND pubkey = ? AND d = ?").bind(NOSTR_KIND_FULFILLMENT, FACILITATOR_PUBKEY, d).all<{ id: string }>();
     let n = 0;
     for (const { id } of results ?? []) {

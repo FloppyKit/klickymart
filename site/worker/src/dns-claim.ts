@@ -1,3 +1,4 @@
+import { markFacilitatedHistory } from "./facilitate";
 /** DNS TXT store claims (Path 3, trust_tier verified via "store claim: DNS TXT").
  * Owner: publish TXT at _klickymart.<domain> containing their npub (bare or "klickymart-claim=npub1..."), then POST a kind 1423
  * signed by that key with tags [["r", domain], ["claim", "dns"]]. Revoke with [["claim", "revoke"]] signed by the same key. */
@@ -67,6 +68,7 @@ export async function handleDnsClaim(db: D1Database | undefined, body: Record<st
     await db.prepare(`INSERT INTO store_claims (domain,pubkey,method,status,txt,event_id,claimed_at,checked_at) VALUES (?,?,'dns','active',?,?,?,?)
       ON CONFLICT(domain,pubkey) DO UPDATE SET status='active', txt=excluded.txt, event_id=excluded.event_id, checked_at=excluded.checked_at, revoked_at=NULL, revoke_event_id=NULL`).bind(n.domain, pk, txts.join(" | ").slice(0, 500), ev.id, nowS, nowS).run();
     clearTierCache();
+    await markFacilitatedHistory(db, n.domain); // KIMI-004: a DNS claim also demotes earlier facilitated 421s
   }
   return { status: dryRunStatus(opts.dryRun), body: { ok: true, domain: n.domain, npub, status: "active", method: "dns", txt_name: name, dry_run: !!opts.dryRun, stored: !opts.dryRun, trust: "trust_tier becomes verified (store claim: DNS TXT)" } };
 }
