@@ -1,3 +1,4 @@
+import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
 import { checkExtras, checkoutOf } from "./explain";
@@ -33,11 +34,15 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       domain: row.d,
       verdict,
       status: row.status,
+      ...storeFacts(row),
       ...checkExtras(row, raw),
       checkout_depth: checkoutOf(row, raw),
       pay: c.pay,
       btc_grade: row.btc,
       btc_any: row.btc_any === null ? null : row.btc_any === 1,
+      btc_indirect: (raw.btc_indirect as unknown[] | undefined) ?? null,
+      btc_grade_range: (raw.btc_grade_range as string | undefined) ?? null,
+      btc_grade_reason: (raw.btc_grade_reason as string | undefined) ?? null,
       record_ts: row.ts,
       record_time: new Date(row.ts * 1000).toISOString(),
       evidence,

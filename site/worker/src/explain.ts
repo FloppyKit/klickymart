@@ -23,6 +23,11 @@ export function shipOf(raw: Record<string, unknown>): Ship {
   return { pre_pay: s.pre_pay ?? null, ships_us: s.ships_us ?? null, free_min_usd: s.free_min_usd ?? null, ...(s.pre_pay_ev ? { pre_pay_ev: s.pre_pay_ev } : {}), ...(s.ships_us_ev ? { ships_us_ev: s.ships_us_ev } : {}), ...(s.free_min_ev ? { free_min_ev: s.free_min_ev } : {}) };
 }
 
+/** One source of truth for the headline store facts; every endpoint (check, alternatives, offers, MCP) uses this. */
+export function storeFacts(row: IndexRow) {
+  const guest = row.guest === null ? null : row.guest === 1;
+  return { checkout: row.co, co: row.co, agent_access: row.ag, guest, btc_grade: row.btc, btc: row.btc };
+}
 export function checkoutOf(row: IndexRow, raw: Record<string, unknown>) {
   const probe = raw.checkout_probe as { step_reached?: string; n?: string; ts?: number; pm_visible?: string } | undefined;
   return {
