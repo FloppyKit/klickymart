@@ -15,6 +15,10 @@ import { lnurlNostrPubkey, lud16Of, type Fetcher, checkPreimage, checkZapReceipt
 export const ZAP_RECEIPT_KIND = 9735;
 export const DELETION_KIND = 5;
 export const INGEST_LIMITS = { perPubkeyPerDay: 200, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
+/** KM-007: relay-ingested notes/reviews older than this are rejected (was ~10 years), and nothing more than
+ * MAX_FUTURE_S ahead of our clock is accepted. Key age is judged on first_seen (ingest time), never on created_at. */
+export const RELAY_NOTE_MAX_AGE_S = 60 * 86400;
+export const MAX_FUTURE_S = 600;
 
 export interface IngestCtx {
   indexStatus?: (d: string) => string | undefined;
@@ -81,13 +85,13 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
   if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984, 0, NOSTR_KIND_STORE_SUGGESTION].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
-    const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
+    const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
   }
   const v = verifyNostrEvent(ev, ev.kind);
   if (!v.ok) return { ok: false, reason: v.reason };
   if (!ev.tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return { ok: false, reason: "bad tags" };
-  if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + 600) return { ok: false, reason: "future created_at" };
+  if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + MAX_FUTURE_S) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
   if (ev.kind === 0) return { ok: true, d: null };
   if (ev.kind === NOSTR_KIND_STORE_SUGGESTION) { const p = parseSuggestionEvent(ev, ctx.now ?? Date.now(), 365 * 86400); return p.ok ? { ok: true, d: null } : { ok: false, reason: `1423: ${p.message}` }; }
@@ -101,8 +105,8 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   }
   if (!d) return { ok: false, reason: "does not reference an indexed merchant (a 31420:*:<domain> or r tag)" };
   if (ev.kind === NOSTR_KIND_ACCEPTANCE && tagv(ev.tags, "rating") !== undefined) {
-    const r = parseReviewEvent(ev, (x) => ctx.domains.has(x), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
-    const x = r.ok ? null : parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
+    const r = parseReviewEvent(ev, (x) => ctx.domains.has(x), ctx.now ?? Date.now(), { maxAgeS: RELAY_NOTE_MAX_AGE_S });
+    const x = r.ok ? null : parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     if (!r.ok && !x?.ok) return { ok: false, reason: `review: ${r.message}` };
   }
   return { ok: true, d };
@@ -241,7 +245,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   }
   for (let k = 0; k < stmts.length; k += 200) await db.batch(stmts.slice(k, k + 200));
   for (const ev of exps) {
-    const x = parseExperience(ev, (dd) => ctx.domains.has(dd), now, { maxAgeS: 10 * 365 * 86400 });
+    const x = parseExperience(ev, (dd) => ctx.domains.has(dd), now, { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     if (!x.ok) continue;
     let ps: string | null = null;
     if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap")), await storeBindings(db, x.value.d), x.value.d); } catch { ps = null; } }
@@ -253,7 +257,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     if (p.ok) { try { await submitStore({}, { db, indexed: ctx.domains, salt: "", ip: null, via: "nostr", signed: p.value, now, origin: "https://klickymart.com" }); } catch { /* migration pending */ } }
   }
   for (const ev of reviews) {
-    const p = parseReviewEvent(ev, (x) => ctx.domains.has(x), now, { maxAgeS: 10 * 365 * 86400 });
+    const p = parseReviewEvent(ev, (x) => ctx.domains.has(x), now, { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     if (!p.ok) continue;
     const ful = await getEvent(db, p.value.fulfillment ?? undefined);
     const zap = await getEvent(db, tagv(ev.tags, "zap"));
