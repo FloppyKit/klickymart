@@ -11,7 +11,7 @@ export const PAY_ALIASES: Record<string, string> = {
   "btc-onchain": "btc", onchain: "btc", "on-chain": "btc", bitcoin_onchain: "btc",
   lightning: "ln", "btc-lightning": "ln",
   "shop-pay": "spay", shoppay: "spay", "apple-pay": "apay", applepay: "apay", "google-pay": "gpay", googlepay: "gpay",
-  paypal: "pp", "gift-card": "gift", giftcard: "gift", "credit-card": "card", "debit-card": "card", "cash-app": "cashapp", ecash: "cashu",
+  paypal: "pp", "gift-card": "gift", giftcard: "gift", "credit-card": "card", "debit-card": "card", "cash-app": "cashapp", ecash: "cashu", "stripe-link": "link", "link-by-stripe": "link",
 };
 /** /alternatives pay filter names (what each expands to). */
 export const ALT_PAY_FILTERS: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], "btc-onchain": ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"], ecash: ["cashu"] };
@@ -26,6 +26,11 @@ export function isPayCode(c: string): boolean {
   return (PAY_CODES as readonly string[]).includes(base) || base === "bnpl" || base === "oth";
 }
 export function vocabulary() {
-  return { pay_codes: [...PAY_CODES], pay_aliases: PAY_ALIASES, pay_groups: PAY_GROUP_NAMES, alternatives_pay: Object.keys(ALT_PAY_FILTERS),
+  return { q_bool_filters: [...Q_BOOL_FILTERS], btc_processors: [...BTC_PROCESSORS], pay_codes: [...PAY_CODES], pay_aliases: PAY_ALIASES, pay_groups: PAY_GROUP_NAMES, alternatives_pay: Object.keys(ALT_PAY_FILTERS),
     cat_codes: [...CAT_CODES], categories: [...COARSE_CATEGORIES], q_categories: Q_CATEGORIES, subs: [...SUBCATEGORIES], status: [...STATUS_VALUES], first_blocker_kinds: [...BLOCKER_KINDS] };
 }
+
+/** /q boolean filters (0|1). Kept here so llms.txt, openapi and MCP list the same set. */
+export const Q_BOOL_FILTERS = ["guest", "reachable", "ship_pre", "ships_us", "btc_indirect"] as const;
+/** Third-party bitcoin processors: a store using one takes BTC only indirectly (btc_indirect), not natively. */
+export const BTC_PROCESSORS = ["bitpay", "coinbase-commerce", "confirmo", "opennode", "nowpayments", "coinpayments", "cryptomus", "triple-a", "coingate", "strike", "speed", "zaprite-hosted", "bitrefill-giftcard"] as const;

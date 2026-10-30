@@ -3,7 +3,7 @@
 export const PAY_CODES = [
   "card", "apay", "gpay", "spay", "pp", "venmo", "cashapp", "zelle", "ach", "check",
   "cod", "gift", "bnpl", "ebt", "btc", "ln", "lnurl", "bolt12", "sp", "ark", "cashu",
-  "fedi", "liq", "usdc", "usdt", "eth", "xmr", "ltc", "crypto", "oth", "hsa",
+  "fedi", "liq", "usdc", "usdt", "eth", "xmr", "ltc", "crypto", "oth", "hsa", "link",
 ] as const;
 export type PayCode = (typeof PAY_CODES)[number];
 

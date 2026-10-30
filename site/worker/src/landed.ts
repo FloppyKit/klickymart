@@ -27,7 +27,10 @@ export function zipToState(zip: string): string | null {
   for (const [a, b, s] of RANGES) if (p >= a && p <= b) return s;
   return null;
 }
-export function validZip(z: string | null | undefined): string | null { return z && /^\d{5}$/.test(z) && zipToState(z) ? z : null; }
+/** ZIP codes that are well-formed but are placeholders, not assigned to any address. */
+export const PLACEHOLDER_ZIPS = new Set(["00000", "11111", "12345", "99999", "22222", "33333", "44444", "55555", "66666", "77777", "88888"]);
+export function validZip(z: string | null | undefined): string | null { return z && /^\d{5}$/.test(z) && !PLACEHOLDER_ZIPS.has(z) && zipToState(z) ? z : null; }
+export const ZIP_ERROR = "zip must be a real 5-digit US ZIP code (placeholders such as 99999 or 00000 are rejected because they map to no address)";
 
 /** Landed-cost view of one record for a ZIP (and optional item price). Unknown stays null. */
 export type OfferShip = { usd: number; n?: number; src?: string; me?: string; note?: string };

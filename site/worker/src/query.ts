@@ -49,6 +49,7 @@ export interface QueryParams {
   /** GO 5.7: finer subcategory (signed `sub`), landed-cost signals */
   sub?: string;
   ship_pre?: number;
+  btc_indirect?: number;
   ships_us?: number;
   free_ship_max?: number;
   sort?: string[];
@@ -68,7 +69,7 @@ const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
-  "sub", "ship_pre", "ships_us", "free_ship_max", "sort", "limit", "cursor", "fields", "format",
+  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "sort", "limit", "cursor", "fields", "format",
 ]);
 
 export function validateQueryParams(searchParams: URLSearchParams): { ok: true; params: QueryParams } | { ok: false; param: string; message: string } {
@@ -243,7 +244,7 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     if (!SUB_CODES.includes(sub)) return { ok: false, param: "sub", message: `sub must be one of: ${SUB_CODES.join(", ")}` };
     params.sub = sub;
   }
-  for (const key of ["ship_pre", "ships_us"] as const) {
+  for (const key of ["ship_pre", "ships_us", "btc_indirect"] as const) {
     const v = searchParams.get(key);
     if (v !== null) {
       if (v !== "0" && v !== "1") return { ok: false, param: key, message: `${key} must be 0 or 1` };
@@ -366,8 +367,9 @@ function matches(row: IndexRow, p: QueryParams): boolean {
     if (row.ag === null || row.ag < p.ag_min) return false;
   }
 
-  if (p.sub || p.ship_pre !== undefined || p.ships_us !== undefined || p.free_ship_max !== undefined) {
+  if (p.sub || p.ship_pre !== undefined || p.ships_us !== undefined || p.free_ship_max !== undefined || p.btc_indirect !== undefined) {
     const raw = rawOf(row);
+    if (p.btc_indirect !== undefined) { const has = Array.isArray(raw.btc_indirect) && (raw.btc_indirect as unknown[]).length > 0; if (has !== (p.btc_indirect === 1)) return false; }
     if (p.sub && !(Array.isArray(raw.sub) && (raw.sub as string[]).includes(p.sub))) return false;
     const ship = (raw.ship ?? {}) as { pre_pay?: boolean | null; ships_us?: boolean | null; free_min_usd?: number | null };
     if (p.ship_pre !== undefined && ship.pre_pay !== (p.ship_pre === 1)) return false;
