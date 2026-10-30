@@ -1020,7 +1020,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const validated = validateQueryParams(url.searchParams);
       if (!validated.ok) return new Response(render404(origin, shell), { status: 400 });
       const result = querySnapshot(snap, validated.params);
-      return new Response(renderDashboard(snap, origin, url.searchParams, result.items, result.total, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      return new Response(renderDashboard(snap, origin, url.searchParams, result.items, result.total, shell, await allTiers().catch(() => undefined)), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (path === "/about") return new Response(renderAbout(origin, snap, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (path === "/contribute") return new Response(renderContribute(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });

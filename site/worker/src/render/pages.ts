@@ -8,6 +8,7 @@ import type { IndexRow, Snapshot } from "../index-mem";
 import { renderAgentPolicy, renderCheckoutDetail, renderV5, renderWhy } from "../explain";
 import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
+import type { TrustInfo } from "../submissions";
 import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact, uniquePayLabels } from "../records-api";
 import { computeStoryCounts, landscapeFormulaInputs, storyLine } from "../landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "../nostr-kinds";
@@ -130,7 +131,7 @@ ${awning("On the shelves", "Which stores a software agent can reach, how checkou
   }, shell);
 }
 
-export function renderDashboard(snap: Snapshot, origin: string, searchParams: URLSearchParams, items: IndexRow[], total: number, shell: PageShell): string {
+export function renderDashboard(snap: Snapshot, origin: string, searchParams: URLSearchParams, items: IndexRow[], total: number, shell: PageShell, tiers?: Map<string, TrustInfo>): string {
   const stats = computeStats(snap.rows) as {
     by_status: Record<string, number>;
     btc_histogram: Record<string, number>;
@@ -141,43 +142,57 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
   };
   const landscapeIn = landscapeFormulaInputs(snap.rows);
   const reachable = snap.rows.filter((r) => r.status === "crawled" && r.ag !== null && r.ag >= 1).length;
-  const tiles = [
-    { label: "Crawled", count: stats.by_status.crawled ?? 0, href: "/dashboard?status=crawled" },
-    { label: "Reachable (ag≥1)", count: reachable, href: "/dashboard?reachable=1" },
-    { label: "ToS bans automation", count: stats.by_status["blocked-tos"] ?? 0, href: "/dashboard?status=blocked-tos" },
-    { label: "Agents not welcome", count: stats.by_status["agents-not-welcome"] ?? 0, href: "/dashboard?status=agents-not-welcome" },
-    { label: "Errors", count: stats.by_status.error ?? 0, href: "/dashboard?status=error" },
-    { label: "Total", count: stats.records, href: "/dashboard" },
+
+  const N = stats.records;
+  const crawledRows = snap.rows.filter((r) => r.status === "crawled");
+  const C = crawledRows.length;
+
+  // Q1: how many sites can an agent get into?
+  const outcome = [
+    { label: "Crawled, agent could read pages", n: reachable, href: "/dashboard?reachable=1" },
+    { label: "Crawled, blocked at the front page", n: (stats.by_status.crawled ?? 0) - reachable, href: "/dashboard?status=crawled" },
+    { label: "Terms of service ban automation", n: stats.by_status["blocked-tos"] ?? 0, href: "/dashboard?status=blocked-tos" },
+    { label: "Turned agents away (robots.txt, 403, block page)", n: stats.by_status["agents-not-welcome"] ?? 0, href: "/dashboard?status=agents-not-welcome" },
+    { label: "Site errored when we checked", n: stats.by_status.error ?? 0, href: "/dashboard?status=error" },
   ];
 
-  const hist = stats.btc_histogram ?? {};
-  const histKeys = ["0", "1", "2", "3", "4", "ungraded"];
-  const maxH = Math.max(1, ...histKeys.map((k) => hist[k] ?? 0));
-  const bars = histKeys.map((k, i) => {
-    const v = hist[k] ?? 0;
-    const h = Math.round((v / maxH) * 100);
-    const label = k === "ungraded" ? "∅" : k;
-    const x = i * 40 + 5;
-    return `<g><rect class="km-bar" x="${x}" y="${100 - h}" width="32" height="${h}"/><text x="${x + 16}" y="115">${label}</text><title>${k === "ungraded" ? "not graded" : `grade ${k}`}: ${v}</title></g>`;
-  }).join("");
+  // Q2: how far into a store does an agent get? (crawled sites only)
+  const agWords: [string, string][] = [["3", "Reached the payment screen"], ["2", "Read product and cart pages"], ["1", "Browse only"], ["0", "Blocked at landing"], ["unknown", "Not measured"]];
+  const agCount: Record<string, number> = {};
+  for (const r of crawledRows) { const k = r.ag === null || r.ag === undefined ? "unknown" : String(r.ag); agCount[k] = (agCount[k] ?? 0) + 1; }
+  const depth = agWords.map(([k, label]) => ({ label: `${label} (ag ${k === "unknown" ? "?" : k})`, n: agCount[k] ?? 0, href: k === "unknown" ? "/about#unknowns" : `/q?ag=${k}` }));
 
-  const agDist = stats.ag_distribution ?? {};
-  const agRows = ["0", "1", "2", "3", "unknown"].map((k) =>
-    `<tr><td>ag ${k === "unknown" ? "unknown" : k}</td><td>${agDist[k] ?? 0}</td></tr>`,
-  ).join("");
+  // Q3: where can an agent pay with Bitcoin today? verified (our own probe) vs claimed (store page says so)
+  const btcRails: Record<string, string> = { btc: "Bitcoin", ln: "Lightning", lnurl: "Lightning", bolt12: "Lightning", sp: "Silent payments", ark: "Ark", cashu: "Cashu", fedi: "Fedimint", liq: "Liquid", xmr: "Monero" };
+  const byD = new Map(snap.rows.map((r) => [r.d, r]));
+  const btcStores = (stats.bitcoin_accepting ?? []).map((m) => {
+    const row = byD.get(m.d)!;
+    const t = tiers?.get(m.d);
+    const proof = (t?.trust_proofs ?? []).find((x) => /protocol endpoint/.test(x)) ?? null;
+    const ev = ((rowToCompact(row, origin).evidence as { pay?: { c: string; url?: string; neg?: boolean }[] }).pay ?? []).filter((e) => btcRails[e.c] && !e.neg);
+    const rails = [...new Set(ev.map((e) => btcRails[e.c]!))];
+    return { ...m, ag: row.ag, verified: t?.trust_tier === "verified" && !!proof, proof, rails, evUrl: ev.find((e) => e.url)?.url ?? null };
+  }).sort((a, b) => Number(b.verified) - Number(a.verified) || (b.ag ?? -1) - (a.ag ?? -1) || (b.btc ?? -1) - (a.btc ?? -1) || a.d.localeCompare(b.d));
+  const nVer = btcStores.filter((b) => b.verified).length;
+  const agShort: Record<string, string> = { "3": "payment screen", "2": "product/cart", "1": "browse only", "0": "blocked" };
+  const btcRows = btcStores.map((b) => `<tr data-btc-store="${esc(b.d)}" data-verified="${b.verified ? "1" : "0"}">
+<td><a href="${esc(merchantUrl(origin, b.d))}">${esc(b.name ?? b.d)}</a><br><span class="km-muted">${esc(b.d)}</span></td>
+<td>${b.verified ? `<strong class="km-proof-verified">Verified</strong><br><span class="km-muted">${esc((b.proof ?? "").replace("protocol endpoint: ", "our probe got a real ").replace(" challenge", " payment challenge"))}</span>` : `Claimed<br><span class="km-muted">${b.evUrl ? `<a href="${esc(b.evUrl)}" rel="nofollow noopener">store page says so</a>` : "store page says so"}</span>`}</td>
+<td>${esc(b.rails.join(", ") || "Bitcoin")}</td>
+<td>${esc(b.ag === null ? "not measured" : agShort[String(b.ag)] ?? String(b.ag))}</td>
+<td>${b.btc === null ? `<span class="km-muted">not graded</span>` : gradeBadge(b.btc)}</td></tr>`).join("");
 
-  const payCounts = stats.pay_counts ?? {};
-  const payRows = Object.entries(payCounts)
-    .sort((a, b) => (b[1].online + b[1].instore + b[1].unscoped) - (a[1].online + a[1].instore + a[1].unscoped))
-    .slice(0, 20)
-    .map(([code, c]) => `<tr><td>${esc(payLabel(code))}</td><td>${c.online}</td><td>${c.instore}</td><td>${c.unscoped}</td></tr>`)
-    .join("");
+  // Q4: which payment methods do crawled stores show? (distinct stores, any scope)
+  const payStores: Record<string, number> = {};
+  for (const r of crawledRows) {
+    const raw = parseRaw(r.raw_json);
+    const seen = new Set<string>();
+    for (const sc of ["pay_online", "pay_instore", "pay_unscoped"]) { const l = raw[sc]; if (Array.isArray(l)) for (const c of l) if (typeof c === "string") seen.add(payLabel(c.split(":")[0]!)); }
+    for (const l of seen) payStores[l] = (payStores[l] ?? 0) + 1;
+  }
+  const payBars = Object.entries(payStores).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12).map(([label, n]) => ({ label, n, href: "" }));
 
-  const btcList = (stats.bitcoin_accepting ?? [])
-    .slice(0, 40)
-    .map((m) => `<li><a href="${esc(merchantUrl(origin, m.d))}">${esc(m.name ?? m.d)}</a> <span class="km-muted">${esc(m.d)}</span> ${gradeBadge(m.btc)}</li>`)
-    .join("");
-
+  const barTable = (caption: string, rows: { label: string; n: number; href: string }[], denom: number, unit: string) => `<table class="km-table km-table-compact km-bars"><caption class="km-sr-only">${esc(caption)}</caption><thead><tr><th scope="col">${esc(unit)}</th><th scope="col">Count</th><th scope="col" aria-hidden="true"></th></tr></thead><tbody>${rows.map((r) => `<tr><th scope="row">${r.href ? `<a href="${esc(r.href)}">${esc(r.label)}</a>` : esc(r.label)}</th><td class="km-bar-n">${r.n} of ${denom}</td><td class="km-bar-cell" aria-hidden="true"><span class="km-hbar" style="width:${denom ? Math.round((r.n / denom) * 100) : 0}%"></span></td></tr>`).join("")}</tbody></table>`;
   const tableRows = items.slice(0, 100).map((row) => renderTableRow(row, origin)).join("");
 
   const categoryVal = searchParams.get("category") ?? "";
@@ -188,43 +203,44 @@ export function renderDashboard(snap: Snapshot, origin: string, searchParams: UR
 
   const body = `
 <div class="km-store km-dash">
-${awning("The map, in numbers.", "Every site we checked, what stopped us, and what they accept. The landscape inputs below drive the road, the store and the sun.", "h1")}
-<div class="km-tiles">${tiles.map((t) => `<a class="km-tile" href="${esc(t.href)}"><span class="km-tile-n">${t.count}</span><span class="km-tile-l">${esc(t.label)}</span></a>`).join("")}</div>
+${awning("The map, in numbers.", "Every site we checked, what stopped us, and what they accept.", "h1")}
+<section class="km-receipt" data-testid="dash-reach">
+<h2 class="km-h2">Can an agent get into these sites?</h2>
+<p class="km-muted">All ${N} sites we checked, by what happened when our crawler arrived.</p>
+${barTable("Outcome per site", outcome, N, "What happened")}
+</section>
 
-<section class="km-section km-receipt">
-<h2 class="km-h2">Landscape inputs</h2>
-<dl class="km-dl">
-<dt>Reach (${landscapeIn.reach.value.toFixed(4)})</dt>
-<dd>${landscapeIn.reach.reachable_merchants} reachable of ${landscapeIn.reach.total_merchants} merchants · <code>${esc(landscapeIn.reach.formula)}</code></dd>
-<dt>BTC sun (${landscapeIn.btc_sun.value.toFixed(4)})</dt>
-<dd>${landscapeIn.btc_sun.candidate_merchants} BTC-accepting merchants · mean privacy score ${landscapeIn.btc_sun.mean_privacy_score.toFixed(4)} · <code>${esc(landscapeIn.btc_sun.formula)}</code>
-<ul>${landscapeIn.btc_sun.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></dd>
-</dl>
+<section class="km-receipt" data-testid="dash-btc">
+<h2 class="km-h2">Where can an agent pay with Bitcoin today?</h2>
+<p><strong>${btcStores.length} of ${N}</strong> sites take Bitcoin or Lightning. <strong>${nVer}</strong> verified: our own probe got a real machine-payable challenge. <strong>${btcStores.length - nVer}</strong> claimed: the store's own page says it accepts Bitcoin, but we have not paid there.</p>
+<div class="km-receipt-table"><table class="km-table km-table-compact">
+<thead><tr><th scope="col">Store</th><th scope="col">How we know</th><th scope="col">Rails</th><th scope="col">How far an agent got</th><th scope="col">Privacy grade (0–4)</th></tr></thead>
+<tbody>${btcRows || `<tr><td colspan="5" class="km-muted">None indexed</td></tr>`}</tbody></table></div>
+<p class="km-muted">Privacy grade 3+ means paying without an account or KYC. Full set as JSON: <a href="/q?pay_group=bitcoin">/q?pay_group=bitcoin</a></p>
 </section>
 
 <div class="km-receipt-grid">
-<section class="km-receipt">
-<h2 class="km-h2">Bitcoin grade (all sites)</h2>
-<p class="km-muted">Ungraded (<span class="km-grade km-g-ungraded">not graded</span>) is distinct from grade 0.</p>
-<svg class="km-chart" viewBox="0 0 260 120" role="img" aria-label="Bitcoin grade histogram">${bars}</svg>
+<section class="km-receipt" data-testid="dash-depth">
+<h2 class="km-h2">How far into a store does an agent get?</h2>
+<p class="km-muted">Deepest step reached, ${C} crawled sites.</p>
+${barTable("Deepest step reached", depth, C, "Deepest step")}
 </section>
-<section class="km-receipt">
-
-<h2 class="km-h2">Agent access (ag)</h2>
-<table class="km-table km-table-compact"><thead><tr><th>ag</th><th>Sites</th></tr></thead><tbody>${agRows}</tbody></table>
+<section class="km-receipt" data-testid="dash-pay">
+<h2 class="km-h2">Which payment methods do stores show?</h2>
+<p class="km-muted">Stores showing each method, of ${C} crawled. Top 12.</p>
+${payBars.length ? barTable("Stores per payment method", payBars, C, "Method") : `<p class="km-muted">None observed</p>`}
 </section>
 </div>
-<section class="km-receipt">
 
-<h2 class="km-h2">Payment methods (observed)</h2>
-<table class="km-table km-table-compact"><thead><tr><th>Method</th><th>Online</th><th>In-store</th><th>Unscoped</th></tr></thead><tbody>${payRows || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
-</section>
-<section class="km-receipt">
-
-<h2 class="km-h2">Bitcoin-accepting merchants</h2>
-<ul class="km-btc-list">${btcList || `<li class="km-muted">None indexed</li>`}</ul>
-${(stats.bitcoin_accepting?.length ?? 0) > 40 ? `<p class="km-muted">Showing 40 of ${stats.bitcoin_accepting!.length}. Use <code>/q?pay_group=bitcoin</code> for the full set.</p>` : ""}
-</section>
+<details class="km-receipt"><summary>How the background picture is drawn</summary>
+<dl class="km-dl">
+<dt>Road (reach ${landscapeIn.reach.value.toFixed(2)})</dt>
+<dd>${landscapeIn.reach.reachable_merchants} reachable of ${landscapeIn.reach.total_merchants} sites · <code>${esc(landscapeIn.reach.formula)}</code></dd>
+<dt>Sun (Bitcoin ${landscapeIn.btc_sun.value.toFixed(2)})</dt>
+<dd>${landscapeIn.btc_sun.candidate_merchants} Bitcoin-accepting sites · mean privacy score ${landscapeIn.btc_sun.mean_privacy_score.toFixed(2)} · <code>${esc(landscapeIn.btc_sun.formula)}</code>
+<ul>${landscapeIn.btc_sun.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></dd>
+</dl>
+</details>
 
 <form class="km-filters" method="get" action="/dashboard">
   <details open><summary>Filters</summary>
