@@ -254,7 +254,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const addLanded = (body: { items: Record<string, unknown>[] }, zip: string, taxpreOnly = false) => {
     const byD = new Map(snap.rows.map((x) => [x.d, x]));
     for (const it of body.items) { const row = byD.get(String(it.d)); if (row) it.landed = landedFor(parseRaw(row.raw_json), zip); }
-    if (taxpreOnly) body.items = body.items.filter((it) => (it.landed as { tax_shown_before_payment?: boolean | null } | undefined)?.tax_shown_before_payment === true);
+    if (taxpreOnly) {
+      const tp = (it: Record<string, unknown>) => (it.landed as { tax_shown_before_payment?: boolean | null } | undefined)?.tax_shown_before_payment;
+      const before = body.items;
+      body.items = before.filter((it) => tp(it) === true);
+      const unknown = before.filter((it) => tp(it) == null).length;
+      const b = body as Record<string, unknown>;
+      b.count = body.items.length; b.total = body.items.length;
+      b.taxpre = { observed_true: body.items.length, observed_false: before.filter((it) => tp(it) === false).length, unknown,
+        note: body.items.length ? "Only stores where our checkout probe saw sales tax before the payment step." : `No store in this list has been observed showing tax before payment; for ${unknown} of ${before.length} it is unknown (not observed), which does not mean they hide it.` };
+    }
   };
   const offersFor = async (q: OfferQuery, live: boolean) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
@@ -287,12 +296,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/alternatives" && request.method === "GET") {
-    const r = findAlternatives(snap, origin, altParams(url.searchParams));
-    if (!r.ok) return err400("domain", r.message);
+    const taxpre = url.searchParams.get("taxpre") === "1";
     const azip = url.searchParams.get("zip");
+    if (taxpre && azip === null) return err400("taxpre", "taxpre=1 needs zip=<5-digit US ZIP>");
+    const ap = altParams(url.searchParams);
+    const r = findAlternatives(snap, origin, taxpre ? { ...ap, limit: 500 } : ap);
+    if (!r.ok) return err400("domain", r.message);
     if (azip !== null) {
       if (!validZip(azip)) return err400("zip", "zip must be a 5-digit US ZIP code");
-      addLanded(r.body as { items: Record<string, unknown>[] }, azip, url.searchParams.get("taxpre") === "1");
+      addLanded(r.body as { items: Record<string, unknown>[] }, azip, taxpre);
+      if (taxpre) { const b = r.body as { items: unknown[]; count?: number }; b.items = b.items.slice(0, ap.limit ?? 20); b.count = b.items.length; }
     }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderAlternatives(origin, r.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
