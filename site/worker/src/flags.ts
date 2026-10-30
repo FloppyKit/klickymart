@@ -213,7 +213,8 @@ export async function submitReport(db: D1Database, ev: { id: string; pubkey: str
   if ((n?.k ?? 0) >= FLAG_LIMITS.reportsPerKeyPerDay || (n?.g ?? 0) >= 1000) return bad("rate_limited", `max ${FLAG_LIMITS.reportsPerKeyPerDay} reports per key per day`, 429);
   if (!(await db.prepare("SELECT 1 FROM nostr_events WHERE id = ?").bind(ev.id).first())) { // KM-008: atomic decision
     const day = utcDayOf(Date.now());
-    if (await takeAll(db, [{ k: `fl:g:${day}`, limit: 1000, ttlS: 2 * DAY }, { k: `fl:pk:${ev.pubkey}:${day}`, limit: FLAG_LIMITS.reportsPerKeyPerDay, ttlS: 2 * DAY }]))
+    const hit = await takeAll(db, [{ k: `fl:ev:${ev.id}`, limit: 1, ttlS: 2 * DAY }, { k: `fl:pk:${ev.pubkey}:${day}`, limit: FLAG_LIMITS.reportsPerKeyPerDay, ttlS: 2 * DAY }, { k: `fl:g:${day}`, limit: 1000, ttlS: 2 * DAY }]); // R5-003
+    if (hit && !hit.k.startsWith("fl:ev:"))
       return bad("rate_limited", `max ${FLAG_LIMITS.reportsPerKeyPerDay} reports per key per day`, 429);
   }
   const r = await db.prepare("INSERT OR IGNORE INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, REPORT_KIND, ev.pubkey, ev.created_at, t.d, JSON.stringify(ev), nowS, "post").run();

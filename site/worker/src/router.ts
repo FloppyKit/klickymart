@@ -258,7 +258,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       if (!(await env.DB.prepare("SELECT 1 FROM experiences WHERE id = ?").bind(x.value.id).first())
-        && !(await take(env.DB, { k: `ex:pk:${x.value.pubkey}:${new Date().toISOString().slice(0, 10)}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 }))) // KM-008
+        && await exTake(env.DB, x.value.id, x.value.pubkey)) // KM-008, R5-003
         return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
       if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
@@ -810,7 +810,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
       const badge = tierBadgeHtml((await tiersFor([row.d])).get(row.d));
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(/(<h1>[^<]*<\/h1>)/, `$1${badge}`), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(/(<h1>[^<]*<\/h1>)/, (m) => m + badge), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -1086,4 +1086,11 @@ export async function bootstrapFixtures(env: Env, ndjson: string): Promise<void>
   });
   await persistIngest(rows, report, env);
   resetSnapshotCache();
+}
+
+/** R5-003: per-event take first (concurrent copies of one note count once), then the per-key day cap.
+ * Returns true when the request must be refused. */
+async function exTake(db: D1Database, id: string, pubkey: string): Promise<boolean> {
+  const hit = await takeAll(db, [{ k: `ex:ev:${id}`, limit: 1, ttlS: 2 * 86400 }, { k: `ex:pk:${pubkey}:${new Date().toISOString().slice(0, 10)}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 }]);
+  return !!hit && !hit.k.startsWith("ex:ev:");
 }

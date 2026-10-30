@@ -98,7 +98,7 @@ describe("facilitated 421s become history once the store claims", () => {
     const pre = bytesToHex(key()); const inv = encodeBolt11ForTest(key(), "lnbc10u", bytesToHex(sha256(hexToBytes(pre))));
     const buyerSk = key(), other = key();
     const kv = new Map<string, string>();
-    const r = await facilitate({ DB: env.DB, KV: { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => void kv.set(k, v) } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK },
+    const r = await facilitate({ DB: env.DB, KV: { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => void kv.set(k, v) } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" },
       { domain: DOM, agent_pubkey: pk(buyerSk), proof: { type: "preimage", preimage: pre, bolt11: inv } }, (d) => d === DOM, "ip");
     // use a local test key in place of the production facilitator key
     const ful = r.body.event as Ev;
@@ -120,7 +120,7 @@ describe("facilitated 421s become history once the store claims", () => {
     expect(c.verified_payments).toBe(0);
     expect(c.facilitated_history?.reviewers).toBe(1);
     // and new facilitation is refused after the claim
-    expect((await facilitate({ DB: env.DB, KV: { get: async () => null, put: async () => {} } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK },
+    expect((await facilitate({ DB: env.DB, KV: { get: async () => null, put: async () => {} } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" },
       { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, (d) => d === DOM, "ip")).status).toBe(409);
   });
 });

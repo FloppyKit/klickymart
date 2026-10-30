@@ -20,7 +20,7 @@ describe("KM-008: atomic rate limits", () => {
   it("8 parallel facilitate calls for one agent+domain (cap 1/day) sign at most once (audit KM-008 repro)", async () => {
     const SK = bytesToHex(secp.utils.randomSecretKey()); const agent = bytesToHex(secp.schnorr.getPublicKey(secp.utils.randomSecretKey()));
     const d = "race.example"; const store = kv();
-    const rs = await Promise.all(Array.from({ length: 8 }, () => facilitate({ DB: env.DB, KV: store, FACILITATOR_SK_HEX: SK }, { domain: d, agent_pubkey: agent, proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "203.0.113.9")));
+    const rs = await Promise.all(Array.from({ length: 8 }, () => facilitate({ DB: env.DB, KV: store, FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" }, { domain: d, agent_pubkey: agent, proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "203.0.113.9")));
     expect(rs.filter((r) => r.status === 200).length).toBe(1);
     expect(rs.filter((r) => r.status === 429).length).toBe(7);
   });

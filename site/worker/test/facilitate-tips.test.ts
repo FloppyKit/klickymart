@@ -50,7 +50,7 @@ describe("POST /facilitate (facilitated 421)", () => {
     const pre = bytesToHex(key()); const inv = encodeBolt11ForTest(NODE, "lnbc10u", bytesToHex(sha256(hexToBytes(pre))));
     expect(checkFacilitationProof({ type: "preimage", preimage: pre, bolt11: fakeBolt11(bytesToHex(sha256(hexToBytes(pre)))) })).toMatchObject({ ok: false, code: "bad_proof" }); // zero-sig invoice
     const agent = pk(key());
-    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK }, { domain: DOM, agent_pubkey: agent, proof: { type: "preimage", preimage: pre, bolt11: inv } }, known, "1.1.1.1");
+    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" }, { domain: DOM, agent_pubkey: agent, proof: { type: "preimage", preimage: pre, bolt11: inv } }, known, "1.1.1.1");
     expect(r.status).toBe(200);
     const ev = r.body.event as Ev;
     expect(verifyNostrEvent(ev as never, 421).ok).toBe(true);
@@ -63,7 +63,7 @@ describe("POST /facilitate (facilitated 421)", () => {
   it("wrong preimage is refused; hash-only proof is labelled unverified-claim", async () => {
     const inv = encodeBolt11ForTest(NODE, "lnbc10u", "ab".repeat(32));
     expect(checkFacilitationProof({ type: "preimage", preimage: "11".repeat(32), bolt11: inv })).toMatchObject({ ok: false, code: "proof_mismatch" });
-    const r = await facilitate({ KV: kv(), FACILITATOR_SK_HEX: SK }, { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, known, "ip");
+    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" }, { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, known, "ip");
     expect(r.status).toBe(200);
     expect((r.body.event as Ev).tags).toContainEqual(["verification", "unverified-claim"]);
     expect(String(r.body.label)).toMatch(/UNVERIFIED CLAIM/);
@@ -75,7 +75,7 @@ describe("POST /facilitate (facilitated 421)", () => {
     expect(checkFacilitationProof({ type: "zap", receipt: forged })).toMatchObject({ ok: false });
   });
   it("refuses secret keys, unknown domains, claimed stores; rate-limits per agent+domain", async () => {
-    const e = { DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK };
+    const e = { DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" };
     const agent = pk(key()); const proof = { type: "hash", sha256: "ef".repeat(32) };
     expect((await facilitate(e, { domain: DOM, agent_pubkey: agent, proof, nsec: "x" } as never, known, "ip")).body.error).toMatchObject({ code: "secret_sent" });
     expect((await facilitate(e, { domain: "nope.example", agent_pubkey: agent, proof }, known, "ip")).status).toBe(400);

@@ -156,7 +156,18 @@ export function cleanCategory(c: unknown): string | null {
 export function ipHash(ip: string | null, salt: string, now = Date.now()): string | null {
   if (!ip) return null;
   const week = Math.floor(now / (7 * 86400_000));
-  return bytesToHex(hmac(sha256, utf8ToBytes(salt || ephemeralSalt()), utf8ToBytes(`km-submit:${week}:${ip}`))).slice(0, 24);
+  return bytesToHex(hmac(sha256, utf8ToBytes(salt || ephemeralSalt()), utf8ToBytes(`km-submit:${week}:${ipNetwork(ip)}`))).slice(0, 24);
+}
+/** R5-004: rate-limit by network, not address: the /64 for IPv6 (one subscriber's allocation), the /32 for IPv4. */
+export function ipNetwork(ip: string): string {
+  const s = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
+  const v4 = s.match(/^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) return v4[1];
+  if (!s.includes(":")) return s;
+  const [head, tail] = s.includes("::") ? s.split("::") : [s, null];
+  const h = head ? head.split(":") : []; const t = tail ? tail.split(":") : [];
+  const groups = tail === null ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  return groups.slice(0, 4).map((g) => (parseInt(g || "0", 16) || 0).toString(16)).join(":") + "::/64";
 }
 /** Random per-isolate key used only when no SUBMIT_SALT secret is configured (KM-013: no committed default salt). */
 let ephemeral: string | null = null;
@@ -211,8 +222,11 @@ export async function submitStore(input: SubmitInput, ctx: SubmitCtx): Promise<S
     dry_run: !!ctx.dryRun };
 
   const db = ctx.db;
+  // R5-001: a replay of a signed 1423 we already hold is idempotent and must not spend anyone's quota.
+  let replay = false;
+  if (db && ctx.signed) { try { replay = !!(await db.prepare("SELECT 1 FROM store_submissions WHERE event_id = ? OR id = ?").bind(ctx.signed.id, ctx.signed.id).first()); } catch { /* table missing */ } }
   // rate limits (per key and per salted IP hash; reputation cut)
-  if (db) {
+  if (db && !replay) {
     try {
       const keyRows = submitter !== "anon" ? await db.prepare("SELECT flags_json, created_at FROM store_submissions WHERE submitter = ? ORDER BY created_at DESC LIMIT 60").bind(submitter).all<{ flags_json: string; created_at: number }>() : { results: [] };
       const kr = keyRows.results ?? [];
@@ -227,13 +241,20 @@ export async function submitStore(input: SubmitInput, ctx: SubmitCtx): Promise<S
           return { status: 429, body: { ok: false, status: "rejected", reason: "rate_limited", error: { code: "rate_limited", message: `network limit: ${SUBMIT_LIMITS.perDay}/day and ${SUBMIT_LIMITS.perWeek}/week per salted network hash`, retry_after_s: 3600 }, ...base } };
       }
       // KM-008: atomic per-key and per-network day caps (the scans above stay for the weekly and reputation rules).
+      // R5-001: per-event take first (concurrent copies of one signed event count once), then network, then key.
+      // R5-006: the takes get their own try; a limiter failure is a 503, not a silent skip of later checks.
       if (!ctx.dryRun) {
         const day = new Date(now).toISOString().slice(0, 10);
-        const hit = await takeAll(db, [
-          ...(submitter !== "anon" ? [{ k: `sub:pk:${submitter}:${day}`, limit: dayLimit, ttlS: 2 * 86400 }] : []),
-          ...(ih ? [{ k: `sub:ip:${ih}:${day}`, limit: SUBMIT_LIMITS.perDay, ttlS: 2 * 86400 }] : []),
-        ]);
-        if (hit) return { status: 429, body: { ok: false, status: "rejected", reason: "rate_limited", error: { code: "rate_limited", message: hit.k.startsWith("sub:ip") ? `network limit: ${SUBMIT_LIMITS.perDay}/day per salted network hash` : `submitter limit: ${dayLimit}/day`, retry_after_s: 3600 }, ...base } };
+        let hit;
+        try {
+          hit = await takeAll(db, [
+            ...(ctx.signed ? [{ k: `sub:ev:${ctx.signed.id}`, limit: 1, ttlS: 2 * 86400 }] : []),
+            ...(ih ? [{ k: `sub:ip:${ih}:${day}`, limit: SUBMIT_LIMITS.perDay, ttlS: 2 * 86400 }] : []),
+            ...(submitter !== "anon" ? [{ k: `sub:pk:${submitter}:${day}`, limit: dayLimit, ttlS: 2 * 86400 }] : []),
+          ]);
+        } catch { return { status: 503, body: { ok: false, status: "rejected", reason: "unavailable", error: { code: "unavailable", message: "rate limiter unavailable; try again later" }, ...base } }; }
+        if (hit?.k.startsWith("sub:ev:")) replay = true;
+        else if (hit) return { status: 429, body: { ok: false, status: "rejected", reason: "rate_limited", error: { code: "rate_limited", message: hit.k.startsWith("sub:ip") ? `network limit: ${SUBMIT_LIMITS.perDay}/day per salted network hash` : `submitter limit: ${dayLimit}/day`, retry_after_s: 3600 }, ...base } };
       }
       // sub-domain stuffing: same submitter sending > 3 sub-domains of one registrable domain
       if (submitter !== "anon" || ih) {

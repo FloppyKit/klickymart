@@ -37,7 +37,7 @@ describe("KIMI-004: DNS claims stop facilitation and demote facilitated proofs",
   it("an active store_claims row makes facilitate return 409 and markFacilitatedHistory run", async () => {
     const d = "dns-claimed.example";
     await env.DB.prepare("INSERT INTO store_claims (domain,pubkey,method,status,txt,event_id,claimed_at,checked_at) VALUES (?,?,'dns','active','t',?,1,1)").bind(d, pk(key()), bytesToHex(key())).run();
-    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: bytesToHex(key()) }, { domain: d, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "ip");
+    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: bytesToHex(key()), SUBMIT_SALT: "test-salt" }, { domain: d, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "ip");
     expect(r.status).toBe(409);
     const ful = bytesToHex(key());
     await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(ful, 421, FACILITATOR_PUBKEY, 1, d, "{}", 1, "r").run();
@@ -48,7 +48,7 @@ describe("KIMI-004: DNS claims stop facilitation and demote facilitated proofs",
     expect(n).toBeGreaterThan(0); expect(row?.proof_status).toBe("facilitated-history");
     // revoked claims no longer block
     await env.DB.prepare("UPDATE store_claims SET status = 'revoked' WHERE domain = ?").bind(d).run();
-    const r2 = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: bytesToHex(key()) }, { domain: d, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "ip");
+    const r2 = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: bytesToHex(key()), SUBMIT_SALT: "test-salt" }, { domain: d, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "ip");
     expect(r2.status).toBe(200);
   });
 });

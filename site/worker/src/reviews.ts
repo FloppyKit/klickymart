@@ -63,11 +63,14 @@ export async function rateLimitCheck(db: D1Database, rv: ParsedReview, now = Dat
   if ((p?.nd ?? 0) >= REVIEW_LIMITS.perPubkeyPerDomainPerDay) return { code: "rate_limited", message: "one review per key per merchant per day" };
   // KM-008: the counts above are advisory; the decision is an atomic take (re-POSTing a stored review stays idempotent).
   if (await db.prepare("SELECT 1 FROM reviews WHERE id = ?").bind(rv.id).first()) return null;
+  // R5-003: one take per event id first, so concurrent copies of one unstored event count once; then specific -> global.
   const hit = await takeAll(db, [
-    { k: `rv:g:${day}`, limit: REVIEW_LIMITS.globalPerDay, ttlS: 2 * 86400 },
-    { k: `rv:pk:${rv.pubkey}:${day}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 },
+    { k: `rv:ev:${rv.id}`, limit: 1, ttlS: 2 * 86400 },
     { k: `rv:pkd:${rv.pubkey}:${rv.d}:${day}`, limit: REVIEW_LIMITS.perPubkeyPerDomainPerDay, ttlS: 2 * 86400 },
+    { k: `rv:pk:${rv.pubkey}:${day}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 },
+    { k: `rv:g:${day}`, limit: REVIEW_LIMITS.globalPerDay, ttlS: 2 * 86400 },
   ]);
+  if (hit?.k.startsWith("rv:ev:")) return null; // a concurrent copy of this same event already holds the quota; insert is idempotent
   if (hit) return { code: "rate_limited", message: hit.k.startsWith("rv:pkd") ? "one review per key per merchant per day" : hit.k.startsWith("rv:g") ? "daily review intake is full; publish to relays and try tomorrow" : `max ${REVIEW_LIMITS.perPubkeyPerDay} reviews per key per day` };
   return null;
 }

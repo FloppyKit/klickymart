@@ -11,10 +11,20 @@ export async function take(db: D1Database, l: Limit, nowS = Math.floor(Date.now(
   return !!r;
 }
 
-/** Take every limit in order; returns the first limit that refused, or null when all were granted. A refusal does not
- * refund earlier takes (fail closed). */
+/** Give back one unit taken by take() (never below zero). */
+export async function give(db: D1Database, l: Limit): Promise<void> {
+  await db.prepare("UPDATE rate_limits SET n = n - 1 WHERE k = ? AND n > 0").bind(l.k).run();
+}
+
+/** Take every limit in order; returns the first limit that refused, or null when all were granted.
+ * R5-002/R5-003: on a refusal the earlier takes are given back, so a request refused by a narrow (per-key, per-ip) limit
+ * cannot drain a shared (global) one. Callers still list the most specific limit first. */
 export async function takeAll(db: D1Database, limits: Limit[], nowS = Math.floor(Date.now() / 1000)): Promise<Limit | null> {
-  for (const l of limits) if (!(await take(db, l, nowS))) return l;
+  const got: Limit[] = [];
+  for (const l of limits) {
+    if (!(await take(db, l, nowS))) { for (const g of got.reverse()) { try { await give(db, g); } catch { /* best effort */ } } return l; }
+    got.push(l);
+  }
   return null;
 }
 export const utcDayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
