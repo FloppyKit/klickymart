@@ -26,3 +26,22 @@ test("about shows MCP install snippets and simulated-shopper note", async ({ pag
   await page.locator("#agents").screenshot({ path: "e2e/artifacts/about-agents-mcp-dark-desktop.png" });
   await page.screenshot({ path: "e2e/artifacts/about-dark-desktop-agents.png", fullPage: true });
 });
+
+for (const scheme of ["dark", "light"] as const) {
+  test(`hero check label readable (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto("/");
+    await page.locator('[data-testid="check-form"]').scrollIntoViewIfNeeded();
+    const c = await page.evaluate(() => {
+      const lum = (s: string) => { const m = s.match(/[\d.]+/g)!.map(Number); const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]); };
+      const label = document.querySelector('label[for="check-domain"]')!;
+      const hero = document.querySelector(".km-home-hero")!;
+      return { fg: lum(getComputedStyle(label).color), dark: document.documentElement.getAttribute("data-theme"), bg: getComputedStyle(hero).backgroundColor };
+    });
+    // dark scheme: light text; light scheme: dark text on a mostly-opaque light panel
+    if (scheme === "dark") expect(c.fg).toBeGreaterThan(0.6);
+    else { expect(c.fg).toBeLessThan(0.1); expect(c.bg).toMatch(/oklab|srgb|rgba?\(/); }
+    await page.screenshot({ path: `e2e/artifacts/home-check-box-${scheme}-desktop.png` });
+  });
+}

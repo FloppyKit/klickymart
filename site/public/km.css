@@ -243,3 +243,17 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-check-result { display: block; margin-top: .5rem; }
 .km-check-card { padding: .6rem .8rem; border: 1px solid var(--km-border, #444); border-radius: 6px; background: var(--km-surface, rgba(0,0,0,.35)); }
 .km-check-card ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+
+/* Hero contrast: system-light (no explicit data-theme) used to keep the dark-theme black text-shadow, making dark text
+   unreadable over the dark landscape. Give light mode (explicit or system) an opaque-enough light panel and light halos,
+   and keep dark mode light-on-dark. */
+.km-hero-panel .km-story,.km-hero-panel .km-check label{color:var(--km-text)}
+.km-check label:not(.km-sr-only){text-shadow:0 0 14px rgb(0 0 0 / .85),0 1px 3px rgb(0 0 0 / .9)}
+[data-theme="light"] .km-home-hero{background:color-mix(in srgb,var(--km-surface) 82%,transparent)}
+[data-theme="light"] .km-check label:not(.km-sr-only){text-shadow:none}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme]) .km-hero-panel{background:color-mix(in srgb,var(--km-surface) 52%,transparent)}
+  :root:not([data-theme]) .km-home-hero{background:color-mix(in srgb,var(--km-surface) 82%,transparent)}
+  :root:not([data-theme]) .km-hero-panel h1,:root:not([data-theme]) .km-hero-panel .km-lead,:root:not([data-theme]) .km-hero-panel .km-eyebrow{text-shadow:0 0 12px rgb(255 255 255 / .9),0 1px 2px rgb(255 255 255 / .75)}
+  :root:not([data-theme]) .km-hero-panel .km-story,:root:not([data-theme]) .km-hero-panel .km-story-key,:root:not([data-theme]) .km-check label:not(.km-sr-only){text-shadow:none}
+}
