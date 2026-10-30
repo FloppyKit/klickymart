@@ -19,6 +19,14 @@ try {
   /* optional */
 }
 
+// Path 2 batch 1 (2026-10-30): 50 traditional stores, crawl + ToS + guest checkout probe; appended to the main map.
+try {
+  const p2 = readFileSync(join(dataDir, "events.path2-batch1.ndjson"), "utf8").trim();
+  if (p2) events = events ? `${events}\n${p2}` : p2;
+} catch {
+  /* optional */
+}
+
 let agentNative = "";
 try {
   agentNative = readFileSync(join(dataDir, "events.agent-native.ndjson"), "utf8").trim();

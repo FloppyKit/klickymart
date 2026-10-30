@@ -17,3 +17,5 @@ Crawl of 250 commerce sites on 2026-10-29 (16:27–18:49 UTC), with a re-crawl o
 - **Vantage:** all requests came from one cloud/datacenter IP with an honest user agent (`FloppyKitMapBot/0.2 (+https://klickymart.com/bot)`), no proxies, no captcha solving. Blocks may partly reflect IP reputation, not only site policy.
 - **Bitcoin grades** (0–4, see `CRAWL-RUBRIC.md`) are set only with a quote and URL (`btc_src: agent-evidence`); otherwise `btc` is null with `btc_grade_reason` and a possible range. Most bitcoin-positive sites still need hand grading.
 - **Checkout probe:** guest checkout up to the payment-method screen only; no order was placed and no account created.
+
+**Path 2 batch 1 (2026-10-30):** `events.path2-batch1.ndjson`, 50 traditional stores (crawl + ToS + guest checkout probe up to the payment step; no orders, no accounts). Probe results merged; new field `checkout_probe.phone_required` with tag `["l","phonereq:yes|no","nip-xx"]` (5 stores required a phone number before payment). Embedded into the main map at build time; published to relay.primal.net, nos.lol and relay.damus.io.

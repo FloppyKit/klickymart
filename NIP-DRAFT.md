@@ -70,6 +70,7 @@ so a filter like `{"kinds":[31420],"#l":["pay:lightning"]}` works on any relay. 
 | `l btc:` | `["l","btc:3","nip-xx"]` | bitcoin grade 0–4 (below). Omitted when ungraded |
 | `l btc_any` | `["l","btc_any","nip-xx"]` | some bitcoin option was quoted, grade not yet set |
 | `l btcpriv:` | `["l","btcpriv:noacct","nip-xx"]` | privacy flags: `noacct` (no buyer account needed), `selfhosted` (merchant's own BTCPay/node), `ecash`, `sp` (silent payments), `ark`, `nokyc` (no buyer identity beyond shipping) |
+| `l phonereq:` | `["l","phonereq:yes","nip-xx"]` | guest checkout probe: `yes` = a phone number was required before the payment step, `no` = the probe got past the contact step without one. Omitted when the probe did not reach a checkout form. Content: `checkout_probe.phone_required` |
 | `l ag:` | `["l","ag:2","nip-xx"]` | agent reachability 0–3: 0 blocked at landing, 1 browse only, 2 product/cart readable, 3 payment screen reached |
 | `l ar:` | `["l","ar:rb_ai","nip-xx"]` | agent restriction found: `rb_ai` (robots disallows AI agents), `rb_ck` (robots disallows cart/checkout), `403`, `429`, `cap` (captcha), `cf`/`ak`/`px` (Cloudflare/Akamai/PerimeterX block), `js`, `tarpit`, `net`, `acct` (forced account), `tos` |
 | `l anw:` | `["l","anw:robots-403","nip-xx"]` | why the site was not crawled. With status `agents-not-welcome` (affirmative refusal only): `robots-disallow`, `robots-403`, `robots-429`, `robots-block-page`, `http-403`, `http-429`, `http-503`, `block-page`. With status `error` (no signal either way): `robots-unreachable`, `home-unreachable` |
