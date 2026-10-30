@@ -108,3 +108,4 @@ describe("r4 check + docs", () => {
     expect(t).toMatch(/no-checkout-button: /); expect(t).toMatch(/probe-error: /);
   });
 });
+describe("r4 bundle", () => { it("A + B titles are bundles", () => { expect(productTypes("QuietComfort Headphones + Airfly SE")).toContain("bundle"); }); });

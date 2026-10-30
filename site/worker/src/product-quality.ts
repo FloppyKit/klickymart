@@ -19,7 +19,7 @@ export function conditionOf(text: string, domain = ""): { condition: Condition |
 
 const TYPE_RX: [string, RegExp][] = [
   ["gift-card", /\bgift[\s-]?cards?\b|\be-?gift\b/],
-  ["bundle", /\b(bundle|set|\+)\b|\bset-/],
+  ["bundle", /\b(bundle|set)\b|\bset-|\s\+\s/],
   ["earbuds", /\b(ear ?buds?|in-ear|true wireless|tws)\b/],
   ["headset", /\b(headset|gaming headset)\b/],
   ["headphones", /\b(headphones?|over-ear|on-ear|cans)\b/],
