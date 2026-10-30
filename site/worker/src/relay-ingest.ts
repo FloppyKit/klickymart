@@ -31,7 +31,8 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
     { kinds: [NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE], "#r": domains, since },
   ];
   if (ctx.ourPubkey) f.push({ kinds: [NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE], "#a": domains.map((d) => `${NOSTR_KIND_CRAWL_RECORD}:${ctx.ourPubkey}:${d}`), since });
-  if (fulfillmentIds.length) f.push({ kinds: [ZAP_RECEIPT_KIND], "#e": fulfillmentIds.slice(0, 200) });
+  // Zap receipts on known 421s (payment proof) and on known 422/kind-1 notes (tips; see tips.ts).
+  if (fulfillmentIds.length) f.push({ kinds: [ZAP_RECEIPT_KIND], "#e": fulfillmentIds.slice(0, 400) });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
   return f;
@@ -159,7 +160,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
       }
       res.duplicate++; continue;
     }
-    if (ev.pubkey !== ctx.ourPubkey) {
+    if (ev.pubkey !== ctx.ourPubkey && ev.kind !== ZAP_RECEIPT_KIND) { // receipts are signed by LNURL servers on behalf of many payers
       const n = pkCount.get(ev.pubkey) ?? 0;
       if (n >= INGEST_LIMITS.perPubkeyPerDay) { reject("rate-limited pubkey"); continue; }
       pkCount.set(ev.pubkey, n + 1);
@@ -245,7 +246,9 @@ export async function saveState(db: D1Database, relay: string, u: { maxCreated?:
 
 async function knownFulfillments(db: D1Database): Promise<string[]> {
   const { results } = await db.prepare("SELECT id FROM nostr_events WHERE kind = ? ORDER BY first_seen DESC LIMIT 200").bind(NOSTR_KIND_FULFILLMENT).all<{ id: string }>();
-  return (results ?? []).map((r) => r.id);
+  let notes: { id: string }[] = [];
+  try { notes = (await db.prepare("SELECT id FROM experiences ORDER BY created_at DESC LIMIT 200").all<{ id: string }>()).results ?? []; } catch { /* migration pending */ }
+  return [...(results ?? []), ...notes].map((r) => r.id);
 }
 
 /** One catch-up pass per relay: REQ with since = last seen - overlap, read until EOSE on every sub or timeout. */

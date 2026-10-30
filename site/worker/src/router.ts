@@ -1,3 +1,5 @@
+import { facilitate, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
+import { curators, loadTips, perReviewer, summarize } from "./tips";
 import { mcpToolsList } from "./mcp";
 import { addKnownBrands } from "./product-quality";
 import { experienceTemplate, loadAggregates, parseExperience, storeExperience } from "./experience";
@@ -66,6 +68,7 @@ export interface Env {
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
+  FACILITATOR_SK_HEX?: string;
 }
 
 /** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
@@ -276,6 +279,29 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const dry = url.searchParams.get("dry_run") === "1";
     const r = await submitReview(env, snap, ev, dry);
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/facilitate" && request.method === "POST") {
+    const text = await request.text();
+    if (text.length > REVIEW_LIMITS.maxBytes) return Response.json({ ok: false, error: { code: "too_large", message: "body too large" } }, { status: 413 });
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON" } }, { status: 400 }); }
+    const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
+    const r = await facilitate(env, (body ?? {}) as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "unknown");
+    return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
+  if (path === "/facilitate" && request.method === "GET") {
+    return Response.json({ facilitator_npub: FACILITATOR_NPUB, facilitator_pubkey: FACILITATOR_PUBKEY, limits: FACILITATE_LIMITS, note: FACILITATE_NOTE,
+      usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}|{type:'hash',sha256}}. Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
+  }
+  if ((path === "/tips.json" || path === "/curators.json") && request.method === "GET") {
+    const d = url.searchParams.get("domain")?.toLowerCase() || undefined;
+    const t = await loadTips(env.DB, d);
+    const body = path === "/curators.json"
+      ? { curators: curators(t), note: "Curator record: who tipped which agent notes (public NIP-57 zap receipts). Self-zaps excluded." }
+      : { domain: d ?? null, per_review: [...t.byNote].map(([id, x]) => ({ id, d: t.noteDomain.get(id) ?? null, author: t.author.get(id) ?? null, ...summarize(x) })), per_reviewer: perReviewer(t),
+          weight_rule: "note weight x (1 + min(0.5, 0.1 x distinct validated tippers)); self-zaps ignored" };
+    return Response.json({ ...licenseMetaBlock(), ...body }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
 
   if (path === "/reviews" && request.method === "GET") {
@@ -783,6 +809,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return r;
       },
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
+      facilitate: async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex) }),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());

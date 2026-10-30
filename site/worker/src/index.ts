@@ -65,6 +65,7 @@ interface Env {
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
+  FACILITATOR_SK_HEX?: string;
 }
 
 /** Guarantee: no API route answers 200 with an empty body. JSON/text bodies that come back empty become an explicit JSON error. */

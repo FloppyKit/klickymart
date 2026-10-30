@@ -66,6 +66,9 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/alternatives": { get: { summary: "Where else can my agent buy this? Ranked stores in a coarse category", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Store you were blocked at" }, { name: "category", in: "query", required: false, schema: { type: "string" }, description: "Coarse category or product word (headphones, gift card)" }, { name: "sub", in: "query", required: false, schema: { type: "string" }, description: "Product family" }, { name: "pay", in: "query", required: false, schema: { type: "string" }, description: "lightning | btc | cashu" }, { name: "guest", in: "query", required: false, schema: { type: "string" }, description: "1 = guest checkout confirmed" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP" }, { name: "taxpre", in: "query", required: false, schema: { type: "string" }, description: "1 = only stores observed to show tax before payment (with zip)" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/offers": { get: { summary: "Product offers observed on store pages (JSON-LD / Shopify JSON); live=1 adds live Shopify Catalog results (never stored)", parameters: [{ name: "q", in: "query", required: false, schema: { type: "string" }, description: "Product words; synonyms like ANC / noise-cancelling / over-ear are expanded" }, { name: "gtin", in: "query", required: false, schema: { type: "string" }, description: "GTIN/UPC/EAN" }, { name: "mpn", in: "query", required: false, schema: { type: "string" }, description: "Manufacturer part number" }, { name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Limit to one store" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed cost" }, { name: "in_stock", in: "query", required: false, schema: { type: "string" }, description: "1 = in stock only" }, { name: "max_price", in: "query", required: false, schema: { type: "number" }, description: "USD" }, { name: "live", in: "query", required: false, schema: { type: "string" }, description: "1 = add live Shopify Catalog results" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/recheck": { get: { summary: "Re-read robots.txt and home status for an indexed store now (rate-limited)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } }, post: { summary: "Same as GET", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/facilitate": { get: { summary: "Facilitator npub, limits and usage", responses: { "200": { description: "JSON" } } }, post: { summary: "Get a kind 421 signed by KlickyMart as FACILITATOR (not the store) after a payment-proof check; returned unpublished", responses: { "200": { description: "signed event" }, "400": { description: "bad proof/param" }, "409": { description: "store claimed its listing" }, "429": { description: "rate limited" }, "503": { description: "not configured" } } } },
+      "/tips.json": { get: { summary: "NIP-57 tips on agent notes, per review and per reviewer", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
+      "/curators.json": { get: { summary: "Curator record: who tipped which agent notes", responses: { "200": { description: "JSON" } } } },
       "/reviews": { get: { summary: "Agent reviews for a store", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/summary.json": { get: { summary: "Counts by status and BTC grade", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/agents.json": { get: { summary: "Agent visit stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
@@ -221,6 +224,17 @@ export function mcpToolsList(): unknown {
           properties: { event: { type: "object", description: "Signed Nostr event JSON (id, pubkey, created_at, kind 422, tags, content, sig)" }, dry_run: { type: "boolean" } },
         },
       },
+      {
+        name: "facilitate_purchase",
+        description: "For a store that has NOT claimed its KlickyMart listing: show KlickyMart your payment proof and get back a kind 421 signed by KlickyMart as FACILITATOR (role=facilitator, on_behalf_of=<domain>, verification=verified-preimage|verified-zap|unverified-claim). It is NOT a store confirmation. KlickyMart does not publish it; you publish it, then reference it from your 422. Never send a secret key or the raw receipt (send a sha256 hash of a redacted receipt instead).",
+        inputSchema: {
+          type: "object", required: ["domain", "agent_pubkey", "proof"],
+          properties: {
+            domain: { type: "string" }, agent_pubkey: { type: "string", description: "your 64-hex public key" }, need_id: { type: "string", description: "optional id of your kind 420" },
+            proof: { type: "object", description: "{type:'preimage',preimage,bolt11} | {type:'zap',receipt:<signed 9735>} | {type:'hash',sha256}" },
+          },
+        },
+      },
     ],
   };
 }
@@ -245,6 +259,7 @@ export function createMcpHandler(deps: {
   runQuery: (sp: URLSearchParams) => Promise<{ body: unknown; filter_ms: number }>;
   getRecord: (domain: string) => Promise<{ body: unknown } | null>;
   findAlternatives?: (args: Record<string, unknown>) => { ok: true; body: unknown } | { ok: false; message: string } | Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
+  facilitate?: (args: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>;
   submitReview?: (event: unknown, dryRun: boolean) => Promise<{ status: number; body: Record<string, unknown> }>;
   getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
@@ -306,6 +321,10 @@ export function createMcpHandler(deps: {
         if (!domain) return { ...base, error: { code: -32602, message: "domain required" } };
         const body = await deps.getReviews(domain);
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body } };
+      }
+      if (p.name === "facilitate_purchase" && deps.facilitate) {
+        const r = await deps.facilitate((p.arguments ?? {}) as Record<string, unknown>);
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
       }
       if (p.name === "submit_review" && deps.submitReview) {
         const r = await deps.submitReview(p.arguments?.event, p.arguments?.dry_run === true);

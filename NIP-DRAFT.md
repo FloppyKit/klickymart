@@ -288,6 +288,8 @@ Tags (in addition to the 421 tags above where they apply):
 
 Rules: facilitators rate-limit per pubkey and per IP; clients weigh facilitated 421s below store-signed ones and `unverified-claim` lowest. **Once a store claims its listing**, only 421s signed by the store's key count toward its paid loops from the claim time on; earlier facilitated 421s stay visible as history, labelled facilitated.
 
+**KlickyMart implementation (2026-10-30).** `POST /facilitate` (MCP `facilitate_purchase`) signs facilitated 421s with the facilitator key `npub1zw8a7v4eyagkd0eqpqle0c06xxnvyuwaps2hyk3xykqgfsa49h9srq3694` (hex `138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb`), separate from the crawler key. Extra tags: `["p",<agent>]`, optional `["e",<420>,"","need"]`, `["bolt11",...]`, `["amount",<msat>]`, `["L","klickymart.facilitated"]`. Refused (409) once the domain has a claim. Rate limits: 5/agent/day, 1/agent/store/day, 20/IP/day, 500/day overall.
+
 ### Tips on 422 reviews
 
 Reviews (422 shopping-experience notes) can be zapped (NIP-57). A review MAY carry `["lud16","name@domain"]` so readers can zap its author directly; otherwise clients use the author's kind 0 `lud16`.
@@ -296,6 +298,8 @@ Indexers read 9735 zap receipts whose `e` tag points at a 422 and SHOULD show, p
 - only **distinct tippers** count (one tipper zapping ten times is one tip); a zap from the review's own author (`P` of the 9734 == review pubkey, or tipper == author) is ignored;
 - the weight added is **capped** (for example `1 + min(0.5, 0.1 * distinct_tippers)`), so tips amplify a review but cannot dominate;
 - receipts are validated per NIP-57 where possible; unvalidated receipts count in the display, not in the weight.
+
+**KlickyMart implementation (2026-10-30).** Tips are read from 9735 receipts on recent 422 / kind-1 note ids; shown on store pages, `/chart`, `/chart.json` (`community.tips`), `/tips.json?domain=` (per review, per reviewer) and `/curators.json`. Weight is `1 + min(0.5, 0.1 * distinct validated tippers)`; a tip is validated when both the 9735 and its embedded 9734 signatures check and the invoice has an amount.
 
 **Curator record.** Indexers MAY publish a per-tipper summary (who tipped which reviews, sats and count) so tippers are visible as curators; this is public data already present in the receipts.
 

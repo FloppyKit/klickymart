@@ -1,3 +1,4 @@
+import { loadTips, summarize, type Tip, type TipSummary } from "./tips";
 /** Structured shopping-experience notes on kind 422 (spec: NIP-DRAFT.md "422 as a shopping experience"), plus
  * unstructured kind-1 notes tagged #klickymart. Parsing, storage, per-store aggregates and unsigned templates.
  * KlickyMart never signs or publishes on anyone's behalf; it caches public notes and shows them next to crawl data. */
@@ -34,7 +35,7 @@ export const NOTE_HASHTAG = "klickymart";
 export const SELFTEST_DOMAIN = "klickymart-selftest.invalid";
 /** Experience tag names, documented in llms.txt / NIP-DRAFT. All optional except the store reference. */
 export const EXP_TAGS = ["a", "r", "product", "gtin", "depth", "step", "steps", "blocker", "wall", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
-  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", ...PROOF_TAGS] as const;
+  "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", "lud16", ...PROOF_TAGS] as const;
 
 export interface Experience {
   id: string; kind: number; d: string; pubkey: string; created_at: number; structured: boolean;
@@ -155,12 +156,12 @@ export interface StoreAggregate {
   guest_yes_keys: number; guest_no_keys: number; account_required_keys: number;
   tax_before: { yes: number; no: number }; ship_before: { yes: number; no: number };
   observed: { shipping_usd: { median: number | null; n: number; keys: number; corroborated: boolean }; tax_rate_pct: { median: number | null; n: number; keys: number; corroborated: boolean } };
-  verified_purchase_share: number; proof_keys: number; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
+  verified_purchase_share: number; proof_keys: number; tips: TipSummary; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
 }
 const med = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : Math.round(((s[m - 1]! + s[m]!) / 2) * 100) / 100; };
 
 /** Aggregate one store's notes. Counts are distinct pubkeys (each key's latest structured note; any proof from a key counts once). */
-export function aggregate(d: string, rows: Row[], now = Date.now()): StoreAggregate {
+export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<string, Tip[]>): StoreAggregate {
   const nowS = Math.floor(now / 1000);
   const sorted = [...rows].sort((a, b) => b.created_at - a.created_at);
   const latest = new Map<string, Row>();
@@ -168,7 +169,8 @@ export function aggregate(d: string, rows: Row[], now = Date.now()): StoreAggreg
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
   const proofKeys = new Set(rows.filter((r) => r.proof).map((r) => r.pubkey));
-  const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status)));
+  const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (tips ? summarize(tips.get(r.id) ?? []).weight : 1)));
+  const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
   const depth: Record<string, number> = Object.fromEntries(EXP_DEPTHS.map((x) => [x, 0]));
   for (const r of per) if (r.depth) depth[r.depth] = (depth[r.depth] ?? 0) + 1;
   const count = (f: (r: Row) => string | string[] | null) => { const m = new Map<string, Set<string>>(); for (const r of per) { const v = f(r); for (const k of Array.isArray(v) ? v : v ? [v] : []) { const s = m.get(k) ?? new Set(); s.add(r.pubkey); m.set(k, s); } } return [...m.entries()].map(([kind, s]) => ({ kind, keys: s.size })).sort((a, b) => b.keys - a.keys); };
@@ -194,9 +196,10 @@ export function aggregate(d: string, rows: Row[], now = Date.now()): StoreAggreg
       tax_rate_pct: { median: med(taxes.map((r) => Math.round((r.tax! / r.price!) * 10000) / 100)), n: taxes.length, keys: new Set(taxes.map((r) => r.pubkey)).size, corroborated: new Set(taxes.map((r) => r.pubkey)).size >= MIN_KEYS },
     },
     verified_purchase_share: keysAll.size ? Math.round((proofKeys.size / keysAll.size) * 100) / 100 : 0, proof_keys: proofKeys.size,
+    tips: storeTips,
     avg_rating_5: rated.length ? Math.round((rated.reduce((a, r) => a + r.rating5!, 0) / rated.length) * 10) / 10 : null,
     latest_at: sorted[0]?.created_at ?? null, notes_30d: rows.filter((r) => r.created_at >= nowS - 30 * 86400).length,
-    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3. Unstructured kind-1 notes count toward 'notes' only. Crawl data is never overwritten.`,
+    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Crawl data is never overwritten.`,
   };
 }
 
@@ -208,17 +211,18 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
   try {
     const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")})` : `SELECT ${COLS} FROM experiences`;
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
+    const tips = (await loadTips(db)).byNote;
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
-    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
+    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now, tips); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
   } catch { /* migration pending */ }
   return out;
 }
 
 /** Unsigned event template for the agent to sign and publish itself. */
 export const TEMPLATE_PARAMS = ["domain", "depth", "attempt", "basis", "product", "product_url", "gtin", "steps", "steps_n", "blocker", "walls", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
-  "shown_before_payment", "tax_shown_before_payment", "shipping_shown_before_payment", "price", "shipping", "tax", "total", "currency", "region", "duration_s", "agent", "delivered", "delivery_days", "rating", "rating_max", "narrative", ...PROOF_TAGS] as const;
+  "shown_before_payment", "tax_shown_before_payment", "shipping_shown_before_payment", "price", "shipping", "tax", "total", "currency", "region", "duration_s", "agent", "delivered", "delivery_days", "rating", "rating_max", "narrative", "lud16", ...PROOF_TAGS] as const;
 export const TEMPLATE_EXTRA = ["price_seen", "price_paid", "fee", "estimated"] as const;
 const REVIEW_ATTEMPT_OF: Record<string, string> = { browse: "browse", product: "browse", cart: "cart", checkout: "checkout", shipping: "checkout", payment: "checkout", paid: "paid", delivered: "paid" };
 export function experienceTemplate(a: Record<string, unknown>, aTag: string | null, nowS = Math.floor(Date.now() / 1000)): Res<Record<string, unknown>> {
@@ -254,6 +258,7 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   tags.push(["r", d], ["t", NOTE_HASHTAG], ["L", "klickymart.experience"], ["l", "shopping-experience", "klickymart.experience"]);
   const push = (...t: (string | undefined)[]) => { if (t.slice(1).every((x) => x !== undefined)) tags.push(t as string[]); };
   tags.push(["basis", basis ?? "unknown"]);
+  const lud = s("lud16"); if (lud) { if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(lud)) tags.push(["lud16", lud.toLowerCase()]); else warnings.push("lud16 ignored: expected name@domain lightning address"); }
   push("product", s("product") ?? s("product_url")); push("gtin", s("gtin")); push("depth", depth);
   if (depth) tags.push(["attempt", REVIEW_ATTEMPT_OF[depth]!]);
   const steps = list("steps");

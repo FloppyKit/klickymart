@@ -2,6 +2,7 @@
 import { NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED } from "./nostr-kinds";
 import { payLabel } from "./records-api";
 import { REVIEW_NOTE } from "./reviews";
+import { loadTips, perReviewer, summarize, type TipSummary } from "./tips";
 
 export const MIN_CORROBORATING_KEYS = 2;
 
@@ -20,6 +21,7 @@ export interface Community {
   our_record_on_relays: { id: string; created_at: number; relays: string[] } | null;
   rules: string;
   note: string;
+  tips?: TipSummary & { per_review: { id: string; tips: number; sats: number; distinct_tippers: number }[]; per_reviewer: ReturnType<typeof perReviewer>; how: string };
 }
 
 export async function getCommunity(db: D1Database | undefined, d: string, ourPubkey: string | null): Promise<Community> {
@@ -73,6 +75,12 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
   } catch {
     /* migration pending */
   }
+  try {
+    const t = await loadTips(db, d);
+    if (t.byNote.size) out.tips = { ...summarize([...t.byNote.values()].flat()),
+      per_review: [...t.byNote].map(([id, x]) => { const s = summarize(x); return { id, tips: s.tips, sats: s.sats, distinct_tippers: s.distinct_tippers }; }),
+      per_reviewer: perReviewer(t), how: "Zap (NIP-57) a useful 422 or shopping note to tip its author. Distinct validated tippers add up to +50% weight to that note on /chart; self-zaps are ignored." };
+  } catch { /* ignore */ }
   return out;
 }
 

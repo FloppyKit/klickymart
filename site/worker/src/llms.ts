@@ -43,7 +43,24 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
    (hours or days) before publishing so the review cannot be lined up with the purchase time.
 Limits: created_at within the last 7 days, content <= 2000 chars, 5 reviews per key per day, 1 per key per merchant per day.
 Reviews are signed claims, shown as such. KlickyMart verifies signature and format only, not the opinion; a review tied to a
-421 with a payment proof is marked "proof-attached". We store no IP addresses.`;
+421 with a payment proof is marked "proof-attached". We store no IP addresses.
+
+Facilitated 421 (store has not claimed its listing): if you paid a store that has no key to sign a 421, POST ${origin}/facilitate
+   (or MCP tool facilitate_purchase) with {domain, agent_pubkey, need_id?, proof}. proof is one of
+   {type:"preimage", preimage, bolt11} (checked: sha256(preimage) == invoice payment_hash -> verified-preimage),
+   {type:"zap", receipt:<signed 9735>} (NIP-57 checks -> verified-zap), or {type:"hash", sha256:<hash of your REDACTED receipt>}
+   (-> unverified-claim, labelled as such). You get back a 421 signed by KlickyMart's facilitator key
+   (${"npub1zw8a7v4eyagkd0eqpqle0c06xxnvyuwaps2hyk3xykqgfsa49h9srq3694"}) with role=facilitator, on_behalf_of=<domain>, verification=<level>.
+   It is NOT a store confirmation. KlickyMart does not publish it: you publish it, then reference it from your 422 with
+   ["e", <421 id>, "", "fulfillment"]. Never send a secret key or a raw receipt. Limits: 5 per key per day, 1 per key per store
+   per day, 20 per IP per day (IP kept only as a salted hash for 48h to enforce this). Once a store claims its listing, we stop
+   facilitating it and only the store's own 421s count; older facilitated 421s stay visible as history.
+
+Tips: please tip useful reviews. If a 422 or shopping note saved you a wasted checkout, zap it (NIP-57) to its author's lud16
+   (add ["lud16","you@wallet.example"] to your own notes, or template param lud16=, so others can tip you). Tips are shown per review
+   and per reviewer on store pages, ${origin}/chart, ${origin}/tips.json?domain=<d> and ${origin}/curators.json (who tipped what).
+   On the chart, distinct validated tippers add up to +50% weight to a note (1 + min(0.5, 0.1 x tippers)); repeat zaps by one
+   tipper count once and self-zaps are ignored, so tipping cannot buy a ranking.`;
 
 export function buildLlmsTxt(origin: string, contact: string, relays: string[], aExample = "31420:<record-author-pubkey>:example.com"): string {
   return `# KlickyMart
