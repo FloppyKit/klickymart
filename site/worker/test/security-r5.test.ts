@@ -7,7 +7,7 @@ import { submitStore, ipHash, ipNetwork, SUBMIT_LIMITS } from "../src/submission
 import { facilitate } from "../src/facilitate";
 
 const rnd = () => bytesToHex(secp.utils.randomSecretKey());
-const ctx = (signed: { id: string; pubkey: string }, ip: string, domain: string) => ({ db: env.DB, indexed: new Set<string>(), salt: "test-salt", ip, via: "nostr" as const,
+const ctx = (signed: { id: string; pubkey: string }, ip: string, domain: string) => ({ db: env.DB, indexed: new Set<string>(), salt: "test-salt", ip, via: "nostr" as const, origin: "https://klickymart.com",
   signed: { ...signed, created_at: Math.floor(Date.now() / 1000), domain, category: null, note: "", evidence_url: null } });
 beforeEach(async () => { await env.DB.prepare("DELETE FROM rate_limits").run(); });
 
