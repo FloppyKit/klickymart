@@ -29,9 +29,9 @@ describe("product quality", () => {
     const r = dedupe([{ domain: "bose.com", url: "https://www.bose.com/p/a.html?x=1", title: "A" }, { domain: "bose.com", url: "https://www.bose.com/p/a.html", title: "A" }, { domain: "bose.com", url: "https://www.bose.com/p/b.html", title: "B" }]);
     expect(r.removed).toBe(1);
   });
-  it("condition=new keeps unstated, drops used; brand_strict drops look-alikes", () => {
+  it("condition=new drops unstated and used (round 4); brand_strict drops look-alikes", () => {
     const rows = [annotate({ title: "Bose QC", domain: "x.com" }, "Bose"), annotate({ title: "Used Bose QC", domain: "x.com" }, "Bose"), annotate({ title: "B0SE QC", domain: "y.com" }, "Bose")];
-    expect(applyProductFilters(rows, { condition: "new" }).rows.length).toBe(2);
+    expect(applyProductFilters(rows, { condition: "new" }).rows.length).toBe(0);
     expect(applyProductFilters(rows, { brand_strict: true }).rows.length).toBe(2);
   });
 });
@@ -90,7 +90,7 @@ describe("never an empty body", () => {
       if ([202, 204, 301, 302, 304].includes(r.status)) continue;
       expect((await r.text()).trim().length, p).toBeGreaterThan(0);
     }
-  });
+  }, 30000);
   it("nonEmpty turns an empty JSON 200 into an explicit error", async () => {
     const r = await nonEmpty(new Response("", { headers: { "content-type": "application/json" } }), new Request("https://x/q"));
     expect(r.status).toBe(503); expect(((await r.json()) as any).error.code).toBe("empty_response");

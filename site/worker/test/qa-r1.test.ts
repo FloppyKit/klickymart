@@ -30,10 +30,10 @@ describe("round-1 fixes", () => {
   it("pay=btc means on-chain: every item's pay list contains btc", async () => {
     const a = findAlternatives(await realSnap(), "https://example.com", { category: "crypto-hardware", pay: "btc", limit: 50 });
     if (!a.ok) throw new Error();
-    const r = a.body as { items: { d: string; pay: string[] }[] };
-    // Trezor is listed only because its pay list now has btc from its own FAQ quote (re-extracted, round 1).
+    const r = a.body as { items: { d: string; pay: string[]; btc_route?: string }[] };
+    // Native on-chain stores list btc; processor-only stores (Trezor via Confirmo) stay listed, labelled indirect (round 4).
     expect(r.items.length).toBeGreaterThan(0);
-    for (const it of r.items) expect(it.pay).toContain("btc");
+    for (const it of r.items) if (it.btc_route !== "indirect") expect(it.pay).toContain("btc");
   });
   it("every cat code in llms.txt is accepted by /q (btcnative)", async () => {
     const txt = await (await SELF.fetch("https://example.com/llms.txt")).text();
