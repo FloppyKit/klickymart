@@ -8,3 +8,4 @@ site/.wrangler/
 site/e2e/test-results/
 site/test-results/
 site/playwright-report/
+site/worker/node_modules/
