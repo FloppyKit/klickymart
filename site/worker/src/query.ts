@@ -1,3 +1,4 @@
+import { canonPay, PAY_ALIASES, PAY_GROUP_NAMES, Q_CATEGORIES } from "./vocab";
 import { queryTokens } from "./search-terms";
 import { CATEGORY_MAP } from "./category-map";
 import { resolveCategory } from "./alternatives";
@@ -132,19 +133,19 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
 
   const parsePayList = (key: "pay" | "pay_all", raw: string | null): { ok: true; list: string[] } | { ok: false; param: string; message: string } => {
     if (!raw) return { ok: true, list: [] };
-    const list = raw.split(",").map((s) => s.trim());
+    const list = raw.split(",").map((s) => canonPay(s));
     for (const c of list) {
       const base = c.split(":")[0]!;
       const valid = PAY_CODES.includes(base as (typeof PAY_CODES)[number]) || base.startsWith("bnpl") || base.startsWith("oth");
       if (!valid && !PAY_CODES.some((p) => c.startsWith(p))) {
-        return { ok: false, param: key, message: `invalid pay code: ${c}` };
+        return { ok: false, param: key, message: `invalid pay code: ${c}; use one of ${PAY_CODES.join(", ")}, a group (${PAY_GROUP_NAMES.join(", ")}) or an alias (${Object.keys(PAY_ALIASES).join(", ")})` };
       }
     }
     return { ok: true, list };
   };
 
   const pay = searchParams.get("pay");
-  if (pay && !pay.includes(",") && pay in PAY_GROUPS) {
+  if (pay && !pay.includes(",") && pay.trim().toLowerCase() in PAY_GROUPS) {
     params.pay_group = pay;
   } else {
     const payParsed = parsePayList("pay", pay);
@@ -173,7 +174,7 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
 
   const parseArList = (key: "no_ar" | "ar", raw: string | null): { ok: true; list: string[] } | { ok: false; param: string; message: string } => {
     if (!raw) return { ok: true as const, list: [] as string[] };
-    const list = raw.split(",").map((s) => s.trim());
+    const list = raw.split(",").map((s) => canonPay(s));
     for (const c of list) {
       if (!AR_CODES.includes(c as (typeof AR_CODES)[number])) {
         return { ok: false as const, param: key, message: `invalid ar code: ${c}` };
@@ -231,8 +232,8 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
 
   const category = searchParams.get("category");
   if (category) {
-    if (!V1_CATEGORIES.includes(category as (typeof V1_CATEGORIES)[number])) {
-      return { ok: false, param: "category", message: `category must be one of: ${V1_CATEGORIES.join(", ")}` };
+    if (!Q_CATEGORIES.includes(category)) {
+      return { ok: false, param: "category", message: `category must be one of: ${Q_CATEGORIES.join(", ")}` };
     }
     params.category = category;
   }
@@ -408,7 +409,8 @@ function matches(row: IndexRow, p: QueryParams): boolean {
   }
 
   if (p.category) {
-    if (!categoryMatchesRow(p.category as (typeof V1_CATEGORIES)[number], row)) return false;
+    if ((V1_CATEGORIES as readonly string[]).includes(p.category)) { if (!categoryMatchesRow(p.category as (typeof V1_CATEGORIES)[number], row)) return false; }
+    else if (!(CATEGORY_MAP.map[row.d] ?? []).includes(p.category)) return false;
   }
 
   return true;

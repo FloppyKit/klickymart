@@ -1,3 +1,5 @@
+import { ALT_PAY_FILTERS, COARSE_CATEGORIES, SUBCATEGORIES } from "./vocab";
+export { COARSE_CATEGORIES, SUBCATEGORIES };
 import { storeFacts } from "./explain";
 const pickAlt = (f: ReturnType<typeof storeFacts>) => ({ agent_access: f.agent_access, checkout: f.checkout, guest: f.guest, btc_grade: f.btc_grade });
 /** CASCADE GO 5.6: "Where else can my agent buy this?" Index-only; never crawls. */
@@ -7,7 +9,6 @@ import { CATEGORY_MAP } from "./category-map";
 import { whyOf } from "./explain";
 
 /** GO 5.7 finer subcategories (signed in v3 records as `sub`). Product words map to a sub first, then a coarse category. */
-export const SUBCATEGORIES = ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale"] as const;
 const SUB_SYNONYMS: [RegExp, string, string][] = [
   [/head ?phone|earbud|ear ?phone|speaker|sound ?bar|audio|headset|hi-?fi|turntable/i, "audio", "electronics"],
   [/laptop|notebook|desktop|computer|\bpc\b|monitor|macbook|chromebook|keyboard|mouse/i, "computers", "electronics"],
@@ -33,8 +34,7 @@ export function subsFor(raw: Record<string, unknown>): string[] {
   return Array.isArray(raw.sub) ? (raw.sub as string[]) : [];
 }
 
-export const COARSE_CATEGORIES = ["electronics", "gift-cards", "groceries", "apparel", "hardware", "books", "travel", "crypto-hardware", "other"] as const;
-const PAY_FILTER: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"] };
+const PAY_FILTER: Record<string, string[]> = ALT_PAY_FILTERS;
 const SYNONYMS: [RegExp, string][] = [
   [/noise.?cancel|\banc\b|over.?ear|headphone|earbud|laptop|phone|tv|camera|electronic|speaker|monitor/i, "electronics"],
   [/gift ?card|voucher|top.?up|refill/i, "gift-cards"],
@@ -84,7 +84,8 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     if (!cats.length) return { ok: false as const, message: `${from} is not in the index; pass category= too` };
   }
   if (!cats.length) return { ok: false as const, message: "pass domain= or category=" };
-  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: "pay must be lightning, btc (on-chain only), onchain, bitcoin (on-chain or Lightning) or cashu" };
+  if (p.pay) p = { ...p, pay: p.pay.trim().toLowerCase() };
+  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: `pay must be one of ${Object.keys(ALT_PAY_FILTERS).join(", ")} (btc/onchain/btc-onchain = on-chain only; bitcoin = on-chain or Lightning)` };
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
   const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number }[] = [];
   const turnedAway: { d: string; name: string | null; status: string; reason: string | null; record: string }[] = [];

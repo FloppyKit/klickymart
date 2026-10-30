@@ -73,7 +73,7 @@ describe("/q filters", () => {
   });
 
   it("rejects unknown category", async () => {
-    const res = await SELF.fetch("https://example.com/q?category=travel");
+    const res = await SELF.fetch("https://example.com/q?category=zzz-not-a-category");
     expect(res.status).toBe(400);
   });
 });
