@@ -112,7 +112,7 @@ Every record from /q, /check, /records, /chart.json and MCP carries trust_tier, 
 - flagged : "Flagged: <reason>" (spam, affiliate redirect, look-alike, sub-domain stuffing). Still listed, ranked last.
 - unverified : "Unverified · community-submitted" (src=community) or "Unverified · crawler-indexed".
 - seen : "Seen by shoppers · N visits". At least 3 weighted distinct unflagged keys posted visit-basis notes (421, or 422 with basis=visit) in 60 days; new (< 30 days, fewer than 2 other stores) or anonymous keys count 0.5; at least 2 real keys. The submitter's key, keys first seen within 24 h of the submission, and keys with reputation below -3 do not count. Drops back if more than 40% of the basis notes are flagged.
-- verified : "Verified (payment proof | store claim | protocol endpoint)": a 422 with a verified payment proof from an unflagged key that is not the submitter; a store claim (a key verified by NIP-05 on the domain that signed its own 31420); or a crawler-observed protocol endpoint (/.well-known/ucp or a declared agent API).
+- verified : "Verified (payment proof | store claim | protocol endpoint)": a 422 with a verified payment proof from an unflagged key that is not the submitter; a store claim (a key verified by NIP-05 on the domain that signed its own 31420); or a crawler-observed protocol endpoint (/.well-known/ucp present, or our own probe got a real HTTP 402 challenge; directory-claimed rails do not count).
 - ${origin}/summary.json : counts and headline numbers.
 - ${origin}/export.ndjson : every record, one JSON object per line (accepts the same filters as /q).
 - ${origin}/.well-known/klickymart.json : machine-readable capabilities (endpoints, relays, licenses).

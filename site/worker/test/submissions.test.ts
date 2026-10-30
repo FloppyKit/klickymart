@@ -242,6 +242,8 @@ describe("trust ladder", () => {
     const u = await tier(uniq("ucp"), { ucp: { present: true, endpoint: "https://x.myshopify.com/api/ucp/mcp", src: "https://x/.well-known/ucp" } });
     expect(u.trust_label).toBe("Verified (protocol endpoint)");
     expect((await tier(uniq("ucp"), { ucp: { present: false, endpoint: null } })).trust_tier).toBe("unverified");
+    expect((await tier(uniq("x4"), { an_402: { result: "verified-402", proto: "l402", endpoint: "https://api.x/pay" } })).trust_label).toBe("Verified (protocol endpoint)");
+    expect((await tier(uniq("x4"), { an_rails: ["l402"], an_402: { result: "claimed" }, agent_api: { endpoint: "https://api.x" } })).trust_tier).toBe("unverified");
   });
   it("verified by store claim: NIP-05 key on the domain that signed its own 31420", async () => {
     const d = uniq("cl"); const k = pk();
