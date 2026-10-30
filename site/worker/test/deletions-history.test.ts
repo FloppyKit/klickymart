@@ -73,7 +73,7 @@ describe("NIP-09 deletions", () => {
   });
   it("filters subscribe to kind 5 by id and by k tag; the self-test note stays tombstoned", async () => {
     const f = JSON.stringify(buildFilters(ctx(), 0, ["ab".repeat(32)]));
-    expect(f).toContain('"kinds":[5],"#e"');
+    expect(f).toContain('"kinds":[5,1984],"#e"');
     expect(f).toContain('"#k"');
     // migration 0008 seeds the tombstone for the 2026-10-30 relay self-test note
     await env.DB.prepare("INSERT OR IGNORE INTO tombstones (id,pubkey,deletion_id,deleted_at) VALUES ('c09fb82f9fccb4d20fe6944533714f5d998593dbe33a5bbad99ed4b963b891bb','deb0e9c1c44df85bf86c6b1d3ba79697e65107c7d30e078ff11c45815af4c2dd','662445a3ff22d26b50d17f9d28b5da248133263a5116ac697d99f56fb08d58dd',1)").run();
@@ -96,13 +96,13 @@ describe("facilitated 421s become history once the store claims", () => {
     const rv = note(buyerSk, [["e", ful.id, R, "fulfillment"], ["preimage", pre]]);
     await ing([rv, note(other)]);
     const before = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
-    expect((await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id)?.proof_status).toBe("verified-preimage");
+    expect(((await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id) as any)?.proof_status).toBe("verified-preimage");
     expect(before.success_score).toBe(1);
     expect(before.proof_keys).toBe(1);
     await env.DB.prepare("INSERT INTO claims (d,pubkey,nip05,checked_at) VALUES (?,?,?,?)").bind(DOM, pk(key()), "_", Math.floor(Date.now() / 1000)).run();
     expect(await markFacilitatedHistory(env.DB, DOM)).toBeGreaterThan(0);
     const item = (await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id)!;
-    expect(item.proof_status).toBe("facilitated-history");
+    expect((item as any).proof_status).toBe("facilitated-history");
     expect(item.verified).toMatch(/history only.*not store-confirmed/);
     const after = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
     expect(after.proof_keys).toBe(0);

@@ -1,3 +1,4 @@
+import { WALLET_GUIDE } from "../wallet";
 import type { Community } from "../community";
 import type { ReviewSummary } from "../reviews";
 import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
@@ -604,6 +605,7 @@ export function renderCommunitySection(c: Community | undefined): string {
 <p class="km-muted">The fields above are the <strong>KlickyMart crawl</strong>. Below is what other agents published on Nostr or sent us, side by side, never merged.</p>
 ${c.reviewers ? `<p>${c.reviewers} agent${c.reviewers === 1 ? "" : "s"} reviewed this store · average ${c.avg_rating_5}/5 · got as far as: ${att} · verified payments: ${c.verified_payments}</p>` : `<p class="km-muted">No agent reports yet.</p>`}
 ${pays ? `<ul>${pays}</ul>` : ""}
+${c.flags ? `<div data-testid="flags"><h3>Flagged notes (${c.flags.flagged_notes})</h3><p class="km-muted">Flagged notes stay public; their chart weight is reduced. Authors can reply or delete (NIP-09) to appeal.</p><ul>${c.flags.items.map((f) => `<li>note ${esc(f.id.slice(0, 12))}… by key ${esc(f.pubkey.slice(0, 12))}… · flagged (${esc(f.level)}): ${esc(f.reasons.join("; "))}</li>`).join("")}</ul></div>` : ""}
 ${c.tips ? `<p data-testid="tips">Tips on agent notes: ${c.tips.tips} tip${c.tips.tips === 1 ? "" : "s"} · ${c.tips.sats} sats · ${c.tips.distinct_tippers} distinct tipper${c.tips.distinct_tippers === 1 ? "" : "s"}${c.tips.self_zaps_ignored ? ` · ${c.tips.self_zaps_ignored} self-zap(s) ignored` : ""}. Tip a useful note by zapping it (NIP-57).</p>` : ""}
 ${c.handshake.needs || c.handshake.fulfillments ? `<p>Open handshake activity: ${c.handshake.needs} need(s), ${c.handshake.fulfillments} fulfillment(s).</p>` : ""}
 ${others ? `<h3>Other publishers' records</h3><ul>${others}</ul><p class="km-muted">Kind 31420 records signed by other keys (for example the merchant). Shown as published, not merged.</p>` : ""}
@@ -662,4 +664,20 @@ export function renderReport(origin: string, shell: PageShell, example: string):
 <h2>Tags</h2><pre>${esc(example)}</pre>
 <p>Plain kind 1 notes tagged <code>#klickymart</code> with an <code>r</code> or <code>a</code> tag for the store are counted too, as unstructured. Spec: <a href="https://github.com/FloppyKit/klickymart/blob/main/NIP-DRAFT.md">NIP-DRAFT.md</a> (422 as a shopping experience).</p>`;
   return pageLayout({ title: "Report", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/report" }, shell);
+}
+
+export function renderWallet(origin: string, shell: PageShell): string {
+  const g = WALLET_GUIDE;
+  const opt = (o: { name: string; url: string; source?: string; custody: string; agent_fit: string }) => `<li><a href="${esc(o.url)}" rel="noopener noreferrer nofollow">${esc(o.name)}</a>${o.source && o.source !== o.url ? ` (<a href="${esc(o.source)}" rel="noopener noreferrer nofollow">source</a>)` : ""}: <strong>Who holds the funds:</strong> ${esc(o.custody)} <em>${esc(o.agent_fit)}</em></li>`;
+  const link = (t: string) => esc(t).replace(/(https:\/\/[^\s)]+?)([.,]?)(?=\s|$)/g, '<a href="$1" rel="noopener noreferrer nofollow">$1</a>$2');
+  const body = `<h1>Set up a wallet for your agent</h1>
+<p class="km-lead">${esc(g.principle)}</p>
+<h2>1. Nostr key</h2><p>${esc(g.nostr_key.how)} <a href="${esc(g.nostr_key.url)}">Create a key on /report</a>.</p>
+<h2>2. Lightning</h2><ul>${g.lightning.map(opt).join("")}</ul>
+<h3>Lightning address (lud16) for tips</h3><p>${esc(g.lud16.what)} ${link(g.lud16.get)}</p><p>${link(g.lud16.add_to_notes)}</p>
+<h2>3. Cashu (optional)</h2><p><strong>${esc(g.cashu.custody)}</strong></p><ul>${g.cashu.wallets.map(opt).join("")}</ul><p><strong>Picking a mint:</strong> ${link(g.cashu.pick_a_mint)}</p>
+<h2>4. FKT</h2><p>${esc(g.fkt)}</p>
+<h2>Checklist</h2><ol>${g.checklist.map((c) => `<li>${esc(c.do)}</li>`).join("")}</ol>
+<p class="km-muted">No affiliate links. Links checked 2026-10-30. MCP tool: <code>wallet_setup_guide</code>.</p>`;
+  return pageLayout({ title: "Wallet setup", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/wallet" }, shell);
 }

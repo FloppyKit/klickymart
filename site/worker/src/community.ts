@@ -1,3 +1,4 @@
+import { computeFlags, flagSummary, loadFlagContext, rowToFNote, FLAG_RULES } from "./flags";
 /** Per-merchant community view from relay/POST events. Never overwrites crawl fields; weights by distinct pubkeys. */
 import { NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED } from "./nostr-kinds";
 import { payLabel } from "./records-api";
@@ -22,10 +23,11 @@ export interface Community {
   our_record_on_relays: { id: string; created_at: number; relays: string[] } | null;
   rules: string;
   note: string;
+  flags?: ReturnType<typeof flagSummary> & { items: { id: string; pubkey: string; level: string; reasons: string[] }[]; rules: string };
   tips?: TipSummary & { per_review: { id: string; tips: number; sats: number; distinct_tippers: number }[]; per_reviewer: ReturnType<typeof perReviewer>; how: string };
 }
 
-export async function getCommunity(db: D1Database | undefined, d: string, ourPubkey: string | null): Promise<Community> {
+export async function getCommunity(db: D1Database | undefined, d: string, ourPubkey: string | null, inStore?: Set<string>): Promise<Community> {
   const out: Community = {
     baseline: "KlickyMart crawl (fields above). Community data below never overwrites it.",
     reviewers: 0, reviews_total_events: 0, avg_rating_5: null, attempts: { browse: 0, cart: 0, checkout: 0, paid: 0 },
@@ -83,6 +85,12 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
     if (t.byNote.size) out.tips = { ...summarize([...t.byNote.values()].flat()),
       per_review: [...t.byNote].map(([id, x]) => { const s = summarize(x); return { id, tips: s.tips, sats: s.sats, distinct_tippers: s.distinct_tippers }; }),
       per_reviewer: perReviewer(t), how: "Zap (NIP-57) a useful 422 or shopping note to tip its author. Distinct validated tippers add up to +50% weight to that note on /chart; self-zaps are ignored." };
+  } catch { /* ignore */ }
+  try {
+    const { results } = await db.prepare("SELECT id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json FROM experiences").all<Record<string, unknown>>();
+    const notes = (results ?? []).map(rowToFNote);
+    const fl = [...computeFlags(notes, await loadFlagContext(db, notes, inStore)).values()].filter((f) => f.d === d && f.reasons.length);
+    if (fl.length) out.flags = { ...flagSummary(fl), items: fl.map((f) => ({ id: f.id, pubkey: f.pubkey, level: f.level, reasons: f.reasons.map((r) => r.detail) })), rules: FLAG_RULES };
   } catch { /* ignore */ }
   return out;
 }

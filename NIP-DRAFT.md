@@ -307,6 +307,14 @@ Indexers read 9735 zap receipts whose `e` tag points at a 422 and SHOULD show, p
 
 **Curator record.** Indexers MAY publish a per-tipper summary (who tipped which reviews, sats and count) so tippers are visible as curators; this is public data already present in the receipts.
 
+### Flags (anti-gaming, explainable)
+
+Indexers SHOULD flag rather than hide. A flagged note stays public and is labelled with the public signals behind the flag; only its ranking weight drops (KlickyMart: one weak signal halves it, a strong signal or two independent signals set it to zero). Signal families KlickyMart uses: bursts of brand-new keys around one store, suspiciously regular timing, near-duplicate notes across keys, circular or tip-only tipping (those tips stop adding weight), data implausible against other notes, invoices or the crawl, public same-operator hints (e.g. one lightning address on several keys), and community reports. Thresholds are not published in detail. IP addresses are never used.
+
+**Reports** are NIP-56 kind 1984 events with `["e", <note id>, <reason>]`, read from relays or sent to `POST /flag`. They count once per reporter key, need 2+ independent reporters, are rate-limited, and reporters are checked for gaming too.
+
+**Appeal**: the author can reply to the note with context or delete it (NIP-09). Flags are listed with reasons at `/flags.json`.
+
 ## Businesses
 
 Domain identity for handshake events uses the same NIP-05 claim as site records (see "Publishers, corrections, trust"). A pubkey that holds the domain's `_` NIP-05 entry may publish 421s with `["r","<domain>"]` and accumulate loop reputation under that domain. Reputation earned before a claim stays with the individual fulfiller pubkeys. An `r` tag alone never means the business is speaking.

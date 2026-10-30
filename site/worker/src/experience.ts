@@ -1,3 +1,4 @@
+import { computeFlags, flagSummary, loadFlagContext, rowToFNote, type NoteFlag } from "./flags";
 import { loadTips, summarize, type Tip, type TipSummary } from "./tips";
 /** Structured shopping-experience notes on kind 422 (spec: NIP-DRAFT.md "422 as a shopping experience"), plus
  * unstructured kind-1 notes tagged #klickymart. Parsing, storage, per-store aggregates and unsigned templates.
@@ -156,12 +157,12 @@ export interface StoreAggregate {
   guest_yes_keys: number; guest_no_keys: number; account_required_keys: number;
   tax_before: { yes: number; no: number }; ship_before: { yes: number; no: number };
   observed: { shipping_usd: { median: number | null; n: number; keys: number; corroborated: boolean }; tax_rate_pct: { median: number | null; n: number; keys: number; corroborated: boolean } };
-  verified_purchase_share: number; proof_keys: number; tips: TipSummary; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
+  verified_purchase_share: number; proof_keys: number; tips: TipSummary; flags: ReturnType<typeof flagSummary>; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
 }
 const med = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : Math.round(((s[m - 1]! + s[m]!) / 2) * 100) / 100; };
 
 /** Aggregate one store's notes. Counts are distinct pubkeys (each key's latest structured note; any proof from a key counts once). */
-export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<string, Tip[]>): StoreAggregate {
+export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<string, Tip[]>, flags?: Map<string, NoteFlag>): StoreAggregate {
   const nowS = Math.floor(now / 1000);
   const sorted = [...rows].sort((a, b) => b.created_at - a.created_at);
   const latest = new Map<string, Row>();
@@ -169,7 +170,8 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
   const proofKeys = new Set(rows.filter((r) => r.proof && r.proof_status !== "facilitated-history").map((r) => r.pubkey));
-  const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (tips ? summarize(tips.get(r.id) ?? []).weight : 1)));
+  const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (flags?.get(r.id)?.tip_weight ?? (tips ? summarize(tips.get(r.id) ?? []).weight : 1)) * (flags?.get(r.id)?.weight ?? 1)));
+  const noteFlags = rows.map((r) => flags?.get(r.id)).filter((x): x is NoteFlag => !!x);
   const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
   const depth: Record<string, number> = Object.fromEntries(EXP_DEPTHS.map((x) => [x, 0]));
   for (const r of per) if (r.depth) depth[r.depth] = (depth[r.depth] ?? 0) + 1;
@@ -177,6 +179,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   const reached = per.filter((r) => r.depth && DEPTH_RANK[r.depth]! >= 2);
   const paid = per.filter((r) => r.depth && DEPTH_RANK[r.depth]! >= 4);
   // weighted share of keys that reached payment or beyond; null until 2 keys
+  // a key whose notes here are all zero-weighted by flags drops out of the score entirely
   const wsum = per.reduce((a, r) => a + (wOf.get(r.pubkey) ?? 1), 0);
   const wok = per.filter((r) => r.depth && DEPTH_RANK[r.depth]! >= 3).reduce((a, r) => a + (wOf.get(r.pubkey) ?? 1), 0);
   const ships = per.filter((r) => r.shipping !== null && (r.currency ?? "USD") === "USD");
@@ -196,26 +199,28 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
       tax_rate_pct: { median: med(taxes.map((r) => Math.round((r.tax! / r.price!) * 10000) / 100)), n: taxes.length, keys: new Set(taxes.map((r) => r.pubkey)).size, corroborated: new Set(taxes.map((r) => r.pubkey)).size >= MIN_KEYS },
     },
     verified_purchase_share: keysAll.size ? Math.round((proofKeys.size / keysAll.size) * 100) / 100 : 0, proof_keys: proofKeys.size,
-    tips: storeTips,
+    tips: storeTips, flags: flagSummary(noteFlags),
     avg_rating_5: rated.length ? Math.round((rated.reduce((a, r) => a + r.rating5!, 0) / rated.length) * 10) / 10 : null,
     latest_at: sorted[0]?.created_at ?? null, notes_30d: rows.filter((r) => r.created_at >= nowS - 30 * 86400).length,
     rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Crawl data is never overwritten.`,
   };
 }
 
-const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
+const COLS = "raw_json,id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
 const fromDb = (r: Record<string, any>): Row => ({ ...r, structured: r.structured === 1, pay_offered: JSON.parse(r.pay_offered || "[]"), walls: JSON.parse(r.walls || "[]") }) as Row;
-export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now()): Promise<Map<string, StoreAggregate>> {
+export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string> } = {}): Promise<Map<string, StoreAggregate>> {
   const out = new Map<string, StoreAggregate>();
   if (!db) return out;
   try {
     const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")})` : `SELECT ${COLS} FROM experiences`;
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
     const tips = (await loadTips(db)).byNote;
+    const fnotes = (results ?? []).map(rowToFNote);
+    const flags = computeFlags(fnotes, await loadFlagContext(db, fnotes, opts.inStoreOnly));
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
-    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now, tips); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
+    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now, tips, flags); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
   } catch { /* migration pending */ }
   return out;
 }

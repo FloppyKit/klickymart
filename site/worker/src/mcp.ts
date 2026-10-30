@@ -1,3 +1,4 @@
+import { WALLET_GUIDE } from "./wallet";
 import { CONDITION_FILTERS, PRODUCT_TYPES } from "./product-quality";
 import { flagPrefix } from "./row-flags";
 import { Q_BOOL_FILTERS, Q_CATEGORIES, STATUS_VALUES, CAT_CODES, SUBCATEGORIES, PAY_CODES, PAY_ALIASES, PAY_GROUP_NAMES, ALT_PAY_FILTERS, BLOCKER_KINDS } from "./vocab";
@@ -67,6 +68,10 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/offers": { get: { summary: "Product offers observed on store pages (JSON-LD / Shopify JSON); live=1 adds live Shopify Catalog results (never stored)", parameters: [{ name: "q", in: "query", required: false, schema: { type: "string" }, description: "Product words; synonyms like ANC / noise-cancelling / over-ear are expanded" }, { name: "gtin", in: "query", required: false, schema: { type: "string" }, description: "GTIN/UPC/EAN" }, { name: "mpn", in: "query", required: false, schema: { type: "string" }, description: "Manufacturer part number" }, { name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Limit to one store" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed cost" }, { name: "in_stock", in: "query", required: false, schema: { type: "string" }, description: "1 = in stock only" }, { name: "max_price", in: "query", required: false, schema: { type: "number" }, description: "USD" }, { name: "live", in: "query", required: false, schema: { type: "string" }, description: "1 = add live Shopify Catalog results" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/recheck": { get: { summary: "Re-read robots.txt and home status for an indexed store now (rate-limited)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } }, post: { summary: "Same as GET", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/facilitate": { get: { summary: "Facilitator npub, limits and usage", responses: { "200": { description: "JSON" } } }, post: { summary: "Get a kind 421 signed by KlickyMart as FACILITATOR (not the store) after a payment-proof check; returned unpublished", responses: { "200": { description: "signed event" }, "400": { description: "bad proof/param" }, "409": { description: "store claimed its listing" }, "429": { description: "rate limited" }, "503": { description: "not configured" } } } },
+      "/wallet": { get: { summary: "Non-custodial wallet setup page", responses: { "200": { description: "HTML" } } } },
+      "/wallet.json": { get: { summary: "Wallet setup guide and checklist (JSON)", responses: { "200": { description: "JSON" } } } },
+      "/flags.json": { get: { summary: "Flagged agent notes with explainable reasons", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
+      "/flag": { post: { summary: "Submit a signed NIP-56 kind 1984 report about a note (not published)", responses: { "201": { description: "stored" }, "400": { description: "bad report" }, "429": { description: "rate limited" } } } },
       "/tips.json": { get: { summary: "NIP-57 tips on agent notes, per review and per reviewer", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
       "/curators.json": { get: { summary: "Curator record: who tipped which agent notes", responses: { "200": { description: "JSON" } } } },
       "/reviews": { get: { summary: "Agent reviews for a store", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
@@ -225,6 +230,11 @@ export function mcpToolsList(): unknown {
         },
       },
       {
+        name: "wallet_setup_guide",
+        description: "Non-custodial wallet setup guide for agents: Nostr key, self-custodial or agent-friendly Lightning options (NWC, Alby Hub, phoenixd, LNbits) with who holds the funds, how to get a lud16 for tips, Cashu wallets and mint risk, plus a checklist. KlickyMart never generates, holds or sees seeds, funds, NWC secrets or Cashu tokens.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "facilitate_purchase",
         description: "For a store that has NOT claimed its KlickyMart listing: show KlickyMart your payment proof and get back a kind 421 signed by KlickyMart as FACILITATOR (role=facilitator, on_behalf_of=<domain>, verification=verified-preimage|verified-zap|unverified-claim). It is NOT a store confirmation. KlickyMart does not publish it; you publish it, then reference it from your 422. Never send a secret key or the raw receipt (send a sha256 hash of a redacted receipt instead).",
         inputSchema: {
@@ -320,6 +330,10 @@ export function createMcpHandler(deps: {
         const domain = String(p.arguments?.domain ?? "");
         if (!domain) return { ...base, error: { code: -32602, message: "domain required" } };
         const body = await deps.getReviews(domain);
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body } };
+      }
+      if (p.name === "wallet_setup_guide") {
+        const body = { ...WALLET_GUIDE, page: "/wallet" } as Record<string, unknown>;
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body } };
       }
       if (p.name === "facilitate_purchase" && deps.facilitate) {

@@ -1,3 +1,5 @@
+import { WALLET_GUIDE } from "./wallet";
+import { computeFlags, flagSummary, loadFlagContext, rowToFNote, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
 import { facilitate, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
 import { curators, loadTips, perReviewer, summarize } from "./tips";
 import { mcpToolsList } from "./mcp";
@@ -51,7 +53,7 @@ import {
   renderQueryResults,
   renderCheckResult,
   renderAlternatives,
-  renderChart, renderReport,
+  renderChart, renderReport, renderWallet,
 } from "./render/pages";
 
 export interface Env {
@@ -302,6 +304,26 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json({ facilitator_npub: FACILITATOR_NPUB, facilitator_pubkey: FACILITATOR_PUBKEY, limits: FACILITATE_LIMITS, note: FACILITATE_NOTE,
       usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}|{type:'hash',sha256}}. Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
   }
+  if (path === "/wallet" && request.method === "GET") {
+    return new Response(renderWallet(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" } });
+  }
+  if (path === "/wallet.json" && request.method === "GET") return Response.json({ ...licenseMetaBlock(), ...WALLET_GUIDE }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
+  if (path === "/flags.json" && request.method === "GET") {
+    const d = url.searchParams.get("domain")?.toLowerCase() || undefined;
+    const { results } = await env.DB.prepare(`SELECT id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json FROM experiences`).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
+    const notes = (results ?? []).map(rowToFNote);
+    const flags = [...computeFlags(notes, await loadFlagContext(env.DB, notes, inStoreOnly(snap))).values()].filter((f) => f.reasons.length && (!d || f.d === d));
+    return Response.json({ ...licenseMetaBlock(), domain: d ?? null, ...flagSummary(flags), items: flags.map((f) => ({ ...f, label: `flagged (${f.level}): ${f.reasons.map((r) => r.detail).join("; ")}` })),
+      rules: FLAG_RULES, appeal: "Authors can reply to the note with context (we read replies as context) or delete it with NIP-09. Flags never hide or delete a note.",
+      report: `POST ${origin}/flag with a signed NIP-56 kind 1984 event: ["e", <note id>, <reason>]` }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
+  }
+  if (path === "/flag" && request.method === "POST") {
+    const text = await request.text();
+    if (text.length > 4096) return Response.json({ ok: false, error: { code: "too_large", message: "report too large" } }, { status: 413 });
+    let ev: Ev; try { ev = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be a signed kind 1984 event" } }, { status: 400 }); }
+    const r = await submitReport(env.DB, ev);
+    return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
   if ((path === "/tips.json" || path === "/curators.json") && request.method === "GET") {
     const d = url.searchParams.get("domain")?.toLowerCase() || undefined;
     const t = await loadTips(env.DB, d);
@@ -452,11 +474,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, pages_scanned: lvb?.pages_scanned ?? null, products_scanned: lvb?.products_scanned ?? null, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
   };
   if ((path === "/chart.json" || path === "/chart") && request.method === "GET") {
-    const aggs = await loadAggregates(env.DB);
+    const aggs = await loadAggregates(env.DB, undefined, Date.now(), { inStoreOnly: inStoreOnly(snap) });
     const ch = buildChart(snap, aggs, { limit: Number(url.searchParams.get("limit") ?? 50) || 50, category: url.searchParams.get("category") ?? undefined });
     if (path === "/chart") return new Response(renderChart(origin, shell, ch), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     const st = aggs.get(SELFTEST_DOMAIN);
-    return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, items: ch.items, ...(st ? { selftest: { d: SELFTEST_DOMAIN, note: "KlickyMart ingest self-test (fake .invalid domain); not ranked", community: st } } : {}) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
+    return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, flags: { flagged_notes: [...aggs.values()].reduce((a, x) => a + (x.flags?.flagged_notes ?? 0), 0), url: `${origin}/flags.json` }, items: ch.items, ...(st ? { selftest: { d: SELFTEST_DOMAIN, note: "KlickyMart ingest self-test (fake .invalid domain); not ranked", community: st } } : {}) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
   if (path === "/report/template" && request.method === "GET") {
     const args: Record<string, unknown> = Object.fromEntries(url.searchParams.entries());
@@ -486,7 +508,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const attachObserved = async (body: Record<string, unknown>) => {
     const items = (body.items as Record<string, unknown>[] | undefined) ?? [];
     const ds = [...new Set(items.map((i) => String(i.d ?? i.domain ?? i.store ?? "")).filter(Boolean))].slice(0, 50);
-    const aggs = ds.length ? await loadAggregates(env.DB, ds) : new Map();
+    const aggs = ds.length ? await loadAggregates(env.DB, ds, Date.now(), { inStoreOnly: inStoreOnly(snap) }) : new Map();
     const obs: Record<string, unknown> = {};
     for (const [d, a] of aggs) obs[d] = { source: "observed by agents (Nostr kind 422 notes)", keys: a.keys, corroborated: a.corroborated, shipping_usd: a.observed.shipping_usd, tax_rate_pct: a.observed.tax_rate_pct, latest: a.latest_at };
     body.observed_by_agents = { note: "Separate from landed totals above, which come from KlickyMart's crawl and store policies. Corroborated means 2+ distinct keys.", stores: obs };
@@ -565,9 +587,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         const alt = findAlternatives(snap, origin, { domain: String(res.body.domain), limit: 5 });
         if (alt.ok) res.body.alternatives = { categories: alt.body.categories, items: alt.body.items, more: `${origin}/alternatives?domain=${res.body.domain}` };
       }
-      res.body.community = await getCommunity(env.DB, String(res.body.domain), crawlerHex);
-      const ex = (await loadAggregates(env.DB, [String(res.body.domain)])).get(String(res.body.domain));
-      res.body.community_experience = ex ? { ...ex, source: "Nostr shopping-experience notes", chart: `${origin}/chart` } : { source: "Nostr shopping-experience notes", keys: 0, note: "No agent has posted a shopping-experience note for this store yet.", report: `${origin}/report` };
+      res.body.community = await getCommunity(env.DB, String(res.body.domain), crawlerHex, inStoreOnly(snap));
+      const ex = (await loadAggregates(env.DB, [String(res.body.domain)], Date.now(), { inStoreOnly: inStoreOnly(snap) })).get(String(res.body.domain));
+      res.body.community_experience = ex ? { ...ex, source: "Nostr shopping-experience notes", chart: `${origin}/chart`, flags_url: `${origin}/flags.json?domain=${res.body.domain}` } : { source: "Nostr shopping-experience notes", keys: 0, note: "No agent has posted a shopping-experience note for this store yet.", report: `${origin}/report` };
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
     }
     if (url.searchParams.get("format") === "html") {
@@ -654,7 +676,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         explain: { ...checkExtras(row, raw), checkout_depth: checkoutOf(row, raw) },
         nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null, a: aTagFor(domain) },
         reviews: await getReviews(env.DB, domain),
-        community: await getCommunity(env.DB, domain, crawlerHex),
+        community: await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap)),
       },
       { headers: apiHeaders(snap.version, 0) },
     );
@@ -665,7 +687,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const row = snap.rows.find((r) => r.d === domain);
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -818,7 +840,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       },
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
       facilitate: async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
-      getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex) }),
+      getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex, inStoreOnly(snap)) }),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());
         if (!row) return null;

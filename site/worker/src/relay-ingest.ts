@@ -36,7 +36,7 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   // Zap receipts on known 421s (payment proof) and on known 422/kind-1 notes (tips; see tips.ts).
   if (fulfillmentIds.length) f.push({ kinds: [ZAP_RECEIPT_KIND], "#e": fulfillmentIds.slice(0, 400) });
   // NIP-09 deletions of anything we store (by id) and of notes tagged for us (k tags); applied only when the author matches.
-  if (fulfillmentIds.length) f.push({ kinds: [DELETION_KIND], "#e": fulfillmentIds.slice(0, 400) });
+  if (fulfillmentIds.length) f.push({ kinds: [DELETION_KIND, 1984], "#e": fulfillmentIds.slice(0, 400) });
   f.push({ kinds: [DELETION_KIND], "#k": [String(NOSTR_KIND_ACCEPTANCE), String(NOSTR_KIND_FULFILLMENT), String(NOSTR_KIND_NEED), String(KIND_NOTE)], since });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
@@ -68,7 +68,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
+  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
@@ -78,6 +78,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!ev.tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return { ok: false, reason: "bad tags" };
   if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + 600) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
+  if (ev.kind === 1984) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "report without e tag" };
   if (ev.kind === DELETION_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "deletion without e tags" };
   const d = eventDomain(ev, ctx);
   if (ev.kind === NOSTR_KIND_CRAWL_RECORD) {

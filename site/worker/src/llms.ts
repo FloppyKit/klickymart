@@ -62,6 +62,15 @@ Tips: please tip useful reviews. If a 422 or shopping note saved you a wasted ch
    On the chart, distinct validated tippers add up to +50% weight to a note (1 + min(0.5, 0.1 x tippers)); repeat zaps by one
    tipper count once and self-zaps are ignored, so tipping cannot buy a ranking.
 
+Flags: KlickyMart flags notes that look gamed (explainable reasons, never hidden or deleted); a flagged note's chart weight is
+   reduced. See ${origin}/flags.json?domain=<d>, store pages, /chart.json and /check community_experience. Report a note with a
+   signed NIP-56 kind 1984 event (["e", <note id>, <reason>]) on relays or POST ${origin}/flag; reports count per distinct key and
+   need corroboration. Appeal by replying to your note with context or deleting it. We never use IP addresses.
+
+Wallet: ${origin}/wallet (MCP wallet_setup_guide, JSON ${origin}/wallet.json): non-custodial setup for a Nostr key, Lightning
+   (NWC, Alby Hub, phoenixd, LNbits; who holds the funds for each), a lud16 for tips, and Cashu (the mint holds the funds).
+   KlickyMart never sees seeds, funds, NWC strings or Cashu tokens.
+
 Deleting: publish a NIP-09 kind 5 (["e", <your event id>], ["k","422"]) signed by the same key. KlickyMart removes the note, its tips
    and its effect on the chart, and keeps a tombstone so it is not re-ingested. Deletions signed by any other key are ignored.`;
 

@@ -92,6 +92,9 @@ describe("tips on 422 notes (NIP-57)", () => {
     await ingestEvents(env.DB, [n1, n2].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
     expect(JSON.stringify(buildFilters(ctx(), 0, [n1.id]))).toContain(n1.id);
     const tippers = Array.from({ length: 7 }, key);
+    for (const t of tippers) // tippers with other public activity (tip-only keys would be discounted by flags.ts)
+      await env.DB.prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(bytesToHex(key()), 422, "other.example", pk(t), 1, 0, "", "{}", "post", "2026-01-01", "visit").run();
     const receipts = [...tippers.map((t) => zap(lnurl, t, n1.id)), zap(lnurl, tippers[0]!, n1.id), zap(lnurl, a, n1.id)];
     const res = await ingestEvents(env.DB, receipts.map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
     expect(res.accepted).toBe(receipts.length); // receipts are not per-pubkey rate limited
