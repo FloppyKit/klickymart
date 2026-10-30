@@ -3,7 +3,8 @@
  * (weak flag x0.5, strong flag or 2+ independent signals x0). Inputs are public Nostr data only; never IP addresses.
  * Authors can appeal by replying to the note or deleting it (NIP-09). */
 import { decodeBolt11 } from "./bolt11";
-import { loadTips, tipWeight, type Tip } from "./tips";
+import { loadTips, tipWeight, bonusEligible, type Tip } from "./tips";
+import { BIG_NIP05_PROVIDERS, verifiedNip05 } from "./nip05";
 
 export const REPORT_KIND = 1984;
 export const FLAG_LIMITS = { reportsPerKeyPerDay: 10, minReporters: 2, strongReporters: 4 };
@@ -22,7 +23,10 @@ export interface FlagCtx {
   reports: Report[];
   fulfillmentMsat: Map<string, number>;    // 421 id -> invoice amount
   inStoreOnly?: Set<string>;               // crawl: domains with in-store payment only (no online checkout)
+  crawlPrices?: Map<string, { min: number; max: number; n: number }>; // our crawl/offer prices (USD) per store
+  nip05?: Map<string, string>;             // pubkey -> NIP-05 domain we verified
 }
+export interface FlagStatic { inStoreOnly: Set<string>; crawlPrices: Map<string, { min: number; max: number; n: number }> }
 
 const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9$.\s]/g, " ").split(/\s+/).filter(Boolean);
 const shingles = (s: string) => { const w = words(s); const o = new Set<string>(); for (let i = 0; i + 2 < w.length; i++) o.add(w.slice(i, i + 3).join(" ")); return o; };
@@ -69,9 +73,15 @@ export function computeFlags(notes: FNote[], ctx: FlagCtx): Map<string, NoteFlag
         const med = others[(others.length - 1) >> 1]!;
         if (n.price > med * 5 || n.price < med / 5) add(n.id, { signal: "implausible-data", strength: "weak", detail: `price ${n.price} is far from other agents' median ${med}` });
       }
+      const cp = ctx.crawlPrices?.get(d);
+      if (cp && n.price != null && n.price > 0 && (n.currency ?? "USD") === "USD" && (n.price > cp.max * 5 || n.price < cp.min / 5))
+        add(n.id, { signal: "implausible-data", strength: "weak", detail: `price ${n.price} is far outside the prices our crawl saw at this store (${cp.min}-${cp.max} USD)` });
       if (ctx.inStoreOnly?.has(d) && n.depth && DEEP.has(n.depth)) add(n.id, { signal: "implausible-data", strength: "weak", detail: "claims an online payment step; our crawl found in-store payment only" });
       const ful = n.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1];
-      const stated = Number(tag(n.tags, "amount"));
+      const toMsat = (t: string[]) => { const v = Number(t[2]); const c = (t[3] ?? "").toLowerCase(); return !(v > 0) ? NaN : c === "msat" ? v : c === "sat" || c === "sats" ? v * 1000 : c === "btc" ? v * 1e11 : NaN; };
+      const at = n.tags.find((t) => t[0] === "amount" && /^\d+$/.test(t[1] ?? "")) ; // legacy ["amount", <msat>]
+      const pt = n.tags.find((t) => t[0] === "amount" && (t[1] === "price_paid" || t[1] === "total"));
+      const stated = at ? Number(at[1]) : pt ? toMsat(pt) : NaN;
       const inv = ful ? ctx.fulfillmentMsat.get(ful) : undefined;
       if (inv && stated > 0 && Math.abs(inv - stated) > 0.1 * Math.max(inv, stated)) add(n.id, { signal: "implausible-data", strength: "strong", detail: `stated amount ${stated} msat does not match the cited invoice (${inv} msat)` });
     }
@@ -80,6 +90,16 @@ export function computeFlags(notes: FNote[], ctx: FlagCtx): Map<string, NoteFlag
   const lud = new Map<string, Set<string>>();
   for (const n of notes) { const l = tag(n.tags, "lud16")?.toLowerCase(); if (l) (lud.get(l) ?? lud.set(l, new Set()).get(l)!).add(n.pubkey); }
   for (const n of notes) { const k = lud.get(tag(n.tags, "lud16")?.toLowerCase() ?? ""); if (k && k.size >= 2) add(n.id, { signal: "same-operator", strength: k.size >= 3 ? "strong" : "weak", detail: `lightning address shared by ${k.size} keys` }); }
+  // 5b. NIP-05: several keys verified under one domain posting about the same store (big public providers: weak at most)
+  if (ctx.nip05?.size) for (const [, list] of byStore) {
+    const byDom = new Map<string, Set<string>>();
+    for (const n of list) { const dm = ctx.nip05.get(n.pubkey); if (dm) (byDom.get(dm) ?? byDom.set(dm, new Set()).get(dm)!).add(n.pubkey); }
+    for (const n of list) {
+      const dm = ctx.nip05.get(n.pubkey); const k = dm ? byDom.get(dm)! : null; if (!k) continue;
+      const big = BIG_NIP05_PROVIDERS.has(dm!);
+      if (big ? k.size >= 4 : k.size >= 2) add(n.id, { signal: "same-operator", strength: !big && k.size >= 3 ? "strong" : "weak", detail: `${k.size} keys verified under one NIP-05 domain${big ? " (a large public provider)" : ""} posted about this store` });
+    }
+  }
   // 3. tip rings and tip-only tippers
   const author = (id: string) => byId.get(id)?.pubkey;
   const edges = new Set<string>();
@@ -95,10 +115,11 @@ export function computeFlags(notes: FNote[], ctx: FlagCtx): Map<string, NoteFlag
   for (const [id, tips] of ctx.tips) {
     const n = byId.get(id); if (!n) continue;
     const val = [...new Set(tips.filter((t) => !t.self && t.validated && t.tipper).map((t) => t.tipper!))];
+    const bonus = [...new Set(tips.filter(bonusEligible).map((t) => t.tipper!))];
     const bad = val.filter((p) => (ring.has(p) && ring.has(n.pubkey)) || !ctx.active.has(p));
     if (ring.has(n.pubkey) && val.some((p) => ring.has(p))) add(id, { signal: "tip-ring", strength: "weak", detail: "author and tippers tip each other in a small circle" });
     if (val.length && val.filter((p) => !ctx.active.has(p)).length * 2 >= val.length) add(id, { signal: "tip-only-tippers", strength: "weak", detail: "most tips come from keys whose only activity is tipping" });
-    if (bad.length) tipW.set(id, tipWeight(val.length - bad.length));
+    if (bad.length) tipW.set(id, tipWeight(bonus.filter((p) => !bad.includes(p)).length));
   }
   // 6. community reports (NIP-56), distinct reporters, reporters checked too
   const reps = new Map<string, Report[]>();
@@ -135,8 +156,8 @@ export function flagSummary(flags: NoteFlag[]) {
 }
 
 type Row = Record<string, any>;
-export async function loadFlagContext(db: D1Database, notes: FNote[], inStoreOnly?: Set<string>): Promise<FlagCtx> {
-  const ctx: FlagCtx = { firstSeen: new Map(), active: new Set(), tips: new Map(), reports: [], fulfillmentMsat: new Map(), inStoreOnly };
+export async function loadFlagContext(db: D1Database, notes: FNote[], st?: Partial<FlagStatic>): Promise<FlagCtx> {
+  const ctx: FlagCtx = { firstSeen: new Map(), active: new Set(), tips: new Map(), reports: [], fulfillmentMsat: new Map(), inStoreOnly: st?.inStoreOnly, crawlPrices: st?.crawlPrices, nip05: await verifiedNip05(db) };
   try {
     for (const q of ["SELECT pubkey, MIN(created_at) AS t FROM nostr_events GROUP BY pubkey", "SELECT pubkey, MIN(created_at) AS t FROM experiences GROUP BY pubkey"]) {
       const { results } = await db.prepare(q).all<{ pubkey: string; t: number }>();
@@ -192,4 +213,56 @@ export async function submitReport(db: D1Database, ev: { id: string; pubkey: str
   const r = await db.prepare("INSERT OR IGNORE INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, REPORT_KIND, ev.pubkey, ev.created_at, t.d, JSON.stringify(ev), nowS, "post").run();
   return { status: (r.meta?.changes ?? 0) > 0 ? 201 : 200, body: { ok: true, id: ev.id, target: p.target, reason: p.reason, published: false,
     note: `Counted once per reporter key; a note is flagged only when ${FLAG_LIMITS.minReporters}+ independent keys report it. Reporters are checked for gaming too. You may also publish this report to relays yourself.` } };
+}
+
+/** Crawl-side inputs (from the snapshot and our offers file). */
+export async function buildFlagStatic(snap: { rows: { d: string; pay_online: number; pay_instore: number }[] }): Promise<FlagStatic> {
+  const crawlPrices = new Map<string, { min: number; max: number; n: number }>();
+  try {
+    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
+    const { parseOffers } = await import("./offers");
+    for (const o of parseOffers(EMBEDDED_OFFERS_NDJSON || "")) {
+      const p = o.dn?.price_usd ?? o.p; if (!(p > 0) || (o.c && o.c !== "USD")) continue;
+      const c = crawlPrices.get(o.d); crawlPrices.set(o.d, c ? { min: Math.min(c.min, p), max: Math.max(c.max, p), n: c.n + 1 } : { min: p, max: p, n: 1 });
+    }
+  } catch { /* no offers */ }
+  return { inStoreOnly: inStoreOnly(snap), crawlPrices };
+}
+
+const NOTE_COLS = "id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json";
+/** Full scan: every stored note scored with the full public context. */
+export async function scanFlags(db: D1Database, st?: Partial<FlagStatic>): Promise<Map<string, NoteFlag>> {
+  const { results } = await db.prepare(`SELECT ${NOTE_COLS} FROM experiences`).all<Row>();
+  const notes = (results ?? []).map(rowToFNote);
+  return computeFlags(notes, await loadFlagContext(db, notes, st));
+}
+
+/** Recompute after a write (ingest, POST, deletion, claim, NIP-05 pass) and write only the rows that changed.
+ * Signals can cross stores (tip rings, shared addresses), so the score is computed over all notes; the cache write is the
+ * incremental part. Request paths read the cache. */
+export async function refreshFlagCache(db: D1Database, st?: Partial<FlagStatic>, nowS = Math.floor(Date.now() / 1000)): Promise<{ upserted: number; removed: number }> {
+  try {
+    const fresh = await scanFlags(db, st);
+    const old = await readFlagCache(db);
+    const stmts: D1PreparedStatement[] = []; let up = 0, rm = 0;
+    for (const [id, f] of fresh) {
+      const o = old.get(id);
+      if (o && JSON.stringify(o) === JSON.stringify(f)) continue;
+      stmts.push(db.prepare("INSERT INTO note_flags (id,d,pubkey,level,weight,tip_weight,reasons_json,computed_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET d=excluded.d, pubkey=excluded.pubkey, level=excluded.level, weight=excluded.weight, tip_weight=excluded.tip_weight, reasons_json=excluded.reasons_json, computed_at=excluded.computed_at")
+        .bind(id, f.d, f.pubkey, f.level, f.weight, f.tip_weight ?? null, JSON.stringify(f.reasons), nowS)); up++;
+    }
+    for (const id of old.keys()) if (!fresh.has(id)) { stmts.push(db.prepare("DELETE FROM note_flags WHERE id = ?").bind(id)); rm++; }
+    for (let k = 0; k < stmts.length; k += 100) await db.batch(stmts.slice(k, k + 100));
+    return { upserted: up, removed: rm };
+  } catch { return { upserted: 0, removed: 0 }; }
+}
+
+export async function readFlagCache(db: D1Database | undefined, d?: string): Promise<Map<string, NoteFlag>> {
+  const m = new Map<string, NoteFlag>();
+  if (!db) return m;
+  try {
+    const { results } = await db.prepare(`SELECT id,d,pubkey,level,weight,tip_weight,reasons_json FROM note_flags${d ? " WHERE d = ?" : ""}`).bind(...(d ? [d] : [])).all<Row>();
+    for (const r of results ?? []) m.set(r.id, { id: r.id, d: r.d, pubkey: r.pubkey, reasons: JSON.parse(r.reasons_json), level: r.level, weight: r.weight, ...(r.tip_weight != null ? { tip_weight: r.tip_weight } : {}) });
+  } catch { /* migration pending */ }
+  return m;
 }

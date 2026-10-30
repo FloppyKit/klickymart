@@ -624,7 +624,9 @@ export function renderChart(origin: string, shell: PageShell, chart: { items: { 
 
 /** SRI hashes for the /report signing scripts (worker/test/report-sign.test.ts checks them against public/). */
 export const NOSTR_TOOLS_SRI = "sha384-x/Q9a1/oiBraMvfi4OiwWB6magWUVbgXQlkWwpEoxeiILzwqe2oaGOQrllDnZUVP";
-export const REPORT_SIGN_SRI = "sha384-7bYYE8kykUkGqu/E5NEsvw1TPTyHmSzSrz6QjtPlXMYKOB6ljmAItgd/n63r0gxh";
+export const REPORT_SIGN_SRI = "sha384-RU27Fg8Cq2dCrG8bIfKQliWFnailJd4ltO2rdGB8FI4bn5qb+u12MNJCax812kO2";
+/** Relays the /report page may connect to (also its CSP connect-src). */
+export const REPORT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
 export function renderReport(origin: string, shell: PageShell, example: string): string {
   const body = `<h1>Report a shopping experience</h1>
 <p class="km-lead">After your agent shops, it can post a public, signed Nostr note about how it went. KlickyMart reads public relays and builds the <a href="/chart">store chart</a> from these notes. KlickyMart never signs or publishes for you.</p>
@@ -638,7 +640,7 @@ export function renderReport(origin: string, shell: PageShell, example: string):
 <p><label>Use my existing key: <input id="km-paste" type="password" autocomplete="off" spellcheck="false" placeholder="nsec1..." size="40"></label> <button type="button" id="km-use-nsec">Use nsec</button> or <button type="button" id="km-use-nip07">Use NIP-07 signer (window.nostr)</button></p>
 <p><label><input type="checkbox" id="km-per-store"> Per-store key for extra privacy</label> (a new key for each store, so your notes about different stores can't be linked)</p>
 <div id="km-nsec-box" hidden><p class="km-bad"><strong>Save this now. It is shown once.</strong> Anyone with it can post as you. KlickyMart does not have it and cannot recover it.</p>
-<p><span id="km-nsec-label"></span>: <input id="km-nsec" readonly size="70" autocomplete="off"> <a id="km-nsec-dl" href="#">Download nsec</a> <button type="button" id="km-hide-nsec">I saved it, hide it</button></p></div>
+<p><span id="km-nsec-label"></span>: <input id="km-nsec" type="password" readonly size="70" autocomplete="off"> <button type="button" id="km-show-nsec">Show once</button> <a id="km-nsec-dl">Download nsec (then it is cleared)</a> <button type="button" id="km-hide-nsec">I saved it, clear it</button></p></div>
 <p id="km-key-status" class="km-muted" aria-live="polite">No key loaded.</p>
 <h3>Note</h3>
 <p><label>Store domain <input data-field="domain" placeholder="example.com"></label>
@@ -655,7 +657,10 @@ export function renderReport(origin: string, shell: PageShell, example: string):
 <p id="km-warn" class="km-muted" aria-live="polite"></p>
 <pre id="km-signed" data-testid="km-signed"></pre>
 <p><button type="button" id="km-dry">Test with /reviews?dry_run=1</button>
-<label>Relays <input id="km-relays" value="wss://relay.damus.io wss://nos.lol wss://relay.primal.net" size="60"></label> <button type="button" id="km-publish">Publish to relays (from your browser)</button></p>
+<label>Relays <input id="km-relays" value="${REPORT_RELAYS.join(" ")}" data-allowed="${REPORT_RELAYS.join(" ")}" size="60"></label> <button type="button" id="km-publish">Review before publishing</button></p>
+<div id="km-confirm-box" data-testid="km-confirm" hidden><p class="km-bad"><strong>Check before publishing.</strong> Relay notes are public and hard to take back (a deletion request is only a request).</p>
+<p>Relays:</p><pre id="km-confirm-relays"></pre><p>Signed event:</p><pre id="km-confirm-event"></pre>
+<p><label><input type="checkbox" id="km-confirm-ok"> I reviewed the relays and the signed event above</label> <button type="button" id="km-confirm-publish" disabled>Confirm publish</button></p></div>
 <p id="km-result" class="km-muted" aria-live="polite"></p>
 </section>
 <script src="/vendor/nostr-tools-2.17.0.bundle.js" integrity="${NOSTR_TOOLS_SRI}" crossorigin="anonymous" defer></script>

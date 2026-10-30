@@ -1,4 +1,4 @@
-import { computeFlags, flagSummary, loadFlagContext, rowToFNote, type NoteFlag } from "./flags";
+import { flagSummary, readFlagCache, type NoteFlag } from "./flags";
 import { loadTips, summarize, type Tip, type TipSummary } from "./tips";
 /** Structured shopping-experience notes on kind 422 (spec: NIP-DRAFT.md "422 as a shopping experience"), plus
  * unstructured kind-1 notes tagged #klickymart. Parsing, storage, per-store aggregates and unsigned templates.
@@ -146,7 +146,7 @@ export async function storeExperience(db: D1Database, x: Experience, raw: unknow
 export const MIN_KEYS = 2;
 const DEPTH_RANK: Record<string, number> = { browse: 0, product: 0.5, cart: 1, checkout: 2, shipping: 2.5, payment: 3, paid: 4, delivered: 5 };
 /** Weight of one key's evidence: 1 by default, 2 with a proof attached, 3 when the proof was checked. */
-export const proofWeight = (proof: string | null, status: string | null) => (status === "facilitated-history" ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
+export const proofWeight = (proof: string | null, status: string | null) => (status === "facilitated-history" || status === "facilitated-unverified" ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
 type Row = Experience & { proof_status: string | null; walls_json?: string };
 
 export interface StoreAggregate {
@@ -169,7 +169,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   for (const r of sorted) if (r.structured && !latest.has(r.pubkey)) latest.set(r.pubkey, r);
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
-  const proofKeys = new Set(rows.filter((r) => r.proof && r.proof_status !== "facilitated-history").map((r) => r.pubkey));
+  const proofKeys = new Set(rows.filter((r) => r.proof && r.proof_status !== "facilitated-history" && r.proof_status !== "facilitated-unverified").map((r) => r.pubkey));
   const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (flags?.get(r.id)?.tip_weight ?? (tips ? summarize(tips.get(r.id) ?? []).weight : 1)) * (flags?.get(r.id)?.weight ?? 1)));
   const noteFlags = rows.map((r) => flags?.get(r.id)).filter((x): x is NoteFlag => !!x);
   const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
@@ -206,7 +206,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   };
 }
 
-const COLS = "raw_json,id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
+const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
 const fromDb = (r: Record<string, any>): Row => ({ ...r, structured: r.structured === 1, pay_offered: JSON.parse(r.pay_offered || "[]"), walls: JSON.parse(r.walls || "[]") }) as Row;
 export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string> } = {}): Promise<Map<string, StoreAggregate>> {
   const out = new Map<string, StoreAggregate>();
@@ -215,8 +215,7 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")})` : `SELECT ${COLS} FROM experiences`;
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
     const tips = (await loadTips(db)).byNote;
-    const fnotes = (results ?? []).map(rowToFNote);
-    const flags = computeFlags(fnotes, await loadFlagContext(db, fnotes, opts.inStoreOnly));
+    const flags = await readFlagCache(db); // computed on write (refreshFlagCache)
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
@@ -281,11 +280,17 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   const sbpOut = (v: boolean | null | "not-observed") => (v === null ? "unknown" : v === "not-observed" ? "not-observed" : v ? "true" : "false");
   for (const k of ["tax", "shipping"]) tags.push(["shown_before_payment", k, sbpOut(sbp[k]!)]);
   const cur = s("currency") ?? "USD";
-  const est = new Set(list("estimated").map((x) => x.toLowerCase()));
+  // estimated: a boolean (true = every amount given is an estimate) or a list of amount kinds.
+  const estRaw = a.estimated;
+  const estAll = estRaw === true || (typeof estRaw === "string" && /^(true|yes|1)$/i.test(estRaw.trim()));
+  const estNone = estRaw === false || (typeof estRaw === "string" && /^(false|no|0)$/i.test(estRaw.trim()));
+  const est = new Set(estAll ? [...AMOUNT_KINDS] : estNone ? [] : list("estimated").map((x) => x.toLowerCase()));
   for (const x of est) if (!(AMOUNT_KINDS as readonly string[]).includes(x)) warnings.push(`estimated "${x}" ignored (use ${AMOUNT_KINDS.join(", ")})`);
   const amounts: Record<string, { value: string; estimated: boolean }> = {};
   for (const k of ["price", "price_seen", "price_paid", "fee", "shipping", "tax", "total"]) {
     const v = s(k); if (v === undefined) continue;
+    // "unknown" / "not-observed": you looked but the amount was not shown (not zero). Kept as a tag, never as a number.
+    if (/^(unknown|not-observed)$/i.test(v)) { tags.push(["amount", k, v.toLowerCase(), cur]); amounts[k] = { value: v.toLowerCase(), estimated: false }; continue; }
     if (!Number.isFinite(Number(v)) || Number(v) < 0) return fail(`bad_${k}`, `${k} must be a non-negative number (got "${v}")`);
     tags.push(["amount", k, v, cur, ...(est.has(k) ? ["estimated"] : [])]); amounts[k] = { value: v, estimated: est.has(k) };
   }

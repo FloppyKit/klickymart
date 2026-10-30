@@ -17,7 +17,7 @@ describe("/report in-browser signing never sends a secret key", () => {
     const fetches = [...js.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1]!.trim());
     expect(fetches).toEqual(['"/report/template?" + templateQuery(f', '"/reviews?dry_run=1"']);
     expect(js).toMatch(/body: JSON\.stringify\(publicEvent\(signed\)\)/);
-    expect(js).toMatch(/pool\.publish\(relays, ev\)/); expect(js).toMatch(/var ev = publicEvent\(signed\)/);
+    expect(js).toMatch(/pool\.publish\(relays, ev\)/); expect(js).toMatch(/review = \{ relays: relays, ev: publicEvent\(signed\) \}/);
     for (const bad of ["XMLHttpRequest", "sendBeacon", "localStorage", "sessionStorage", "document.cookie", "console.log", "gtag", "analytics", "navigator.clipboard", "postMessage", "new Image", "WebSocket("])
       expect(js.includes(bad), bad).toBe(false);
   });

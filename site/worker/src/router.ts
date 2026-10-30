@@ -1,5 +1,9 @@
 import { WALLET_GUIDE } from "./wallet";
-import { computeFlags, flagSummary, loadFlagContext, rowToFNote, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
+const TEMPLATE_HELP = {
+  estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
+  amounts: "price, price_seen, price_paid, fee, shipping, tax, total: a non-negative number, or unknown / not-observed when the store did not show it (not zero)",
+};
+import { flagSummary, readFlagCache, refreshFlagCache, buildFlagStatic, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
 import { facilitate, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
 import { curators, loadTips, perReviewer, summarize } from "./tips";
 import { mcpToolsList } from "./mcp";
@@ -53,7 +57,7 @@ import {
   renderQueryResults,
   renderCheckResult,
   renderAlternatives,
-  renderChart, renderReport, renderWallet,
+  renderChart, renderReport, renderWallet, REPORT_RELAYS,
 } from "./render/pages";
 
 export interface Env {
@@ -235,6 +239,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
+      if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
       return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
     } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
   }
@@ -254,6 +259,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }
     await markFacilitatedHistory(env.DB, p.value.d);
+    await refreshFlagCache(env.DB, await buildFlagStatic(snap));
     return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews`, ...xb } };
   } catch {
     return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
@@ -310,9 +316,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/wallet.json" && request.method === "GET") return Response.json({ ...licenseMetaBlock(), ...WALLET_GUIDE }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
   if (path === "/flags.json" && request.method === "GET") {
     const d = url.searchParams.get("domain")?.toLowerCase() || undefined;
-    const { results } = await env.DB.prepare(`SELECT id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json FROM experiences`).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
-    const notes = (results ?? []).map(rowToFNote);
-    const flags = [...computeFlags(notes, await loadFlagContext(env.DB, notes, inStoreOnly(snap))).values()].filter((f) => f.reasons.length && (!d || f.d === d));
+    const flags = [...(await readFlagCache(env.DB, d)).values()].filter((f) => f.reasons.length);
     return Response.json({ ...licenseMetaBlock(), domain: d ?? null, ...flagSummary(flags), items: flags.map((f) => ({ ...f, label: `flagged (${f.level}): ${f.reasons.map((r) => r.detail).join("; ")}` })),
       rules: FLAG_RULES, appeal: "Authors can reply to the note with context (we read replies as context) or delete it with NIP-09. Flags never hide or delete a note.",
       report: `POST ${origin}/flag with a signed NIP-56 kind 1984 event: ["e", <note id>, <reason>]` }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
@@ -322,6 +326,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (text.length > 4096) return Response.json({ ok: false, error: { code: "too_large", message: "report too large" } }, { status: 413 });
     let ev: Ev; try { ev = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be a signed kind 1984 event" } }, { status: 400 }); }
     const r = await submitReport(env.DB, ev);
+    if (r.status === 201) await refreshFlagCache(env.DB, await buildFlagStatic(snap));
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   }
   if ((path === "/tips.json" || path === "/curators.json") && request.method === "GET") {
@@ -486,13 +491,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const d = String(args.domain ?? "").toLowerCase().replace(/^www\./, "");
     const t = experienceTemplate(args, aTagFor(d));
     if (!t.ok) return err400(t.code === "region_too_precise" ? "region" : t.code === "missing_domain" ? "domain" : t.code.replace(/^bad_/, ""), t.message);
-    return Response.json(t.value, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+    return Response.json({ ...t.value, param_help: TEMPLATE_HELP }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   }
   if (path === "/report" && request.method === "GET") {
     const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "true", account_required: "false", basis: "visit", pay_used: "ln", pay_offered: ["card", "ln", "spay"], btc_route: "native", shown_before_payment: "tax,shipping", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
     return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8",
       // In-browser signing page: scripts only from this origin, network only to this origin and wss:// relays, no framing.
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; connect-src 'self' wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      // Strict: no inline script (none on this page, so no hashes needed); scripts only from this origin (the pinned,
+      // SRI-checked nostr-tools bundle and km-report-sign.js); network only to this origin and the listed relays.
+      "Content-Security-Policy": `default-src 'none'; script-src 'self'; connect-src 'self' ${REPORT_RELAYS.join(" ")}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'`,
       "Referrer-Policy": "no-referrer", "Cache-Control": "no-store" } });
   }
   if (path === "/pending.json" && request.method === "GET") {
@@ -873,6 +880,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           if (res.underscore && env.DB) {
             await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?)").bind(v.domain, res.underscore, `_${v.domain}`, Math.floor(Date.now() / 1000)).run();
             await markFacilitatedHistory(env.DB, v.domain);
+            await refreshFlagCache(env.DB, await buildFlagStatic(snap));
           }
         }
       }

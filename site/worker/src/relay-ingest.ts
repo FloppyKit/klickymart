@@ -1,4 +1,6 @@
-import { markFacilitatedHistory } from "./facilitate";
+import { markFacilitatedHistory, FACILITATOR_PUBKEY } from "./facilitate";
+import { refreshFlagCache } from "./flags";
+import { nip05Pass } from "./nip05";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -14,6 +16,8 @@ export const DELETION_KIND = 5;
 export const INGEST_LIMITS = { perPubkeyPerDay: 200, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
 
 export interface IngestCtx {
+  indexStatus?: (d: string) => string | undefined;
+  flagStatic?: import("./flags").FlagStatic;
   domains: Set<string>;
   ourPubkey: string | null;
   now?: number;
@@ -26,7 +30,7 @@ export function relayList(raw: string | undefined): string[] {
 }
 
 /** REQ filters for one relay. */
-export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: string[] = []): Record<string, unknown>[] {
+export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: string[] = [], noteAuthors: string[] = []): Record<string, unknown>[] {
   const domains = [...ctx.domains].sort();
   const f: Record<string, unknown>[] = [
     { kinds: [NOSTR_KIND_CRAWL_RECORD], since },
@@ -38,6 +42,8 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   // NIP-09 deletions of anything we store (by id) and of notes tagged for us (k tags); applied only when the author matches.
   if (fulfillmentIds.length) f.push({ kinds: [DELETION_KIND, 1984], "#e": fulfillmentIds.slice(0, 400) });
   f.push({ kinds: [DELETION_KIND], "#k": [String(NOSTR_KIND_ACCEPTANCE), String(NOSTR_KIND_FULFILLMENT), String(NOSTR_KIND_NEED), String(KIND_NOTE)], since });
+  // Profiles (kind 0) only for keys that posted notes: used for NIP-05 same-operator hints (flags.ts / nip05.ts).
+  if (noteAuthors.length) f.push({ kinds: [0], authors: noteAuthors.slice(0, 200) });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
   return f;
@@ -68,7 +74,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
+  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984, 0].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
@@ -78,6 +84,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!ev.tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return { ok: false, reason: "bad tags" };
   if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + 600) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
+  if (ev.kind === 0) return { ok: true, d: null };
   if (ev.kind === 1984) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "report without e tag" };
   if (ev.kind === DELETION_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "deletion without e tags" };
   const d = eventDomain(ev, ctx);
@@ -98,7 +105,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
 /** Cheap proof checks. preimage: sha256(preimage) == payment_hash of the 421's bolt11.
  * zap: receipt is a valid signed 9735 that references the 421 and carries a bolt11 with an amount (receipt signer is
  * not yet checked against the recipient's LNURL nostrPubkey). */
-export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | null): "verified-preimage" | "verified-zap" | "unverified-claim" | null {
+export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | null): "verified-preimage" | "verified-zap" | "unverified-claim" | "facilitated-unverified" | null {
   const ful = review.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1];
   const pre = tagv(review.tags, "preimage"); const zap = tagv(review.tags, "zap"); const cashu = tagv(review.tags, "cashu");
   if (!ful && !pre && !zap && !cashu) return null;
@@ -112,6 +119,8 @@ export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | 
     const b = tagv(zapReceipt.tags, "bolt11"); const dec = b ? decodeBolt11(b) : null;
     if (refs && dec && (dec.amount_msat ?? 0) > 0) return "verified-zap";
   }
+  // A 421 KlickyMart signed as facilitator from a bare hash proves nothing: no proof bonus, plain-note weight.
+  if (fulfillment.pubkey === FACILITATOR_PUBKEY && tagv(fulfillment.tags, "verification") === "unverified-claim") return "facilitated-unverified";
   return "unverified-claim";
 }
 
@@ -175,7 +184,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     }
     for (let k = valid.length - 1; k >= 0; k--) if (tomb.get(valid[k]!.ev.id) === valid[k]!.ev.pubkey) { valid.splice(k, 1); reject("deleted by author (tombstone)"); }
   }
-  if (!valid.length) return res;
+  if (!valid.length) { if (res.accepted) await refreshFlagCache(db, ctx.flagStatic); return res; }
   const existing = new Map<string, string>();
   const ids = [...new Set(valid.map((x) => x.ev.id))];
   for (let k = 0; k < ids.length; k += 90) {
@@ -237,6 +246,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     const zap = await getEvent(db, tagv(ev.tags, "zap"));
     await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: checkProof(ev, ful, zap) });
   }
+  if (res.accepted) await refreshFlagCache(db, ctx.flagStatic);
   const touched = new Set([...reviews, ...exps, ...valid.filter((x) => x.ev.kind === NOSTR_KIND_FULFILLMENT).map((x) => x.ev)].map((e) => eventDomain(e, ctx) ?? tagv(e.tags, "r")).filter((x): x is string => !!x));
   for (const d of touched) await markFacilitatedHistory(db, d);
   return res;
@@ -301,12 +311,14 @@ async function knownFulfillments(db: D1Database): Promise<string[]> {
 export async function catchUp(db: D1Database, relays: string[], ctx: IngestCtx, connect: Connect = workerConnect, timeoutMs = INGEST_LIMITS.catchupTimeoutMs): Promise<Record<string, IngestResult & { error?: string }>> {
   const state = await getState(db);
   const fulIds = await knownFulfillments(db);
+  let authors: string[] = [];
+  try { authors = ((await db.prepare("SELECT DISTINCT pubkey FROM experiences LIMIT 200").all<{ pubkey: string }>()).results ?? []).map((r) => r.pubkey); } catch { /* */ }
   const out: Record<string, IngestResult & { error?: string }> = {};
   // Reads run in parallel; D1 writes are serialized so cross-relay dedupe (and relay lists) stay exact.
   let writeChain: Promise<unknown> = Promise.resolve();
   await Promise.all(relays.map(async (relay) => {
     const since = Math.max(0, (state[relay]?.last_seen ?? 0) - INGEST_LIMITS.catchupOverlapS);
-    const filters = buildFilters(ctx, since, fulIds);
+    const filters = buildFilters(ctx, since, fulIds, authors);
     const events: { ev: unknown; relay: string }[] = [];
     let error: string | undefined;
     try {
@@ -340,5 +352,6 @@ export async function catchUp(db: D1Database, relays: string[], ctx: IngestCtx, 
     writeChain = job.catch(() => undefined);
     await job;
   }));
+  if (ctx.indexStatus && (await nip05Pass(db, (u, i) => fetch(u, i), ctx.indexStatus)) > 0) await refreshFlagCache(db, ctx.flagStatic);
   return out;
 }

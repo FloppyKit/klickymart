@@ -1,5 +1,5 @@
 import { storeFacts } from "./explain";
-import { storeCard, landedForProduct, hostOf } from "./store-card";
+import { storeCard, landedForProduct, hostOf, findRow } from "./store-card";
 /** GO D1: product offers observed by KlickyBot (deterministic: schema.org JSON-LD and Shopify /products.json only).
  * Shopify catalog (UCP) results are never stored: its usage guidelines forbid caching, so /offers can add them live (live=1). */
 import type { Snapshot } from "./index-mem";
@@ -35,7 +35,8 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   const m = qy.mpn ? qy.mpn.toLowerCase().replace(/[^a-z0-9]/g, "") : null;
   const qt = qy.q ? queryTokens(qy.q) : [];
   if (!g && !m && !qt.length && !qy.domain) return { ok: false as const, message: "give gtin, mpn, q or domain" };
-  const rows = new Map(snap.rows.map((r) => [r.d, r]));
+  const exact = new Map(snap.rows.map((r) => [r.d, r]));
+  const rows = { get: (d: string) => exact.get(d) ?? findRow(snap, d) ?? undefined };
   const scored: { o: Offer; conf: number; how: string }[] = [];
   for (const o of offers) {
     if (qy.domain && o.d !== qy.domain && o.d !== qy.domain.replace(/^www\./, "")) continue;
@@ -65,7 +66,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
       ...(o.dn ? { denomination: o.dn, ...giftCardPrice(o) } : {}),
       shipping: rowShipping(landed, o.sh),
-      store: row ? { ...storeCard(snap, o.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
+      store: row ? { ...storeCard(snap, row.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(row.d)}`, ...(row.d !== o.d ? { matched_via: `${o.d} -> ${row.d} (same registrable domain)` } : {}) } : null,
       ...(landed ? { landed } : {}),
     };
   });

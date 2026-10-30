@@ -1,3 +1,4 @@
+import { buildFlagStatic } from "./flags";
 import { SELFTEST_DOMAIN } from "./experience";
 /** RelayIngester Durable Object: keeps live WebSocket subscriptions to RELAY_URLS with exponential backoff, buffers
  * events and flushes them to D1. An alarm every 30 s re-establishes dropped sockets and flushes; the 5-minute cron
@@ -11,7 +12,9 @@ const FLUSH_AT = 50;
 
 export async function ingestCtx(env: Env): Promise<IngestCtx> {
   const snap = await loadSnapshot(env);
-  return { domains: new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]), ourPubkey: crawlerPubkeyHexFromSnapshot(snap, env.CRAWLER_PUBKEY_HEX) };
+  const status = new Map(snap.rows.map((r) => [r.d, r.status]));
+  return { domains: new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]), ourPubkey: crawlerPubkeyHexFromSnapshot(snap, env.CRAWLER_PUBKEY_HEX),
+    flagStatic: await buildFlagStatic(snap), indexStatus: (d: string) => status.get(d) };
 }
 
 interface RelayLive { ws: SocketLike | null; state: "connecting" | "open" | "down"; attempts: number; nextTry: number; since: number; opened_at: number | null; events: number; last_error: string | null }

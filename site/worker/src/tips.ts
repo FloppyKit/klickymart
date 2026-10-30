@@ -7,11 +7,14 @@ import { verifyNostrEvent } from "./nostr-verify";
 export const ZAP_RECEIPT = 9735;
 /** Ranking multiplier for a note: 1 + min(CAP, PER * distinct validated tippers). */
 export const TIP_WEIGHT = { PER: 0.1, CAP: 0.5 };
+/** A tipper counts toward the bonus only with a zap of at least MIN_SATS and a key with history: a visit note, other
+ * public activity we hold, or first seen at least MIN_AGE_S ago. Dust and throwaway keys still show, but add nothing. */
+export const TIP_BONUS_RULES = { MIN_SATS: 21, MIN_AGE_S: 30 * 86400 };
 export const tipWeight = (distinctValidated: number) => 1 + Math.min(TIP_WEIGHT.CAP, TIP_WEIGHT.PER * distinctValidated);
 
 type Ev = { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string };
-export interface Tip { receipt: string; target: string; tipper: string | null; sats: number | null; validated: boolean; self: boolean; created_at: number }
-export interface TipSummary { tips: number; sats: number; distinct_tippers: number; validated_tippers: number; self_zaps_ignored: number; weight: number }
+export interface Tip { receipt: string; target: string; tipper: string | null; sats: number | null; validated: boolean; self: boolean; created_at: number; eligible?: boolean }
+export interface TipSummary { tips: number; sats: number; distinct_tippers: number; validated_tippers: number; bonus_tippers: number; self_zaps_ignored: number; weight: number }
 
 /** One receipt -> tip. tipper = pubkey of the embedded 9734 zap request (the payer); validated = receipt and request signatures check. */
 export function parseTip(r: Ev, authorOf: (id: string) => string | undefined): Tip | null {
@@ -27,12 +30,14 @@ export function parseTip(r: Ev, authorOf: (id: string) => string | undefined): T
   return { receipt: r.id, target, tipper, sats: dec?.amount_msat != null ? Math.floor(dec.amount_msat / 1000) : null, validated, self: !!tipper && !!author && tipper === author, created_at: r.created_at };
 }
 
+export const bonusEligible = (t: Tip) => !t.self && t.validated && !!t.tipper && (t.sats ?? 0) >= TIP_BONUS_RULES.MIN_SATS && t.eligible !== false;
 export function summarize(tips: Tip[]): TipSummary {
   const nonSelf = tips.filter((t) => !t.self);
   const distinct = new Set(nonSelf.map((t) => t.tipper ?? t.receipt));
   const validated = new Set(nonSelf.filter((t) => t.validated && t.tipper).map((t) => t.tipper!));
-  return { tips: nonSelf.length, sats: nonSelf.reduce((a, t) => a + (t.sats ?? 0), 0), distinct_tippers: distinct.size, validated_tippers: validated.size,
-    self_zaps_ignored: tips.length - nonSelf.length, weight: tipWeight(validated.size) };
+  const bonus = new Set(nonSelf.filter((t) => bonusEligible(t)).map((t) => t.tipper!));
+  return { tips: nonSelf.length, sats: nonSelf.reduce((a, t) => a + (t.sats ?? 0), 0), distinct_tippers: distinct.size, validated_tippers: validated.size, bonus_tippers: bonus.size,
+    self_zaps_ignored: tips.length - nonSelf.length, weight: tipWeight(bonus.size) };
 }
 
 /** All tips on notes (optionally only notes about domain d), keyed by note id, plus per-reviewer and per-tipper (curator) views. */
@@ -46,9 +51,17 @@ export async function loadTips(db: D1Database | undefined, d?: string): Promise<
     for (const n of rv.results ?? []) { author.set(n.id, n.pubkey); noteDomain.set(n.id, n.d); }
     if (!author.size) return { byNote, author, noteDomain };
     const { results } = await db.prepare("SELECT raw_json FROM nostr_events WHERE kind = ?").bind(ZAP_RECEIPT).all<{ raw_json: string }>();
+    // key history for the bonus rule: a visit note, other activity (not reports/receipts), or old enough
+    const hist = new Set<string>();
+    const nowS = Math.floor(Date.now() / 1000);
+    for (const q of [db.prepare("SELECT DISTINCT pubkey FROM experiences WHERE IFNULL(basis,'visit') = 'visit'"),
+      db.prepare("SELECT DISTINCT pubkey FROM nostr_events WHERE kind NOT IN (1984, 9735, 0)"),
+      db.prepare("SELECT pubkey FROM nostr_events GROUP BY pubkey HAVING MIN(created_at) <= ?").bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
+      for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
     for (const row of results ?? []) {
       const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id));
       if (!t || !author.has(t.target)) continue;
+      t.eligible = !!t.tipper && hist.has(t.tipper);
       (byNote.get(t.target) ?? byNote.set(t.target, []).get(t.target)!).push(t);
     }
   } catch { /* migration pending */ }

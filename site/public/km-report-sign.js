@@ -30,14 +30,24 @@
   var hex = function (b) { return Array.prototype.map.call(b, function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); };
   function say(id, msg, bad) { var el = $(id); el.textContent = msg; el.className = bad ? "km-bad" : "km-muted"; }
   function setKey(sk) { state.sk = sk; state.skHex = sk ? hex(sk) : null; state.pk = sk ? NT.getPublicKey(sk) : null; }
+  // The new secret is hidden by default (masked field). "Show once" reveals it a single time; hiding it, or downloading it,
+  // clears the field and revokes the download URL, so the secret is not left in the page.
+  var pending = null;
+  function clearNsec() {
+    $("km-nsec").value = ""; $("km-nsec").type = "password"; $("km-nsec-box").hidden = true;
+    var a = $("km-nsec-dl"); if (a.href && a.href.indexOf("blob:") === 0) URL.revokeObjectURL(a.href); a.removeAttribute("href");
+    $("km-show-nsec").disabled = true; pending = null;
+  }
   function showNsecOnce(sk, label) {
-    var nsec = NT.nip19.nsecEncode(sk);
-    $("km-nsec").value = nsec; $("km-nsec-box").hidden = false;
+    pending = NT.nip19.nsecEncode(sk);
+    $("km-nsec").type = "password"; $("km-nsec").value = pending; $("km-nsec-box").hidden = false; $("km-show-nsec").disabled = false;
     $("km-nsec-label").textContent = label;
-    var blob = new Blob([nsec + "\n"], { type: "text/plain" });
+    var blob = new Blob([pending + "\n"], { type: "text/plain" });
     var a = $("km-nsec-dl"); a.href = URL.createObjectURL(blob); a.download = label.replace(/[^a-z0-9.-]+/gi, "-") + ".nsec.txt";
   }
-  $("km-hide-nsec").onclick = function () { $("km-nsec").value = ""; $("km-nsec-box").hidden = true; URL.revokeObjectURL($("km-nsec-dl").href); };
+  $("km-show-nsec").onclick = function () { if (!pending) return; $("km-nsec").type = "text"; $("km-show-nsec").disabled = true; };
+  $("km-nsec-dl").onclick = function () { if (!pending) return false; setTimeout(clearNsec, 1500); };
+  $("km-hide-nsec").onclick = clearNsec;
   $("km-create").onclick = function () {
     var sk = NT.generateSecretKey(); setKey(sk); state.mode = "create";
     showNsecOnce(sk, "klickymart-agent-key");
@@ -69,7 +79,7 @@
   }
   var signed = null;
   $("km-build").onclick = function () {
-    var f = fields(); signed = null; $("km-signed").textContent = "";
+    var f = fields(); signed = null; $("km-signed").textContent = ""; cancelReview();
     fetch("/report/template?" + templateQuery(f)).then(function (r) { return r.json(); }).then(function (t) {
       if (t.error || !t.unsigned_event) throw new Error((t.error && t.error.message) || "template error");
       say("km-warn", (t.warnings || []).join(" | ") || "No warnings. counts_toward_chart: " + t.fields.counts_toward_chart);
@@ -84,12 +94,29 @@
     fetch("/reviews?dry_run=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(publicEvent(signed)) })
       .then(function (r) { return r.text(); }).then(function (t) { say("km-result", "dry run: " + t); });
   };
+  // Two steps, never one click: "Review" shows the exact relays and signed event; "Confirm publish" stays disabled until the
+  // review box is ticked, and any change (new build, relay edit) cancels the review.
+  var ALLOWED = ($("km-relays").getAttribute("data-allowed") || "").split(" ").filter(Boolean);
+  var review = null;
+  function cancelReview() { review = null; $("km-confirm-box").hidden = true; $("km-confirm-ok").checked = false; $("km-confirm-publish").disabled = true; }
+  $("km-relays").oninput = cancelReview;
   $("km-publish").onclick = function () {
+    cancelReview();
     if (!signed) return say("km-result", "Build and sign first.", true);
     var relays = $("km-relays").value.split(/[\s,]+/).filter(function (u) { return /^wss:\/\//.test(u); });
+    var bad = relays.filter(function (u) { return ALLOWED.indexOf(u) < 0; });
+    if (bad.length) return say("km-result", "This page may only connect to: " + ALLOWED.join(", ") + ". Not allowed: " + bad.join(", "), true);
     if (!relays.length) return say("km-result", "Pick at least one wss:// relay.", true);
+    review = { relays: relays, ev: publicEvent(signed) };
+    $("km-confirm-relays").textContent = relays.join("\n");
+    $("km-confirm-event").textContent = JSON.stringify(review.ev, null, 1);
+    $("km-confirm-box").hidden = false;
+  };
+  $("km-confirm-ok").onchange = function () { $("km-confirm-publish").disabled = !(review && $("km-confirm-ok").checked); };
+  $("km-confirm-publish").onclick = function () {
+    if (!review || !$("km-confirm-ok").checked) return say("km-result", "Review the relays and event, tick the box, then confirm.", true);
+    var relays = review.relays, ev = review.ev; cancelReview();
     var pool = new NT.SimplePool();
-    var ev = publicEvent(signed);
     Promise.allSettled(pool.publish(relays, ev)).then(function (rs) {
       say("km-result", "Published from your browser: " + rs.map(function (r, i) { return relays[i] + " " + (r.status === "fulfilled" ? "ok" : "failed (" + r.reason + ")"); }).join("; ") + ". Event id " + ev.id);
       pool.close(relays);

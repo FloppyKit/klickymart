@@ -1,4 +1,4 @@
-import { walletFacts } from "./store-card";
+import { walletFacts, findRow } from "./store-card";
 import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
@@ -19,7 +19,7 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
   const d = normalizeDomainInput(input);
   if (!d) return { ok: false, message: "domain must be a hostname like example.com" };
   const candidates = [d, d.startsWith("www.") ? d.slice(4) : `www.${d}`];
-  const row = snap.rows.find((r) => candidates.includes(r.d));
+  const row = snap.rows.find((r) => candidates.includes(r.d)) ?? findRow(snap, d);
   if (!row) {
     return { ok: true, body: { domain: d, verdict: "not-in-index", message: "not in index yet", live_crawl: false, suggest: "https://github.com/FloppyKit/klickymart/issues/new?template=suggest-site.yml" } };
   }
@@ -33,6 +33,8 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
     ok: true,
     body: {
       domain: row.d,
+      ...(row.d !== d && row.d !== candidates[1] ? { requested: d, matched_via: `${d} -> ${row.d} (same registrable domain)` } : {}),
+      ...(payNotObserved(raw) ? { pay_note: PAY_NOT_OBSERVED } : {}),
       verdict,
       status: row.status,
       ...storeFacts(row),
@@ -55,4 +57,11 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       live_crawl: false,
     },
   };
+}
+
+export const PAY_NOT_OBSERVED = "payment methods not observed: our crawl did not read this store's payment options (for example the checkout asks for an address before showing them). An empty pay list here means unknown, not none.";
+/** Empty pay lists with no pay source = a data gap (not observed), as opposed to a store that lists no methods. */
+export function payNotObserved(raw: Record<string, unknown>): boolean {
+  const empty = (k: string) => !Array.isArray(raw[k]) || (raw[k] as unknown[]).length === 0;
+  return empty("pay") && empty("pay_online") && empty("pay_instore") && empty("pay_unscoped") && !raw.pay_src;
 }

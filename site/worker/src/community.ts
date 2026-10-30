@@ -1,4 +1,4 @@
-import { computeFlags, flagSummary, loadFlagContext, rowToFNote, FLAG_RULES } from "./flags";
+import { flagSummary, readFlagCache, FLAG_RULES } from "./flags";
 /** Per-merchant community view from relay/POST events. Never overwrites crawl fields; weights by distinct pubkeys. */
 import { NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED } from "./nostr-kinds";
 import { payLabel } from "./records-api";
@@ -87,9 +87,7 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
       per_reviewer: perReviewer(t), how: "Zap (NIP-57) a useful 422 or shopping note to tip its author. Distinct validated tippers add up to +50% weight to that note on /chart; self-zaps are ignored." };
   } catch { /* ignore */ }
   try {
-    const { results } = await db.prepare("SELECT id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json FROM experiences").all<Record<string, unknown>>();
-    const notes = (results ?? []).map(rowToFNote);
-    const fl = [...computeFlags(notes, await loadFlagContext(db, notes, inStore)).values()].filter((f) => f.d === d && f.reasons.length);
+    const fl = [...(await readFlagCache(db, d)).values()].filter((f) => f.reasons.length);
     if (fl.length) out.flags = { ...flagSummary(fl), items: fl.map((f) => ({ id: f.id, pubkey: f.pubkey, level: f.level, reasons: f.reasons.map((r) => r.detail) })), rules: FLAG_RULES };
   } catch { /* ignore */ }
   return out;
