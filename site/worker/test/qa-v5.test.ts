@@ -144,3 +144,17 @@ describe("D8 watch draft + docs", () => {
   });
 });
 void createMcpHandler;
+
+describe("Shopify Catalog live-only", () => {
+  it("live=1 responses are no-store; plain /offers stays cacheable", async () => {
+    const { SELF } = await import("cloudflare:test");
+    const live = await SELF.fetch("https://example.com/offers?q=headphones&live=1");
+    expect(live.headers.get("Cache-Control")).toBe("no-store");
+    const plain = await SELF.fetch("https://example.com/offers?q=headphones");
+    expect(plain.headers.get("Cache-Control")).toContain("public");
+  });
+  it("/about states the domains-only policy", async () => {
+    const { SELF } = await import("cloudflare:test");
+    expect(await (await SELF.fetch("https://example.com/about")).text()).toContain("We keep only the merchant domains");
+  });
+});

@@ -272,9 +272,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/offers" && request.method === "GET") {
     const q = offerQuery((k) => url.searchParams.get(k));
     if (typeof q === "string") return err400("zip", q);
-    const r = await offersFor(q, url.searchParams.get("live") === "1");
+    const live = url.searchParams.get("live") === "1";
+    const r = await offersFor(q, live);
     if (!r.ok) return err400("q", r.message);
-    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: apiHeaders(snap.version, 0) });
+    // Shopify Catalog results must never be cached or stored: live responses are no-store end to end.
+    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: { ...apiHeaders(snap.version, 0), ...(live ? { "Cache-Control": "no-store" } : {}) } });
   }
 
   if (path === "/recheck" && (request.method === "GET" || request.method === "POST")) {
