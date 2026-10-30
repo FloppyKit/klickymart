@@ -1,7 +1,7 @@
 import type { IndexRow, Snapshot } from "../index-mem";
 import { awning, esc, eyebrow, gradeBadge, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
-import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact } from "../records-api";
+import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact, uniquePayLabels } from "../records-api";
 import { computeStoryCounts, landscapeFormulaInputs, storyLine } from "../landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "../nostr-kinds";
 
@@ -52,8 +52,8 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
   const story = computeStoryCounts(snap.rows);
   const rows = items.slice(0, 20).map((row) => {
     const c = rowToCompact(row, origin);
-    const pays = [...c.pay.online, ...c.pay.instore, ...c.pay.unscoped].slice(0, 4)
-      .map((p) => `<span class="km-pay-chip">${esc(payLabel(p))}</span>`).join("");
+    const pays = uniquePayLabels([...c.pay.online, ...c.pay.instore, ...c.pay.unscoped]).slice(0, 4)
+      .map((l) => `<span class="km-pay-chip">${esc(l)}</span>`).join("");
     return `<li class="km-result-row km-tag">
       <div class="km-tag-id"><a href="${esc(merchantUrl(origin, row.d))}"><strong>${esc(row.name ?? row.d)}</strong></a>
       <span class="km-tag-domain">${esc(row.d)}</span></div>

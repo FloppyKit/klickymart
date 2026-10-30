@@ -136,8 +136,23 @@ export function computeStats(rows: IndexRow[]): Record<string, unknown> {
 }
 
 export function payLabel(code: string): string {
-  const base = code.split(":")[0]!;
-  return PAY_LABELS[base] ?? code;
+  const [base, sub] = code.split(":") as [string, string | undefined];
+  const label = PAY_LABELS[base] ?? code;
+  if (!sub || !PAY_LABELS[base]) return label;
+  return `${label} (${sub.charAt(0).toUpperCase()}${sub.slice(1)})`;
+}
+
+/** Display labels for a merchant's pay codes, de-duplicated by label (a code can sit in online and in-store lists). */
+export function uniquePayLabels(codes: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of codes) {
+    const l = payLabel(c);
+    if (seen.has(l)) continue;
+    seen.add(l);
+    out.push(l);
+  }
+  return out;
 }
 
 export function suggestDomains(rows: IndexRow[], domain: string, limit = 5): string[] {
