@@ -1,3 +1,4 @@
+import { takeAll, utcDayOf } from "./ratelimit";
 /** Explainable anti-gaming scorer for agent notes (422 / kind-1 shopping experiences).
  * It FLAGS, never hides or deletes: flagged notes stay public with their reasons, and only their chart weight drops
  * (weak flag x0.5, strong flag or 2+ independent signals x0). Inputs are public Nostr data only; never IP addresses.
@@ -210,6 +211,11 @@ export async function submitReport(db: D1Database, ev: { id: string; pubkey: str
   if (!t) return bad("unknown_note", "we hold no note with that id");
   const n = await db.prepare("SELECT (SELECT COUNT(*) FROM nostr_events WHERE kind = ? AND pubkey = ? AND first_seen > ?) AS k, (SELECT COUNT(*) FROM nostr_events WHERE kind = ? AND first_seen > ?) AS g").bind(REPORT_KIND, ev.pubkey, nowS - DAY, REPORT_KIND, nowS - DAY).first<{ k: number; g: number }>();
   if ((n?.k ?? 0) >= FLAG_LIMITS.reportsPerKeyPerDay || (n?.g ?? 0) >= 1000) return bad("rate_limited", `max ${FLAG_LIMITS.reportsPerKeyPerDay} reports per key per day`, 429);
+  if (!(await db.prepare("SELECT 1 FROM nostr_events WHERE id = ?").bind(ev.id).first())) { // KM-008: atomic decision
+    const day = utcDayOf(Date.now());
+    if (await takeAll(db, [{ k: `fl:g:${day}`, limit: 1000, ttlS: 2 * DAY }, { k: `fl:pk:${ev.pubkey}:${day}`, limit: FLAG_LIMITS.reportsPerKeyPerDay, ttlS: 2 * DAY }]))
+      return bad("rate_limited", `max ${FLAG_LIMITS.reportsPerKeyPerDay} reports per key per day`, 429);
+  }
   const r = await db.prepare("INSERT OR IGNORE INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, REPORT_KIND, ev.pubkey, ev.created_at, t.d, JSON.stringify(ev), nowS, "post").run();
   return { status: (r.meta?.changes ?? 0) > 0 ? 201 : 200, body: { ok: true, id: ev.id, target: p.target, reason: p.reason, published: false,
     note: `Counted once per reporter key; a note is flagged only when ${FLAG_LIMITS.minReporters}+ independent keys report it. Reporters are checked for gaming too. You may also publish this report to relays yourself.` } };

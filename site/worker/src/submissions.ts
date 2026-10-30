@@ -1,3 +1,4 @@
+import { takeAll } from "./ratelimit";
 import { BIG_NIP05_PROVIDERS } from "./nip05";
 /** Path 3: community store submission + trust ladder (trust_tier). Separate from the record's `trust` (domain-age) object.
  * Submitters only give a domain, a category hint and a note: facts come from the gated crawl, which the box crawler runs
@@ -217,6 +218,15 @@ export async function submitStore(input: SubmitInput, ctx: SubmitCtx): Promise<S
         const ir = (await db.prepare("SELECT created_at FROM store_submissions WHERE ip_hash = ? AND created_at > ? LIMIT 60").bind(ih, nowS - 7 * 86400).all<{ created_at: number }>()).results ?? [];
         if (over(ir, SUBMIT_LIMITS.perDay, 86400) || over(ir, SUBMIT_LIMITS.perWeek, 7 * 86400))
           return { status: 429, body: { ok: false, status: "rejected", reason: "rate_limited", error: { code: "rate_limited", message: `network limit: ${SUBMIT_LIMITS.perDay}/day and ${SUBMIT_LIMITS.perWeek}/week per salted network hash`, retry_after_s: 3600 }, ...base } };
+      }
+      // KM-008: atomic per-key and per-network day caps (the scans above stay for the weekly and reputation rules).
+      if (!ctx.dryRun) {
+        const day = new Date(now).toISOString().slice(0, 10);
+        const hit = await takeAll(db, [
+          ...(submitter !== "anon" ? [{ k: `sub:pk:${submitter}:${day}`, limit: dayLimit, ttlS: 2 * 86400 }] : []),
+          ...(ih ? [{ k: `sub:ip:${ih}:${day}`, limit: SUBMIT_LIMITS.perDay, ttlS: 2 * 86400 }] : []),
+        ]);
+        if (hit) return { status: 429, body: { ok: false, status: "rejected", reason: "rate_limited", error: { code: "rate_limited", message: hit.k.startsWith("sub:ip") ? `network limit: ${SUBMIT_LIMITS.perDay}/day per salted network hash` : `submitter limit: ${dayLimit}/day`, retry_after_s: 3600 }, ...base } };
       }
       // sub-domain stuffing: same submitter sending > 3 sub-domains of one registrable domain
       if (submitter !== "anon" || ih) {

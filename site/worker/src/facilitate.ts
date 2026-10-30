@@ -7,6 +7,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { verifyBolt11 } from "./bolt11";
 import { checkZapReceipt, claimedKeys } from "./pay-binding";
+import { take } from "./ratelimit";
 import { nostrEventId, verifyNostrEvent } from "./nostr-verify";
 import { NOSTR_KIND_FULFILLMENT } from "./nostr-kinds";
 
@@ -67,7 +68,9 @@ export async function signEvent(skHex: string, tmpl: Omit<Ev, "id" | "pubkey" | 
   return { ...tmpl, pubkey, id, sig };
 }
 
-async function bump(kv: KVNamespace, key: string, limit: number): Promise<boolean> {
+/** KM-008: atomic D1 counter when a DB is bound; the KV read-then-put is only a fallback for DB-less test setups. */
+async function bump(kv: KVNamespace, key: string, limit: number, db?: D1Database): Promise<boolean> {
+  if (db) { try { return await take(db, { k: key, limit, ttlS: 2 * 86400 }); } catch { /* migration pending: KV fallback */ } }
   const n = Number((await kv.get(key)) ?? 0);
   if (n >= limit) return false;
   await kv.put(key, String(n + 1), { expirationTtl: 2 * 86400 });
@@ -95,7 +98,7 @@ export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILI
   if (!env.FACILITATOR_SK_HEX || !HEX64.test(env.FACILITATOR_SK_HEX)) return bad("not_configured", "facilitator key not configured", 503);
   const day = new Date(now).toISOString().slice(0, 10);
   for (const [k, lim] of [[`fac:g:${day}`, FACILITATE_LIMITS.globalPerDay], [`fac:ip:${bytesToHex(sha256(new TextEncoder().encode(`${day}:${ip}`))).slice(0, 16)}:${day}`, FACILITATE_LIMITS.perIpPerDay], [`fac:pk:${agent}:${day}`, FACILITATE_LIMITS.perAgentPerDay], [`fac:pkd:${agent}:${d}:${day}`, FACILITATE_LIMITS.perAgentDomainPerDay]] as const)
-    if (!(await bump(env.KV, k, lim))) return bad("rate_limited", `facilitation limit reached (${JSON.stringify(FACILITATE_LIMITS)})`, 429);
+    if (!(await bump(env.KV, k, lim, env.DB))) return bad("rate_limited", `facilitation limit reached (${JSON.stringify(FACILITATE_LIMITS)})`, 429);
   const amt = pr.amount_msat ?? (Number.isFinite(Number(input.amount_msat)) && Number(input.amount_msat) > 0 ? Math.floor(Number(input.amount_msat)) : null);
   const label = pr.verification === "unverified-claim" ? "UNVERIFIED CLAIM: KlickyMart could not bind this payment to the store." : `Payment proof checked by KlickyMart (${pr.verification}).`;
   const tags: string[][] = [["r", d], ["on_behalf_of", d], ["role", "facilitator"], ["verification", pr.verification], ["p", agent],

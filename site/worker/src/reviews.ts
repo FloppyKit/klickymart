@@ -1,3 +1,4 @@
+import { takeAll } from "./ratelimit";
 /** Kind 422 merchant reviews: validation, storage (D1), and reads. Reviews are signed claims, not verified by KlickyMart
  * unless they reference a 421 and carry a payment proof (and even then only the proof is checkable, not the opinion). */
 import { NOSTR_KIND_ACCEPTANCE, NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
@@ -60,6 +61,14 @@ export async function rateLimitCheck(db: D1Database, rv: ParsedReview, now = Dat
   const p = await db.prepare("SELECT COUNT(*) AS n, SUM(d = ?) AS nd FROM reviews WHERE pubkey = ? AND received_day = ?").bind(rv.d, rv.pubkey, day).first<{ n: number; nd: number | null }>();
   if ((p?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} reviews per key per day` };
   if ((p?.nd ?? 0) >= REVIEW_LIMITS.perPubkeyPerDomainPerDay) return { code: "rate_limited", message: "one review per key per merchant per day" };
+  // KM-008: the counts above are advisory; the decision is an atomic take (re-POSTing a stored review stays idempotent).
+  if (await db.prepare("SELECT 1 FROM reviews WHERE id = ?").bind(rv.id).first()) return null;
+  const hit = await takeAll(db, [
+    { k: `rv:g:${day}`, limit: REVIEW_LIMITS.globalPerDay, ttlS: 2 * 86400 },
+    { k: `rv:pk:${rv.pubkey}:${day}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 },
+    { k: `rv:pkd:${rv.pubkey}:${rv.d}:${day}`, limit: REVIEW_LIMITS.perPubkeyPerDomainPerDay, ttlS: 2 * 86400 },
+  ]);
+  if (hit) return { code: "rate_limited", message: hit.k.startsWith("rv:pkd") ? "one review per key per merchant per day" : hit.k.startsWith("rv:g") ? "daily review intake is full; publish to relays and try tomorrow" : `max ${REVIEW_LIMITS.perPubkeyPerDay} reviews per key per day` };
   return null;
 }
 

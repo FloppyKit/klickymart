@@ -41,6 +41,7 @@ import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
+import { take } from "./ratelimit";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
@@ -255,6 +256,9 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
+      if (!(await env.DB.prepare("SELECT 1 FROM experiences WHERE id = ?").bind(x.value.id).first())
+        && !(await take(env.DB, { k: `ex:pk:${x.value.pubkey}:${new Date().toISOString().slice(0, 10)}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 }))) // KM-008
+        return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
       if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
       return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };

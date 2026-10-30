@@ -1,3 +1,4 @@
+import { takeAll } from "./ratelimit";
 /** GO D9: on-demand recheck of one indexed store. Re-reads robots.txt (honest UA) and the home page status only.
  * Limits: at most 1 live recheck per domain per 10 minutes (else the cached result plus next_allowed_at) and 60 per hour overall.
  * Only domains already in the index; never follows links, never submits anything. */
@@ -34,6 +35,11 @@ export async function recheck(db: D1Database, domain: string, now: number, fetch
   if (last && now - (last.ts as number) < PER_DOMAIN_S) return cached("rate-limit: 1 recheck per domain per 10 minutes");
   const n = await db.prepare("SELECT COUNT(*) AS n FROM rechecks WHERE ts > ?").bind(now - 3600).first<{ n: number }>();
   if ((n?.n ?? 0) >= GLOBAL_PER_HOUR) return { ...cached("rate-limit: 60 rechecks per hour overall"), next_allowed_at: new Date((now + 300) * 1000).toISOString() };
+  // KM-008/KIMI-011: atomic takes so parallel callers cannot all pass the read above.
+  try {
+    const hit = await takeAll(db, [{ k: `rc:d:${domain}:${Math.floor(now / PER_DOMAIN_S)}`, limit: 1, ttlS: 2 * PER_DOMAIN_S }, { k: `rc:g:${Math.floor(now / 3600)}`, limit: GLOBAL_PER_HOUR, ttlS: 7200 }], now);
+    if (hit) return cached(hit.k.startsWith("rc:d") ? "rate-limit: 1 recheck per domain per 10 minutes" : "rate-limit: 60 rechecks per hour overall");
+  } catch { /* migration pending: fall back to the read check */ }
   const base = `https://${domain.split(".").length > 2 ? "" : "www."}${domain}`;
   const h = { "User-Agent": RECHECK_UA };
   let rs: number | null = null, allows: boolean | null = null, line: string | null = null, home: number | null = null;
