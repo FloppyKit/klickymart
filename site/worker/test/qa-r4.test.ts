@@ -39,7 +39,7 @@ describe("r4 shipping", () => {
     expect(p.est_tax).toBeNull(); expect(p.est_total).toBeNull();
   });
   it("/landed: the $25 Bitrefill card matches gift card <= $25, with its fee price and a total; row shipping == landed shipping", async () => {
-    const r = findOffers(parseOffers(OFFERS as string), await realSnap(), "https://example.com", { q: "gift card", zip: "66061", max_price: 25, limit: 100 });
+    const r = findOffers(parseOffers(OFFERS as string), await realSnap(), "https://example.com", { q: "gift card", zip: "66061", max_price: 27, limit: 100 }); // r5: max_price applies to price_with_fee ($26.55)
     if (!r.ok) throw new Error();
     const items = dd(applyProductFilters(r.body.items.map((i) => annotate(i as Record<string, any>, "gift card")), { type: "gift-card" }).rows).rows as Record<string, any>[];
     const b = { items };
@@ -80,7 +80,7 @@ describe("r4 product filters", () => {
 
 describe("r4 btc", () => {
   it("trezor stays in bitcoin hardware results, labelled indirect", async () => {
-    const a = findAlternatives(await realSnap(), "https://example.com", { category: "crypto-hardware", pay: "btc", limit: 50 });
+    const a = findAlternatives(await realSnap(), "https://example.com", { category: "crypto-hardware", pay: "btc", limit: 50, include_indirect: true }); // r5: indirect only when asked
     if (!a.ok) throw new Error();
     const b = a.body as { items: { d: string; btc_route?: string }[] };
     const t = b.items.find((i) => i.d === "shop.trezor.io");

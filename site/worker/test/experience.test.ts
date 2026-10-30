@@ -14,7 +14,7 @@ function sign(kind: number, tags: string[][], content = "Guest checkout reached 
   const id = nostrEventId(ev);
   return { ...ev, id, sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) };
 }
-const exp = (extra: string[][] = []) => [["r", D], ["depth", "payment"], ["guest", "yes"], ["pay_used", "lightning"], ["pay_offered", "card", "lightning"], ["shown_before_payment", "tax", "yes"], ["amount", "shipping", "5.00", "USD"], ["amount", "total", "54.27", "USD"], ["region", "660"], ...extra];
+const exp = (extra: string[][] = []) => [["r", D], ["basis", "visit"], ["depth", "payment"], ["guest", "yes"], ["pay_used", "lightning"], ["pay_offered", "card", "lightning"], ["shown_before_payment", "tax", "yes"], ["amount", "shipping", "5.00", "USD"], ["amount", "total", "54.27", "USD"], ["region", "660"], ...extra];
 
 describe("parseExperience", () => {
   it("parses a structured 422", () => {
@@ -66,7 +66,7 @@ describe("routes", () => {
   it("POST /reviews stores experiences; chart and check show community data beside crawl", async () => {
     expect((await post(sign(422, exp()))).status).toBe(201);
     expect((await post(sign(422, exp([["preimage", "c".repeat(64)]])))).status).toBe(201);
-    expect((await post(sign(1, [["t", "klickymart"], ["r", D]], "smooth"))).status).toBe(201);
+    expect((await post(sign(1, [["t", "klickymart"], ["r", D], ["basis", "visit"]], "smooth"))).status).toBe(201);
     expect((await post(sign(422, exp().filter((t) => t[0] !== "region").concat([["region", "66044"]])))).status).toBe(400);
     const aggs = await loadAggregates(env.DB, [D]);
     expect(aggs.get(D)?.keys).toBe(3);
@@ -100,7 +100,8 @@ describe("r3 note fixes", () => {
   });
   it("validates guest; same boolean on web and MCP", async () => {
     expect(T({ depth: "cart", guest: "1" })).toMatchObject({ ok: false, code: "bad_guest" });
-    const r = T({ depth: "cart", guest: "yes" }); expect(r.ok && (r.value.fields as { guest: boolean }).guest).toBe(true);
+    expect(T({ depth: "cart", guest: "yes" })).toMatchObject({ ok: false, code: "bad_guest" }); // r5: only true|false|unknown, as documented
+    const r = T({ depth: "cart", guest: "true" }); expect(r.ok && (r.value.fields as { guest: boolean }).guest).toBe(true);
     expect(tagsOf(r)).toContainEqual(["guest", "true"]);
     const web = await SELF.fetch(`https://example.com/report/template?domain=${D}&depth=cart&guest=1`);
     expect(web.status).toBe(400);
@@ -132,7 +133,7 @@ describe("r3 note fixes", () => {
     const D2 = "store.google.com";
     const base = await loadAggregates(env.DB, [D2]); const k0 = base.get(D2)?.keys ?? 0;
     for (const b of ["directory", "secondhand", "directory"]) {
-      const res = await SELF.fetch("https://example.com/reviews", { method: "POST", body: JSON.stringify(sign(422, exp([["basis", b]]))), headers: { "Content-Type": "application/json" } });
+      const res = await SELF.fetch("https://example.com/reviews", { method: "POST", body: JSON.stringify(sign(422, exp().filter((t) => t[0] !== "basis").concat([["basis", b]]))), headers: { "Content-Type": "application/json" } });
       expect(res.status).toBe(201);
       expect((await res.json<{ counts_toward_chart: boolean }>()).counts_toward_chart).toBe(false);
     }
