@@ -31,7 +31,9 @@ export function storeFacts(row: IndexRow) {
 export function checkoutOf(row: IndexRow, raw: Record<string, unknown>) {
   const probe = raw.checkout_probe as { step_reached?: string; n?: string; ts?: number; pm_visible?: string } | undefined;
   return {
-    co: row.co, steps: typeof raw.steps === "number" ? raw.steps : null,
+    co: row.co, steps: typeof raw.steps === "number" ? raw.steps : ((raw.checkout_map as { steps?: unknown[] } | undefined)?.steps?.length ?? null),
+    step_list: ((raw.checkout_map as { steps?: { n: number; stage: string; url?: string | null; action?: string | null; status?: unknown }[] } | undefined)?.steps ?? []).map((x) => ({ n: x.n, stage: x.stage, url: x.url ?? null, action: x.action ?? null, status: x.status ?? null })),
+    steps_src: typeof raw.steps === "number" ? "record" : (raw.checkout_map ? "checkout_map (probe)" : null),
     guest: row.guest === null ? null : row.guest === 1,
     guest_source: (raw.guest_src as string | undefined) ?? null,
     guest_evidence: (raw.guest_ev as { url: string; q: string } | undefined) ?? null,
