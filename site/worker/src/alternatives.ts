@@ -87,7 +87,8 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   if (p.pay) p = { ...p, pay: p.pay.trim().toLowerCase() };
   if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: `pay must be one of ${Object.keys(ALT_PAY_FILTERS).join(", ")} (btc/onchain/btc-onchain = on-chain only; bitcoin = on-chain or Lightning)` };
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
-  const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number }[] = [];
+  const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number; indirect: boolean }[] = [];
+  const wantsBtc = !!want && want.some((x) => ["btc", "ln", "lnurl", "bolt12"].includes(x));
   const turnedAway: { d: string; name: string | null; status: string; reason: string | null; record: string }[] = [];
   for (const row of snap.rows) {
     if (row.d === from) continue;
@@ -103,15 +104,18 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       continue;
     }
     const pays = [...new Set([...(raw.pay as string[] ?? []), ...(raw.pay_online as string[] ?? [])])];
-    if (want && !pays.some((x) => want.includes(x))) continue;
+    // Stores that take bitcoin only through a processor (btc_indirect) stay in bitcoin results, labelled and ranked after native ones.
+    const indirect = wantsBtc && !pays.some((x) => want!.includes(x)) && Array.isArray(raw.btc_indirect) && (raw.btc_indirect as unknown[]).length > 0;
+    if (want && !pays.some((x) => want.includes(x)) && !indirect) continue;
     if (p.guest && row.guest === 0) continue; // account required: excluded; unknown kept but ranked lower
-    rows.push({ row, raw, pays, subRank });
+    rows.push({ row, raw, pays, subRank, indirect });
   }
   const n = (v: number | null | undefined) => (v === null || v === undefined ? -1 : v);
   const maj = (d: string) => (MAJOR_RETAILERS.has(d) ? 1 : 0);
   const restricted = (raw: Record<string, unknown>) => (raw.agent_policy ? 1 : 0);
   rows.sort((a, b) =>
-    n(b.row.co) - n(a.row.co) // reaches checkout first
+    Number(a.indirect) - Number(b.indirect) // native bitcoin before processor-only
+    || n(b.row.co) - n(a.row.co) // reaches checkout first
     || restricted(a.raw) - restricted(b.raw) // terms restrict agent orders: after equals
     || maj(b.row.d) - maj(a.row.d) // major retailers among equals
     || b.subRank - a.subRank // the product family is the store's main line
@@ -120,7 +124,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     || n(b.row.btc) - n(a.row.btc)
     || n(b.row.ease) - n(a.row.ease)
     || a.row.d.localeCompare(b.row.d));
-  const items = rows.slice(0, Math.min(50, p.limit ?? 10)).map(({ row, raw, pays, subRank }) => {
+  const items = rows.slice(0, Math.min(50, p.limit ?? 10)).map(({ row, raw, pays, subRank, indirect }) => {
     const pq = Array.isArray(raw.pay_q) ? (raw.pay_q as { c: string; url: string }[]) : [];
     const ev = (want && pq.find((q) => want.includes(q.c))?.url) || (Array.isArray(raw.evu) ? (raw.evu as string[])[0] : null) || `https://${row.d}/`;
     return {
@@ -128,7 +132,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       sub: subsFor(raw), sub_match: sub ? (subRank === 2 ? "main line" : subRank === 1 ? "carries it" : "unknown") : null, major_retailer: MAJOR_RETAILERS.has(row.d),
       agent_ordering: raw.agent_policy ? (raw.agent_policy as { v: string }).v : null,
       ...pickAlt(storeFacts(row)), ease: row.ease,
-      pay: pays, evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
+      pay: pays, ...(wantsBtc ? { btc_route: indirect ? "indirect" : "native", ...(indirect ? { btc_indirect: raw.btc_indirect, btc_note: "bitcoin only through a third-party processor, not paid to the store's own wallet" } : {}) } : {}), evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
     };
   });
   return {
