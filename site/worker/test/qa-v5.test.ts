@@ -63,7 +63,7 @@ describe("D3 landed cost by ZIP", () => {
     expect((landedFor({}, "97201", 50) as Record<string, any>).est_tax).toBe(0);
   });
   it("/check and /alternatives accept zip; MCP schemas document it", async () => {
-    const fx = String((env as Record<string, unknown>).FIXTURE_NDJSON).split("\n")[0]!;
+    const fx = String((env as unknown as Record<string, unknown>).FIXTURE_NDJSON).split("\n")[0]!;
     const dom = (JSON.parse(fx) as { d?: string }).d ?? JSON.parse(JSON.parse(fx).content).d;
     const res = await (await import("../src/router")).handleRequest(new Request(`${O}/check?domain=${dom}&zip=66061`), env as never);
     const j = (await res.json()) as Record<string, any>;
