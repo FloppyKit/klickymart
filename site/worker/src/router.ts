@@ -61,6 +61,8 @@ export interface Env {
 let cachedSnap: Snapshot | null = null;
 let metaCheckedAt = 0;
 let cachedMetaVersion = "";
+/** Snapshot built from the data embedded in this deploy; immutable for the isolate's life, so build it once. */
+let embeddedSnap: Snapshot | null = null;
 
 export async function loadSnapshot(env: Env): Promise<Snapshot> {
   const now = Date.now();
@@ -126,16 +128,18 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
     }
   }
 
-  const { EMBEDDED_EVENTS_NDJSON, EMBEDDED_RECORDS_FALLBACK_NDJSON } = await import("./fixture-data");
+  if (embeddedSnap) { cachedSnap = embeddedSnap; return cachedSnap; }
+  const { EMBEDDED_EVENTS_NDJSON, EMBEDDED_RECORDS_FALLBACK_NDJSON, EMBEDDED_EVENTS_VERIFIED_AT_BUILD } = await import("./fixture-data");
   if (EMBEDDED_EVENTS_NDJSON) {
     const { rows, report } = await ingestFromNdjsonText(EMBEDDED_EVENTS_NDJSON, {
       allowSynthetic: false,
-      verifyEvents: true,
+      // Signatures were checked by scripts/embed-fixtures.js at build; re-verifying 300+ Schnorr sigs per cold start hit CPU limits (1102).
+      verifyEvents: !EMBEDDED_EVENTS_VERIFIED_AT_BUILD,
       sourceLabel: "nostr-31420-ndjson",
       contentHash: "events-v1",
     });
     if (rows.size > 0) {
-      cachedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
+      cachedSnap = embeddedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
       return cachedSnap;
     }
   }
@@ -167,6 +171,7 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
 
 export function resetSnapshotCache(): void {
   cachedSnap = null;
+  embeddedSnap = null;
   metaCheckedAt = 0;
   cachedMetaVersion = "";
 }
@@ -268,7 +273,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const offersFor = async (q: OfferQuery, live: boolean) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
     const r = findOffers(parseOffers(EMBEDDED_OFFERS_NDJSON || ""), snap, origin, q);
-    if (r.ok && live && q.q) (r.body as Record<string, unknown>).live_shopify_catalog = await liveCatalogSearch(q.q, q.zip ?? null, origin);
+    if (r.ok && live && q.q) (r.body as Record<string, unknown>).live_shopify_catalog = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain);
     return r;
   };
   const offerQuery = (g: (k: string) => string | null | undefined): OfferQuery | string => {
