@@ -7,6 +7,7 @@ import type { IndexRow, Snapshot } from "./index-mem";
 import { parseRaw } from "./records-api";
 import { CATEGORY_MAP } from "./category-map";
 import { whyOf } from "./explain";
+import { AN_ALT_CATEGORIES, anCategories, anJson } from "./agent-native";
 
 /** GO 5.7 finer subcategories (signed in v3 records as `sub`). Product words map to a sub first, then a coarse category. */
 const SUB_SYNONYMS: [RegExp, string, string][] = [
@@ -49,11 +50,15 @@ const SYNONYMS: [RegExp, string][] = [
 
 export function categoriesFor(d: string, raw?: Record<string, unknown>): string[] {
   const own = Array.isArray(raw?.category) ? (raw!.category as string[]) : null;
-  return own ?? CATEGORY_MAP.map[d] ?? ["other"];
+  const base = own ?? CATEGORY_MAP.map[d] ?? ["other"];
+  const an = anCategories(d);
+  if (!an.length) return base;
+  return [...new Set([...base.filter((c) => c !== "other"), ...an])];
 }
 
 export function resolveCategory(input: string): string | null {
   const s = input.trim().toLowerCase().replace(/\s+/g, "-");
+  if (s in AN_ALT_CATEGORIES) return s;
   if ((COARSE_CATEGORIES as readonly string[]).includes(s)) return s;
   for (const [rx, c] of SYNONYMS) if (rx.test(input)) return c;
   return null;
@@ -75,7 +80,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     const c = resolveCategory(p.category);
     if (!c) return { ok: true as const, body: { from: p.domain ?? null, categories: [] as string[], sub: null, filters: { pay: p.pay ?? null, guest: !!p.guest }, count: 0, total: 0, items: [] as never[], turned_away: [] as never[], turned_away_note: "",
       note: `We have no category for "${p.category}" yet, so there are no alternatives to list. Use one of valid_categories or a product word like headphones.`,
-      valid_categories: [...COARSE_CATEGORIES], valid_subs: [...SUBCATEGORIES] } };
+      valid_categories: [...new Set([...COARSE_CATEGORIES, ...Object.keys(AN_ALT_CATEGORIES)])], valid_subs: [...SUBCATEGORIES] } };
     cats = [c];
   }
   if (p.domain) {
@@ -137,6 +142,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       agent_ordering: raw.agent_policy ? (raw.agent_policy as { v: string }).v : null,
       ...pickAlt(storeFacts(row)), ease: row.ease,
       pay: pays, ...(wantsBtc ? { btc_route: indirect ? "indirect" : "native", ...(indirect ? { btc_indirect: raw.btc_indirect, btc_note: (raw.btc_indirect as { kind?: string }[]).every((x) => x.kind === "gift-card") ? "bitcoin only by buying the store's gift card at a reseller (e.g. Bitrefill) and paying with the card" : "bitcoin only through a third-party processor, not paid to the store's own wallet" } : {}) } : {}), evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
+      ...(anJson(row.d) ? { agent_native: anJson(row.d) } : {}),
     };
   });
   return {

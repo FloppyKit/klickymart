@@ -1,3 +1,4 @@
+import { anJson } from "./agent-native";
 import { walletFacts, findRow } from "./store-card";
 import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
@@ -55,6 +56,7 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       evidence,
       record: `${origin}/records/${encodeURIComponent(row.d)}`,
       live_crawl: false,
+      ...(anJson(row.d) ? { agent_native: anJson(row.d) } : {}),
     },
   };
 }

@@ -1,3 +1,4 @@
+import { AN_ALT_CATEGORIES, AN_CATS, anOf } from "./agent-native";
 import { canonPay, PAY_ALIASES, PAY_GROUP_NAMES, Q_CATEGORIES } from "./vocab";
 import { queryTokens } from "./search-terms";
 import { CATEGORY_MAP } from "./category-map";
@@ -52,6 +53,10 @@ export interface QueryParams {
   btc_indirect?: number;
   ships_us?: number;
   free_ship_max?: number;
+  /** agent-native stores (2026-10-30) */
+  agent_native?: number;
+  an_cat?: string;
+  rail_status?: string;
   sort?: string[];
   limit?: number;
   cursor?: string;
@@ -69,7 +74,7 @@ const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
-  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "sort", "limit", "cursor", "fields", "format",
+  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "sort", "limit", "cursor", "fields", "format",
 ]);
 
 export function validateQueryParams(searchParams: URLSearchParams): { ok: true; params: QueryParams } | { ok: false; param: string; message: string } {
@@ -258,6 +263,23 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     params.free_ship_max = n;
   }
 
+  const anv = searchParams.get("agent_native");
+  if (anv !== null) {
+    if (anv !== "0" && anv !== "1") return { ok: false, param: "agent_native", message: "agent_native must be 0 or 1" };
+    params.agent_native = Number(anv);
+  }
+  const anc = searchParams.get("an_cat");
+  if (anc) {
+    const c = anc.trim().toLowerCase();
+    if (!AN_CATS.includes(c) && !(c in AN_ALT_CATEGORIES)) return { ok: false, param: "an_cat", message: `an_cat must be one of: ${[...AN_CATS, ...Object.keys(AN_ALT_CATEGORIES)].join(", ")}` };
+    params.an_cat = c;
+  }
+  const rs = searchParams.get("rail_status");
+  if (rs) {
+    if (rs !== "verified-402" && rs !== "claimed") return { ok: false, param: "rail_status", message: "rail_status must be verified-402 or claimed" };
+    params.rail_status = rs;
+  }
+
   const sort = searchParams.get("sort");
   params.sort = sort ? sort.split(",").map((s) => s.trim()) : DEFAULT_SORT;
 
@@ -410,6 +432,13 @@ function matches(row: IndexRow, p: QueryParams): boolean {
     if (!any) return false;
   }
 
+  if (p.agent_native !== undefined || p.an_cat || p.rail_status) {
+    const a = anOf(row.d);
+    if (p.agent_native !== undefined && (a !== null) !== (p.agent_native === 1)) return false;
+    if (p.an_cat && !(a && (a.an_cat === p.an_cat || (AN_ALT_CATEGORIES[p.an_cat] ?? []).includes(a.an_cat)))) return false;
+    if (p.rail_status && !(a && a.label === p.rail_status)) return false;
+  }
+
   if (p.category) {
     if ((V1_CATEGORIES as readonly string[]).includes(p.category)) { if (!categoryMatchesRow(p.category as (typeof V1_CATEGORIES)[number], row)) return false; }
     else if (!(CATEGORY_MAP.map[row.d] ?? []).includes(p.category)) return false;
@@ -430,6 +459,7 @@ function sortKey(row: IndexRow, field: string): number | string | null {
     case "co": val = row.co; break;
     case "ease": val = row.ease; break;
     case "ts": val = row.ts; break;
+    case "status": val = row.status_code; break;
     default: val = row.d;
   }
   return val;

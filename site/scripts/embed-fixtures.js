@@ -19,6 +19,13 @@ try {
   /* optional */
 }
 
+let agentNative = "";
+try {
+  agentNative = readFileSync(join(dataDir, "events.agent-native.ndjson"), "utf8").trim();
+} catch {
+  /* optional: agent-native stores (2026-10-30) */
+}
+
 let offers = "";
 try {
   offers = readFileSync(join(dataDir, "offers.ndjson"), "utf8").trim();
@@ -41,7 +48,7 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 if (secp.hashes) { secp.hashes.sha256 = sha256; secp.hashes.hmacSha256 = (k, ...m) => hmac(sha256, k, secp.etc.concatBytes(...m)); }
 let verified = 0;
-for (const line of events.split("\n")) {
+for (const line of [...events.split("\n"), ...agentNative.split("\n")]) {
   if (!line.trim()) continue;
   const ev = JSON.parse(line);
   const id = bytesToHex(sha256(utf8ToBytes(JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content]))));
@@ -55,6 +62,7 @@ export const EMBEDDED_EVENTS_NDJSON = ${JSON.stringify(events)};
 /** Every event above was id- and signature-checked at build time (${verified} events). */
 export const EMBEDDED_EVENTS_VERIFIED_AT_BUILD = ${verified > 0};
 export const EMBEDDED_RECORDS_FALLBACK_NDJSON = ${JSON.stringify(recordsFallback)};
+export const EMBEDDED_AGENT_NATIVE_NDJSON = ${JSON.stringify(agentNative)};
 export const EMBEDDED_OFFERS_NDJSON = ${JSON.stringify(offers)};
 export const EMBEDDED_SYNTHETIC_NDJSON = ${JSON.stringify(synth.trim())};
 /** @deprecated use EMBEDDED_EVENTS_NDJSON */

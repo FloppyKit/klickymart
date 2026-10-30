@@ -1,4 +1,5 @@
 import type { IndexRow } from "./index-mem";
+import { anJson } from "./agent-native";
 import { maskToArCodes, maskToPayCodes, PAY_GROUPS, PAY_LABELS } from "./codes";
 
 export interface CompactRecord {
@@ -24,6 +25,8 @@ export interface CompactRecord {
   ts: number;
   v: string;
   record: string;
+  /** present only for agent-native stores (2026-10-30) */
+  agent_native?: Record<string, unknown>;
 }
 
 export function parseRaw(raw_json: string): Record<string, unknown> {
@@ -76,6 +79,7 @@ export function rowToCompact(row: IndexRow, origin: string): CompactRecord {
     ts: row.ts,
     v: typeof raw.v === "string" ? raw.v : "0.3-draft",
     record: recordUrl(origin, row.d),
+    ...(anJson(row.d) ? { agent_native: anJson(row.d)! } : {}),
   };
 }
 

@@ -260,3 +260,7 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-check select{min-width:0;padding:.4rem;border-radius:6px}
 .km-inline{display:inline-flex!important;flex:0 0 auto!important;align-items:center;gap:.3rem;font-weight:400!important}
 .km-alt{margin-top:.6rem}.km-alt-list{margin:.3rem 0;padding-left:1.2rem;text-align:left}
+/* agent-native badges (2026-10-30) */
+.badge.an{background:#1d3b5c;color:#e8f1ff;border-radius:4px;padding:1px 6px;font-size:.8em}
+.badge.an-verified-402{background:#14532d;color:#eafff0;border-radius:4px;padding:1px 6px;font-size:.8em}
+.badge.an-claimed,.badge.an-no-402,.badge.an-unreachable{background:#4a4a4a;color:#f2f2f2;border-radius:4px;padding:1px 6px;font-size:.8em}

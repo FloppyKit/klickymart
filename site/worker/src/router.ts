@@ -18,6 +18,7 @@ import type { Snapshot } from "./index-mem";
 import { rowsToSnapshot, snapshotFromJson } from "./index-mem";
 import { normalize } from "./normalize";
 import { ingestFromNdjsonText, persistIngest } from "./ingest";
+import { clearAgentNative, mergeAgentNative } from "./agent-native";
 import { querySnapshot, validateQueryParams } from "./query";
 import { rowToCompact, computeStats, parseRaw, suggestDomains } from "./records-api";
 import { buildOpenApi, createMcpHandler, parseMcpRequest } from "./mcp";
@@ -169,6 +170,12 @@ export async function loadSnapshot(env: Env): Promise<Snapshot> {
       sourceLabel: "nostr-31420-ndjson",
       contentHash: "events-v1",
     });
+    const { EMBEDDED_AGENT_NATIVE_NDJSON } = await import("./fixture-data");
+    if (rows.size > 0 && EMBEDDED_AGENT_NATIVE_NDJSON) {
+      const an = await ingestFromNdjsonText(EMBEDDED_AGENT_NATIVE_NDJSON, { allowSynthetic: false, verifyEvents: !EMBEDDED_EVENTS_VERIFIED_AT_BUILD, sourceLabel: "nostr-31420-agent-native" });
+      clearAgentNative();
+      mergeAgentNative(rows, an.rows);
+    }
     if (rows.size > 0) {
       cachedSnap = embeddedSnap = rowsToSnapshot([...rows.values()], report.version, report.source);
       return cachedSnap;

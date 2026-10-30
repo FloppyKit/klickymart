@@ -1,3 +1,4 @@
+import { AN_ALT_CATEGORIES, AN_CATS } from "./agent-native";
 import { WALLET_GUIDE } from "./wallet";
 import { CONDITION_FILTERS, PRODUCT_TYPES } from "./product-quality";
 import { flagPrefix } from "./row-flags";
@@ -25,6 +26,9 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
             { name: "cat", in: "query", schema: { type: "string" } },
             ...Q_BOOL_FILTERS.map((n) => ({ name: n, in: "query", schema: { type: "string", enum: ["0", "1"] } })),
             { name: "pay", in: "query", schema: { type: "string" } },
+            { name: "agent_native", in: "query", schema: { type: "string", enum: ["0", "1"] }, description: "1 = agent-native stores only (L402/x402 paid APIs, VPN, eSIM, VPS, gift cards, nostr-native, agent-commerce)" },
+            { name: "an_cat", in: "query", schema: { type: "string", enum: [...AN_CATS, ...Object.keys(AN_ALT_CATEGORIES)] }, description: "agent-native category (vps, vpn, esim, paid-api, gift-cards, or a raw an_cat)" },
+            { name: "rail_status", in: "query", schema: { type: "string", enum: ["verified-402", "claimed"] }, description: "verified-402 = our one unauthenticated request got a real HTTP 402 challenge (never paid); claimed = listed by a directory only" },
             { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 500 } },
           ],
           responses: {
@@ -64,7 +68,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/export.ndjson": { get: { summary: "NDJSON export", responses: { "200": { description: "NDJSON stream" } } } },
       "/stats": { get: { summary: "Aggregate stats", responses: { "200": { description: "Stats JSON" } } } },
       "/check": { get: { summary: "One store (domain=) or up to 10 (domains=a,b,c): pay, checkout map, policies, trust, landed-cost parts for a ZIP", description: "Top-level co/checkout, guest, agent_access and btc/btc_grade come from the same row as /alternatives. checkout_map.first_blocker.kind is one of: " + BLOCKER_KINDS.join(", ") + ".", parameters: [{ name: "domains", in: "query", schema: { type: "string" }, description: "batch: 1-10 comma-separated domains" }, { name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed-cost parts" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
-      "/alternatives": { get: { summary: "Where else can my agent buy this? Ranked stores in a coarse category", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Store you were blocked at" }, { name: "category", in: "query", required: false, schema: { type: "string" }, description: "Coarse category or product word (headphones, gift card)" }, { name: "sub", in: "query", required: false, schema: { type: "string" }, description: "Product family" }, { name: "pay", in: "query", required: false, schema: { type: "string" }, description: "lightning | btc | cashu" }, { name: "guest", in: "query", required: false, schema: { type: "string" }, description: "1 = guest checkout confirmed" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP" }, { name: "taxpre", in: "query", required: false, schema: { type: "string" }, description: "1 = only stores observed to show tax before payment (with zip)" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/alternatives": { get: { summary: "Where else can my agent buy this? Ranked stores in a coarse category", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Store you were blocked at" }, { name: "category", in: "query", required: false, schema: { type: "string" }, description: "Coarse category or product word (headphones, gift card); agent-native categories: vps, vpn, esim, paid-api, gift-cards" }, { name: "sub", in: "query", required: false, schema: { type: "string" }, description: "Product family" }, { name: "pay", in: "query", required: false, schema: { type: "string" }, description: "lightning | btc | cashu" }, { name: "guest", in: "query", required: false, schema: { type: "string" }, description: "1 = guest checkout confirmed" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP" }, { name: "taxpre", in: "query", required: false, schema: { type: "string" }, description: "1 = only stores observed to show tax before payment (with zip)" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/offers": { get: { summary: "Product offers observed on store pages (JSON-LD / Shopify JSON); live=1 adds live Shopify Catalog results (never stored)", parameters: [{ name: "q", in: "query", required: false, schema: { type: "string" }, description: "Product words; synonyms like ANC / noise-cancelling / over-ear are expanded" }, { name: "gtin", in: "query", required: false, schema: { type: "string" }, description: "GTIN/UPC/EAN" }, { name: "mpn", in: "query", required: false, schema: { type: "string" }, description: "Manufacturer part number" }, { name: "domain", in: "query", required: false, schema: { type: "string" }, description: "Limit to one store" }, { name: "zip", in: "query", required: false, schema: { type: "string" }, description: "5-digit US ZIP for landed cost" }, { name: "in_stock", in: "query", required: false, schema: { type: "string" }, description: "1 = in stock only" }, { name: "max_price", in: "query", required: false, schema: { type: "number" }, description: "USD" }, { name: "live", in: "query", required: false, schema: { type: "string" }, description: "1 = add live Shopify Catalog results" }, { name: "limit", in: "query", required: false, schema: { type: "integer" }, description: "Max items" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/recheck": { get: { summary: "Re-read robots.txt and home status for an indexed store now (rate-limited)", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } }, post: { summary: "Same as GET", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Indexed store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/facilitate": { get: { summary: "Facilitator npub, limits and usage", responses: { "200": { description: "JSON" } } }, post: { summary: "Get a kind 421 signed by KlickyMart as FACILITATOR (not the store) after a payment-proof check; returned unpublished", responses: { "200": { description: "signed event" }, "400": { description: "bad proof/param" }, "409": { description: "store claimed its listing" }, "429": { description: "rate limited" }, "503": { description: "not configured" } } } },
@@ -149,6 +153,9 @@ export function mcpToolsList(): unknown {
             ship_pre: { type: "integer", enum: [0, 1], description: "1 = shows shipping and tax before the payment step (observed by the probe)" },
             ships_us: { type: "integer", enum: [0, 1] },
             free_ship_max: { type: "number", description: "free-shipping threshold at or below this many USD (publicly stated)" },
+            agent_native: { type: "integer", enum: [0, 1], description: "1 = agent-native stores only" },
+            an_cat: { type: "string", enum: [...AN_CATS, ...Object.keys(AN_ALT_CATEGORIES)] },
+            rail_status: { type: "string", enum: ["verified-402", "claimed"] },
             limit: { type: "integer", maximum: 100 },
           },
         },
@@ -214,6 +221,16 @@ export function mcpToolsList(): unknown {
             limit: { type: "integer", maximum: 50 },
           },
         },
+      },
+      {
+        name: "find_agent_native",
+        description: "Agent-native stores: sellers an agent can pay without a browser checkout (L402/x402 paid APIs, VPN, eSIM, VPS, gift cards, nostr-native, agent-commerce). Each item has agent_native {category, label verified-402|claimed, rails, rails_status, probe_402 with price_seen}. verified-402 = our one unauthenticated request got a real HTTP 402 challenge; we never paid. Stores that refuse agents are returned as findings (status not crawled), never as options. Index only.",
+        inputSchema: { type: "object", properties: {
+          category: { type: "string", enum: [...Object.keys(AN_ALT_CATEGORIES), ...AN_CATS] },
+          rail_status: { type: "string", enum: ["verified-402", "claimed"] },
+          reachable_only: { type: "boolean", description: "default false: findings (blocked-tos, agents-not-welcome, error) are included and labelled" },
+          limit: { type: "integer", maximum: 100 },
+        } },
       },
       {
         name: "get_reviews",
@@ -312,6 +329,17 @@ export function createMcpHandler(deps: {
             structuredContent: body,
           },
         };
+      }
+      if (p.name === "find_agent_native") {
+        const a = p.arguments ?? {};
+        const sp = new URLSearchParams({ agent_native: "1", limit: String(Math.min(100, Number(a.limit) || 50)), sort: "status,d" });
+        if (typeof a.category === "string") sp.set("an_cat", a.category);
+        if (typeof a.rail_status === "string") sp.set("rail_status", a.rail_status);
+        if (a.reachable_only === true) sp.set("status", "crawled");
+        const { body } = await deps.runQuery(sp);
+        const items = (body as { items?: { d: string; status: string; record: string; agent_native?: { category: string; label: string } }[] }).items ?? [];
+        const text = items.map((i) => `${i.d} [${i.agent_native?.category ?? "?"}; ${i.agent_native?.label ?? "claimed"}]${i.status === "crawled" ? "" : ` [FINDING, DO NOT USE: ${i.status}]`} ${i.record}`).join("\n") || "no matches";
+        return { ...base, result: { content: [{ type: "text", text }], structuredContent: body } };
       }
       if (p.name === "get_record") {
         const domain = String(p.arguments?.domain ?? "");

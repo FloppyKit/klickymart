@@ -1,3 +1,4 @@
+import { anBadgeHtml, anSectionHtml } from "../agent-native";
 import { WALLET_GUIDE } from "../wallet";
 import type { Community } from "../community";
 import type { ReviewSummary } from "../reviews";
@@ -263,7 +264,7 @@ function renderTableRow(row: IndexRow, origin: string): string {
     : "";
   return `<tr>
     <td>${merchantLink}${nameLink}<br><span class="km-muted">${esc(row.d)}</span></td>
-    <td>${statusPill(row.status)}</td>
+    <td>${statusPill(row.status)}${anBadgeHtml(row.d) ? ` ${anBadgeHtml(row.d)}` : ""}</td>
     <td>${row.ag ?? `<a href="/about#unknowns">unknown</a>`}</td>
     <td>${gradeBadge(row.btc)}</td>
   </tr>`;
@@ -279,7 +280,7 @@ export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, 
     const quote = typeof raw.tos_q === "string" ? raw.tos_q : "";
     const src = typeof raw.tos_url === "string" ? raw.tos_url : null;
     const body = `
-<h1>${esc(row.name ?? row.d)}</h1>
+<h1>${esc(row.name ?? row.d)}</h1>${anBadgeHtml(row.d) ? `<p>${anBadgeHtml(row.d)}</p>${anSectionHtml(row.d)}` : ""}
 <p><a href="https://${esc(row.d)}/" rel="nofollow noopener">${esc(row.d)}</a> ${statusPill(row.status)}</p>
 ${quote ? `<blockquote class="km-quote">${esc(quote)}</blockquote>` : ""}
 ${src ? `<p><a href="${esc(src)}" rel="nofollow noopener">Source</a></p>` : ""}
@@ -299,7 +300,7 @@ ${reviewsBlock}`;
     : "";
 
   const body = `
-<h1>${esc(row.name ?? row.d)}</h1>
+<h1>${esc(row.name ?? row.d)}</h1>${anBadgeHtml(row.d) ? `<p>${anBadgeHtml(row.d)}</p>${anSectionHtml(row.d)}` : ""}
 <p><a href="https://${esc(row.d)}/" rel="nofollow noopener">${esc(row.d)}</a> ${statusPill(row.status)} ${gradeBadge(row.btc)}</p>
 ${anwBlock}
 ${renderWhy(raw)}
