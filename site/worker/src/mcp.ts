@@ -30,6 +30,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
             { name: "an_cat", in: "query", schema: { type: "string", enum: [...AN_CATS, ...Object.keys(AN_ALT_CATEGORIES)] }, description: "agent-native category (vps, vpn, esim, paid-api, gift-cards, or a raw an_cat)" },
             { name: "rail_status", in: "query", schema: { type: "string", enum: ["verified-402", "claimed"] }, description: "verified-402 = our one unauthenticated request got a real HTTP 402 challenge (never paid); claimed = listed by a directory only" },
             { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 500 } },
+            { name: "min_trust", in: "query", schema: { type: "string", enum: ["flagged", "unverified", "seen", "verified"] }, description: "Minimum trust_tier (every item carries trust_tier, trust_label, trust_why, src)" },
           ],
           responses: {
             "200": {
@@ -78,6 +79,10 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/flag": { post: { summary: "Submit a signed NIP-56 kind 1984 report about a note (not published)", responses: { "201": { description: "stored" }, "400": { description: "bad report" }, "429": { description: "rate limited" } } } },
       "/tips.json": { get: { summary: "NIP-57 tips on agent notes, per review and per reviewer", parameters: [{ name: "domain", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "JSON" } } } },
       "/curators.json": { get: { summary: "Curator record: who tipped which agent notes", responses: { "200": { description: "JSON" } } } },
+      "/submit": { post: { summary: "Suggest a store (community submission, Path 3). Only domain, category hint, note and same-site evidence_url are accepted; facts come from the gated crawl.", parameters: [{ name: "dry_run", in: "query", required: false, schema: { type: "string", enum: ["1"] }, description: "1 = validate only, store nothing" }], requestBody: { content: { "application/json": { schema: { type: "object", properties: { domain: { type: "string" }, category: { type: "string" }, note: { type: "string", maxLength: 280 }, evidence_url: { type: "string" }, submitter: { type: "object", properties: { agent_name: { type: "string" } } }, event: { type: "object", description: "signed kind 1423 store suggestion" } } } } } }, responses: { "200": { description: "duplicate, rejected-by-blocklist, or dry run: {id, domain, status, reason, trust_tier, flags}" }, "201": { description: "queued" }, "400": { description: "bad domain or event" }, "429": { description: "rate limited (10/day, 50/week per submitter and per salted network hash)" } } }, get: { summary: "How to submit, tiers and trust rules", responses: { "200": { description: "JSON" } } } },
+      "/submit/queue.ndjson": { get: { summary: "Same queue as /submit/queue.json, one JSON object per line", responses: { "200": { description: "NDJSON" } } } },
+      "/submit/{id}": { get: { summary: "Submission status with crawl state and trust_tier", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "JSON" }, "404": { description: "not found" } } } },
+      "/submit/queue.json": { get: { summary: "Public gated-crawl queue of community-submitted domains (read by the box crawler)", parameters: [{ name: "state", in: "query", schema: { type: "string", enum: ["pending", "review", "crawled", "refused"] } }, { name: "since", in: "query", schema: { type: "integer" } }, { name: "limit", in: "query", schema: { type: "integer", maximum: 2000 } }], responses: { "200": { description: "JSON (also /submit/queue.ndjson)" } } } },
       "/reviews": { get: { summary: "Agent reviews for a store", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/summary.json": { get: { summary: "Counts by status and BTC grade", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/agents.json": { get: { summary: "Agent visit stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
@@ -247,6 +252,11 @@ export function mcpToolsList(): unknown {
         },
       },
       {
+        name: "submit_store",
+        description: "Suggest a store KlickyMart has not indexed yet. You only give the domain, a category hint and an optional note: facts come from KlickyMart's gated crawl (robots.txt and ToS first), never from you. Only the bare registrable domain is kept (paths, queries, affiliate/referral parameters and sub-domains stripped). Returns {id, domain, status: queued|duplicate|rejected, reason, trust_tier}. New stores start as trust_tier=unverified ('Unverified · community-submitted'); look-alike or spammy submissions are listed as flagged with the reason, never hidden. Limits: 10/day and 50/week per submitter and per salted network hash. dry_run=true validates without storing. Or publish a signed kind 1423 note ([\"r\", domain], [\"t\", category], optional [\"proof\", url]) and pass it as event.",
+        inputSchema: { type: "object", properties: { domain: { type: "string", description: "Store domain, e.g. shop.example" }, category: { type: "string", description: "Category hint (optional)" }, evidence_url: { type: "string", description: "https page on the same store (optional)" }, note: { type: "string", description: "Up to 280 chars; links are removed" }, agent_name: { type: "string", description: "Optional agent name (stored only as a salted id)" }, event: { type: "object", description: "Optional signed kind 1423 event instead of domain" }, dry_run: { type: "boolean" } } },
+      },
+      {
         name: "wallet_setup_guide",
         description: "Non-custodial wallet setup guide for agents: Nostr key, self-custodial or agent-friendly Lightning options (NWC, Alby Hub, phoenixd, LNbits) with who holds the funds, how to get a lud16 for tips, Cashu wallets and mint risk, plus a checklist. KlickyMart never generates, holds or sees seeds, funds, NWC secrets or Cashu tokens.",
         inputSchema: { type: "object", properties: {} },
@@ -288,6 +298,7 @@ export function createMcpHandler(deps: {
   findAlternatives?: (args: Record<string, unknown>) => { ok: true; body: unknown } | { ok: false; message: string } | Promise<{ ok: true; body: unknown } | { ok: false; message: string }>;
   facilitate?: (args: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>;
   submitReview?: (event: unknown, dryRun: boolean) => Promise<{ status: number; body: Record<string, unknown> }>;
+  submitStore?: (args: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>;
   getReviews?: (domain: string) => Promise<unknown>;
   checkDomain?: (domain: string) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
   checkDomainZip?: (domain: string, zip: string | null) => Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }>;
@@ -366,6 +377,10 @@ export function createMcpHandler(deps: {
       }
       if (p.name === "facilitate_purchase" && deps.facilitate) {
         const r = await deps.facilitate((p.arguments ?? {}) as Record<string, unknown>);
+        return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
+      }
+      if (p.name === "submit_store" && deps.submitStore) {
+        const r = await deps.submitStore((p.arguments ?? {}) as Record<string, unknown>);
         return { ...base, result: { content: [{ type: "text", text: JSON.stringify(r.body) }], structuredContent: r.body, isError: r.status >= 400 } };
       }
       if (p.name === "submit_review" && deps.submitReview) {

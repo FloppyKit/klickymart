@@ -429,12 +429,44 @@ A need that points at a directory record, and its acceptance:
 }
 ```
 
+## Kind 1423: Store suggestion (community submission)
+
+A regular event anyone can publish to suggest a store for indexing. It carries no store facts: an indexer queues the domain for its own gated crawl (robots.txt and terms first) and never copies claims from the note.
+
+```json
+{ "kind": 1423, "content": "Small coffee roaster, takes Lightning at checkout.",
+  "tags": [["r", "roaster.example"], ["t", "groceries"], ["proof", "https://roaster.example/checkout-help"], ["t", "klickymart"]] }
+```
+
+- `r` (required): the store domain. Indexers keep only the bare registrable domain (paths, queries, sub-domains and referral parameters are stripped).
+- `t` (optional): a category hint. The hashtag `klickymart` is ignored as a category.
+- `proof` (optional): an https page on the same store. Off-site URLs are dropped.
+- `content`: a short note, at most 280 characters kept, with links removed.
+
+The signature is the submitter identity. KlickyMart also accepts the same fields unsigned via `POST /submit` (anonymous or a salted agent id) and the MCP tool `submit_store`.
+
+**Number check (2026-10-30).** `1423` is not in the NIP README kinds table (nearest: `1337` code snippets, `1617`–`1633` git). GitHub search of nostr-protocol/nips for "kind 1423" and "1423" matched only PR #1423 (NIP-113, by PR number) and PR #1816 (workout events, kind 1301); neither defines kind 1423. No collision found; TO-CONFIRM at submission.
+
+### Trust tiers for listed stores (`trust_tier`)
+
+Indexers SHOULD label, never hide. KlickyMart publishes `trust_tier`, `trust_why[]` and `src` (`crawler` | `community`) with every record:
+
+| tier | when |
+|---|---|
+| `flagged` | a strong abuse signal: spam note, affiliate redirect, look-alike of an indexed domain (edit distance <= 2, confusable or punycode spelling), more than 3 sub-domains of one domain from one submitter |
+| `unverified` | newly submitted, or crawler-indexed with no shopper basis |
+| `seen` | >= 3 weighted distinct unflagged keys with visit-basis notes (421, or 422 `basis=visit`) in 60 days; new or anonymous keys weigh 0.5; >= 2 real keys (>= 30 days old or unflagged notes on >= 2 other stores); the submitter, keys first seen within 24 h of the submission, and keys with reputation below -3 do not count; drops back when > 40% of basis notes are flagged |
+| `verified` | a verified payment proof (422) from an unflagged key that is not the submitter, a store claim (NIP-05 on the domain plus a self-signed 31420), or a crawler-observed protocol endpoint (`/.well-known/ucp`, a declared agent API) |
+
+Submitter reputation = submissions whose store reached `seen` or `verified`, minus 2 x flagged submissions.
+
 ## Numbering and kind checks (checked 2026-10-29)
 
 Checked against `https://raw.githubusercontent.com/nostr-protocol/nips/master/README.md` and open PRs (GitHub API, ~400 open PRs, titles; GitHub issue search for kind strings).
 
 - **NIP number.** Numbering is no longer sequential. Merged NIPs include `01…99` (with gaps) and hex-style IDs `5A, 7D, A0, A3, A4, B0, B7, C0, C7, CC, CD, F4`. Open PR titles already claim many others (e.g. `100, 101, 102, 113, 116, 122, …, 800`, `A1, A5, A7, AA–AE, B9, BB, BC, C1, C4, CF, D8, DA–DC, EE, F5–F7, FB, FC, FE`). Maintainers assign numbers at merge and new proposals are customarily submitted as "NIP-XX". There is therefore no well-defined "next" number. Recommendation: submit as **NIP-XX**; if a number must be suggested, `A6` appears unused in both the README and open PR titles (TO-CONFIRM at submission time). No decimal number after 99 is free of open PR claims at the low end (100–102 are claimed).
 - **Kinds 420/421/422.** Not in the README kinds table (nearest registered: `443–445` Marmot, `818`). GitHub issue/PR search for "kind 420/421/422" returned only unrelated items (issue/PR numbers 420, 421, 422). **No collision found.** Limitation: PR *diff* contents could not be code-searched without authentication; TO-CONFIRM by grepping open PR branches before submission.
+- **Kind 1423** (store suggestion, added 2026-10-30): no collision found; see the Kind 1423 section.
 - **Kind 31420.** Not in the README; search returned 0 hits. No collision found (same limitation).
 
 ## Open questions

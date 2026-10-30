@@ -4,7 +4,8 @@ import { nip05Pass } from "./nip05";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { NOSTR_KIND_ACCEPTANCE, NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED } from "./nostr-kinds";
+import { NOSTR_KIND_ACCEPTANCE, NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED, NOSTR_KIND_STORE_SUGGESTION } from "./nostr-kinds";
+import { parseSuggestionEvent, submitStore } from "./submissions";
 import type { NostrEventLine } from "./nostr-record-source";
 import { verifyNostrEvent } from "./nostr-verify";
 import { parseReviewEvent, storeReview } from "./reviews";
@@ -46,6 +47,8 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   if (noteAuthors.length) f.push({ kinds: [0], authors: noteAuthors.slice(0, 200) });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
+  // Community store suggestions (Path 3): signed kind 1423 with an r tag; queued for the gated crawl, never trusted for facts.
+  f.push({ kinds: [NOSTR_KIND_STORE_SUGGESTION], since });
   return f;
 }
 
@@ -74,7 +77,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984, 0].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
+  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984, 0, NOSTR_KIND_STORE_SUGGESTION].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: 10 * 365 * 86400 });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
@@ -85,6 +88,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + 600) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
   if (ev.kind === 0) return { ok: true, d: null };
+  if (ev.kind === NOSTR_KIND_STORE_SUGGESTION) { const p = parseSuggestionEvent(ev, ctx.now ?? Date.now(), 365 * 86400); return p.ok ? { ok: true, d: null } : { ok: false, reason: `1423: ${p.message}` }; }
   if (ev.kind === 1984) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "report without e tag" };
   if (ev.kind === DELETION_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "deletion without e tags" };
   const d = eventDomain(ev, ctx);
@@ -201,6 +205,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   }
   const stmts: D1PreparedStatement[] = [];
   const reviews: Ev[] = [];
+  const suggestions: Ev[] = [];
   for (const { ev, relay, d } of valid) {
     const prev = existing.get(ev.id);
     if (prev !== undefined) {
@@ -229,6 +234,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     }
     if (ev.kind === NOSTR_KIND_ACCEPTANCE && tagv(ev.tags, "rating") !== undefined) reviews.push(ev);
     if (ev.kind === NOSTR_KIND_ACCEPTANCE || ev.kind === KIND_NOTE) exps.push(ev);
+    if (ev.kind === NOSTR_KIND_STORE_SUGGESTION) suggestions.push(ev);
     res.accepted++;
   }
   for (let k = 0; k < stmts.length; k += 200) await db.batch(stmts.slice(k, k + 200));
@@ -238,6 +244,10 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     let ps: string | null = null;
     if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap"))); } catch { ps = null; } }
     try { await storeExperience(db, x.value, ev, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: ps ?? (x.value.proof ? "proof-attached" : null) }, now); } catch { /* migration pending */ }
+  }
+  for (const ev of suggestions) {
+    const p = parseSuggestionEvent(ev, now, 365 * 86400);
+    if (p.ok) { try { await submitStore({}, { db, indexed: ctx.domains, salt: "", ip: null, via: "nostr", signed: p.value, now, origin: "https://klickymart.com" }); } catch { /* migration pending */ } }
   }
   for (const ev of reviews) {
     const p = parseReviewEvent(ev, (x) => ctx.domains.has(x), now, { maxAgeS: 10 * 365 * 86400 });

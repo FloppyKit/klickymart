@@ -47,6 +47,7 @@ import { agentStats, recordAgentVisit, visitsToday } from "./agent-visits";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
+import { computeTrustTiers, exportQueue, getSubmission, meetsMinTrust, parseSuggestionEvent, queuedStatus, submitStore, tierBadgeHtml, tierFields, TIERS, TRUST_RULES, type SubmitInput, type TrustInfo } from "./submissions";
 import {
   renderHome,
   renderDashboard,
@@ -79,6 +80,8 @@ export interface Env {
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
   FACILITATOR_SK_HEX?: string;
+  /** Salt for submission rate-limit hashes (wrangler secret). */
+  SUBMIT_SALT?: string;
 }
 
 /** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
@@ -297,6 +300,48 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const crawlerHex = crawlerPubkeyHexFromSnapshot(snap, env.CRAWLER_PUBKEY_HEX);
   const aTagFor = (d: string) => (crawlerHex ? `${K31420}:${crawlerHex}:${d}` : null);
 
+  const tiersFor = async (ds: string[]): Promise<Map<string, TrustInfo>> => {
+    const rawBy = new Map(snap.rows.map((r) => [r.d, r]));
+    return computeTrustTiers(env.DB, ds, (d) => { const r = rawBy.get(d); return r ? parseRaw(r.raw_json) : null; });
+  };
+  const allTiers = () => tiersFor(snap.rows.map((r) => r.d));
+  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || "km-dev-salt", ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
+  const handleSubmit = async (body: Record<string, unknown>, via: "post" | "mcp", dryRun: boolean) => {
+    const evIn = body.event ?? (typeof body.kind === "number" ? body : null);
+    if (evIn) {
+      const p = parseSuggestionEvent(evIn);
+      if (!p.ok) return { status: 400, body: { ok: false, status: "rejected", reason: p.message, error: { code: p.code, message: p.message } } };
+      return submitStore(body as SubmitInput, { ...submitCtx(via, dryRun), via: "nostr", signed: p.value });
+    }
+    return submitStore(body as SubmitInput, submitCtx(via, dryRun));
+  };
+
+  if (path === "/submit" && request.method === "POST") {
+    const text = await request.text();
+    if (text.length > 16384) return Response.json({ ok: false, error: { code: "too_large", message: "body too large" } }, { status: 413 });
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON: {domain, category?, note?, evidence_url?, submitter?: {agent_name?}} or a signed kind 1423 event" } }, { status: 400 }); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ ok: false, error: { code: "bad_json", message: "body must be a JSON object" } }, { status: 400 });
+    const r = await handleSubmit(body as Record<string, unknown>, "post", url.searchParams.get("dry_run") === "1" || (body as { dry_run?: unknown }).dry_run === true);
+    return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", ...(r.status === 429 ? { "Retry-After": "3600" } : {}) } });
+  }
+  if ((path === "/submit/queue.ndjson" || path === "/submit/queue.json") && request.method === "GET") {
+    const st = url.searchParams.get("state") ?? "pending";
+    if (!["pending", "review", "crawled", "refused"].includes(st)) return err400("state", "state is pending | review | crawled | refused");
+    const items = await exportQueue(env.DB, { state: st, since: Number(url.searchParams.get("since") ?? 0) || 0, limit: Number(url.searchParams.get("limit") ?? 500) || 500 });
+    if (path.endsWith(".ndjson")) return new Response(items.map((x) => JSON.stringify(x)).join("\n") + (items.length ? "\n" : ""), { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ ...licenseMetaBlock(), count: items.length, state: st, items, note: "Community-submitted domains waiting for the gated crawl (run on the KlickyMart box via crawler/gate.py, never from the Worker). Submitters only gave a domain, a category hint and a note." }, { headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (path === "/submit" && request.method === "GET") {
+    return Response.json({ ...licenseMetaBlock(), how: "POST /submit {domain, category?, note?, evidence_url?, submitter?: {agent_name?}} (add ?dry_run=1 to validate without storing), MCP submit_store, or publish a signed kind 1423 note with [\"r\", domain], [\"t\", category] and optional [\"proof\", url] tags.", kind: 1423, statuses: ["queued", "duplicate", "rejected"], tiers: TIERS, trust_rules: TRUST_RULES, queue: `${origin}/submit/queue.json` }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+  if (path.startsWith("/submit/") && request.method === "GET") {
+    const id = decodeURIComponent(path.slice("/submit/".length));
+    const r = /^(sub_[0-9a-f]{20}|[0-9a-f]{64})$/.test(id) ? await getSubmission(env.DB, id, origin) : null;
+    if (!r) return Response.json({ error: { code: "not_found", message: "no submission with that id" } }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ ...licenseMetaBlock(), ...r }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
+
   if (path === "/reviews" && request.method === "POST") {
     const text = await request.text();
     if (text.length > REVIEW_LIMITS.maxBytes) return Response.json({ ok: false, error: { code: "too_large", message: "event too large" } }, { status: 413 });
@@ -494,6 +539,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const ch = buildChart(snap, aggs, { limit: Number(url.searchParams.get("limit") ?? 50) || 50, category: url.searchParams.get("category") ?? undefined });
     if (path === "/chart") return new Response(renderChart(origin, shell, ch), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     const st = aggs.get(SELFTEST_DOMAIN);
+    const tch = await allTiers();
+    for (const it of ch.items as unknown as Record<string, unknown>[]) Object.assign(it, tierFields(tch.get(String(it.d ?? it.domain ?? ""))));
     return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, flags: { flagged_notes: [...aggs.values()].reduce((a, x) => a + (x.flags?.flagged_notes ?? 0), 0), url: `${origin}/flags.json` }, items: ch.items, ...(st ? { selftest: { d: SELFTEST_DOMAIN, note: "KlickyMart ingest self-test (fake .invalid domain); not ranked", community: st } } : {}) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
   if (path === "/report/template" && request.method === "GET") {
@@ -588,6 +635,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (zipB && row) c.body.landed = landedFor(parseRaw(row.raw_json), zipB);
         return c.body;
       });
+      const tb = await tiersFor(items.map((x) => String((x as { domain?: unknown }).domain ?? "")));
+      for (const x of items as Record<string, unknown>[]) if (!x.error && x.verdict !== "not-in-index") Object.assign(x, tierFields(tb.get(String(x.domain))));
       return Response.json({ ...licenseMetaBlock(), count: items.length, items }, { headers: apiHeaders(snap.version, 0) });
     }
     const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
@@ -609,6 +658,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const ex = (await loadAggregates(env.DB, [String(res.body.domain)], Date.now(), { inStoreOnly: inStoreOnly(snap) })).get(String(res.body.domain));
       res.body.community_experience = ex ? { ...ex, source: "Nostr shopping-experience notes", chart: `${origin}/chart`, flags_url: `${origin}/flags.json?domain=${res.body.domain}` } : { source: "Nostr shopping-experience notes", keys: 0, note: "No agent has posted a shopping-experience note for this store yet.", report: `${origin}/report` };
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
+    }
+    if (res.body.verdict !== "not-in-index") Object.assign(res.body, tierFields((await tiersFor([String(res.body.domain)])).get(String(res.body.domain))));
+    else {
+      const qs = await queuedStatus(env.DB, String(res.body.domain ?? url.searchParams.get("domain") ?? ""));
+      if (qs.queued) Object.assign(res.body, { queued: true, trust_tier: "unverified", trust_label: "Unverified · community-submitted", src: "community", submission: `${origin}/submit/${qs.submission}`, crawl_state: qs.state });
+      else res.body.submit = { hint: "Not indexed. To suggest it, POST /submit {domain} (or MCP submit_store). Nothing is submitted unless you ask.", url: `${origin}/submit` };
     }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderCheckResult(origin, res.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -632,8 +687,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/q" && request.method === "GET") {
     const validated = validateQueryParams(url.searchParams);
     if (!validated.ok) return err400(validated.param, validated.message);
+    const minTrust = url.searchParams.get("min_trust");
+    if (minTrust && !(TIERS as readonly string[]).includes(minTrust)) return err400("min_trust", "min_trust is flagged | unverified | seen | verified");
     const result = querySnapshot(snap, validated.params);
-    const items = result.items.map((r) => rowToCompact(r, origin));
+    const tq = await allTiers();
+    const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) })).filter((x) => meetsMinTrust(x.trust_tier, minTrust));
     const body = {
       ...licenseMetaBlock(),
       version: snap.version,
@@ -690,7 +748,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       {
         ...licenseMetaBlock(),
         record: raw,
-        derived: rowToCompact(row, origin),
+        derived: { ...rowToCompact(row, origin), ...tierFields((await tiersFor([domain])).get(domain)) },
         explain: { ...checkExtras(row, raw), checkout_depth: checkoutOf(row, raw) },
         nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null, a: aTagFor(domain) },
         reviews: await getReviews(env.DB, domain),
@@ -705,7 +763,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const row = snap.rows.find((r) => r.d === domain);
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      const badge = tierBadgeHtml((await tiersFor([row.d])).get(row.d));
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(/(<h1>[^<]*<\/h1>)/, `$1${badge}`), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -822,7 +881,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         const items = result.items.map((r) => rowToCompact(r, origin));
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
-      checkDomain: async (domain) => checkDomain(snap, domain, origin),
+      checkDomain: async (domain) => { const r = checkDomain(snap, domain, origin); if (r.ok && r.body.verdict !== "not-in-index") Object.assign(r.body, tierFields((await tiersFor([String(r.body.domain)])).get(String(r.body.domain)))); return r; },
       findAlternatives: async (args) => {
         const r = findAlternatives(snap, origin, altParams(args));
         const z = args.zip ? String(args.zip) : null;
@@ -857,6 +916,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return r;
       },
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
+      submitStore: async (args: Record<string, unknown>) => handleSubmit({ ...args, submitter: args.agent_name ? { agent_name: args.agent_name } : (args.submitter as never) }, "mcp", args.dry_run === true),
       facilitate: async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex, inStoreOnly(snap)) }),
       getRecord: async (domain) => {

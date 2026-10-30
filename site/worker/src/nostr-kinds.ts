@@ -9,3 +9,6 @@ export const NIP_CRAWL_NAMESPACE = "nip-xx";
 export const NOSTR_KIND_NEED = 420;
 export const NOSTR_KIND_FULFILLMENT = 421;
 export const NOSTR_KIND_ACCEPTANCE = 422;
+
+/** Community "store suggestion" (Path 3). 1423 is unassigned in the NIP kind index (checked 2026-10-30); see NIP-DRAFT.md. */
+export const NOSTR_KIND_STORE_SUGGESTION = 1423;
