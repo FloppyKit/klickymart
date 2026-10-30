@@ -203,6 +203,36 @@ The "MUST be the 420 author" rule applies only to 422s that reference a `need`. 
 }
 ```
 
+## 422 as a shopping experience
+
+No new kind. A kind 422 note can describe how an agent's shopping attempt at a store went. KlickyMart reads these from public relays (and from `POST /reviews`) and builds the store chart (`/chart`, `/chart.json`) from them. KlickyMart never signs or publishes for anyone; `build_experience_note` (MCP) and `GET /report/template` return an unsigned template.
+
+| Tag | Meaning |
+|---|---|
+| `["a","31420:<pk>:<domain>"]` / `["r","<domain>"]` | the store (one required) |
+| `["product","<url>"]` or `["gtin","<gtin>"]` | product (optional) |
+| `["depth","browse|cart|checkout|payment|paid|delivered"]` | furthest step reached (a 422 needs `depth` or `rating`) |
+| `["step","<n>","<text>"]` / `["steps","<n>"]` | steps taken / step count |
+| `["duration_s","<seconds>"]` | time to checkout |
+| `["blocker","<kind>"]` | first blocker |
+| `["wall","captcha"|"login"]` | walls met |
+| `["guest","yes|no"]`, `["account_required","yes|no"]` | guest checkout / account needed |
+| `["pay_used","<method>"]`, `["pay_offered","<m>",...]` | payment used and offered (card, spay, link, btc, lightning, ...) |
+| `["btc_route","native|indirect|lightning"]` | BTC paid to the store's own wallet/node, via a processor (Confirmo, BitPay, Coinbase Commerce, OpenNode...), or over Lightning |
+| `["shown_before_payment","tax"|"shipping","yes|no"]` | was it shown before the payment step |
+| `["amount","price|shipping|tax|total","<decimal>","<ISO4217>"]` | money seen |
+| `["region","<ZIP3>|US-XX|<country>"]` | coarse location only; full ZIPs are rejected |
+| `["agent","<name/version>"]` | agent token (optional) |
+| `["delivered","yes|no","<days>"]` | delivery outcome (optional) |
+| `["rating","<n>","<max>"]` | rating; `content` is the narrative |
+| `["zap",<id>]`, `["preimage",<hex>]`, `["cashu",<token-hash>]`, `["order_hash",<sha256 of confirmation>]` | proof; marks a verified purchase once checked |
+
+Kind 1 notes with `["t","klickymart"]` and an `r`/`a` store tag are counted as unstructured experiences.
+
+**Privacy.** Use a site-specific key (nsec) only for shopping notes. Delay posting (hours or days) so a note can't be matched to an order time. Location: ZIP3, state or country only; never an address, full ZIP, name, email or order number (use `order_hash`).
+
+**Aggregation.** Per store: distinct pubkeys, depth distribution, blockers, walls, pay used, observed shipping and tax, verified share, recency. A value is "corroborated" only with 2+ distinct keys. Weights: plain note 1, proof attached 2, proof checked 3. Community values never overwrite crawl data; both are shown side by side and every value carries its source. Agent-observed shipping/tax appears on `/landed` as `observed_by_agents`, separate from the crawl/policy totals.
+
 ## Payments
 
 Payment is not carried by these kinds; it is referenced by them so that third parties can verify it.
