@@ -1,3 +1,4 @@
+import { mcpToolsList } from "./mcp";
 import { checkExtras, checkoutOf } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { rowsToSnapshot, snapshotFromJson } from "./index-mem";
@@ -15,8 +16,9 @@ import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
 import { hostOf } from "./store-card";
 import { zipToState } from "./landed";
+import { annotate, applyProductFilters, dedupe, CONDITIONS, PRODUCT_TYPES } from "./product-quality";
 import { liveItems, findOffers, parseOffers, type OfferQuery } from "./offers";
-import { landedFor, validZip } from "./landed";
+import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
@@ -281,31 +283,84 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         note: body.items.length ? "Only stores where our checkout probe saw sales tax before the payment step." : `No store in this list has been observed showing tax before payment; for ${unknown} of ${before.length} it is unknown (not observed), which does not mean they hide it.` };
     }
   };
+  /** Unindexed live-catalog stores are queued for our normal crawl pipeline (robots → terms → public pages). Only the
+   * domain + queue time is kept (our own list); no catalog product data is stored. */
+  const markPending = async (items: Record<string, any>[]) => {
+    const ds = [...new Set(items.filter((i) => i.store?.indexed === false && i.domain).map((i) => String(i.domain).replace(/^www\./, "")))];
+    const st = new Map<string, { queued_at: string }>();
+    for (const d of ds.slice(0, 30)) {
+      let v: { queued_at: string } | null = null;
+      try { v = env.KV ? await env.KV.get<{ queued_at: string }>(`pending:${d}`, "json") : null; } catch { /* KV optional */ }
+      if (!v) { v = { queued_at: new Date().toISOString() }; try { await env.KV?.put(`pending:${d}`, JSON.stringify(v)); } catch { /* */ } }
+      st.set(d, v);
+    }
+    for (const i of items) {
+      const d = String(i.domain ?? "").replace(/^www\./, ""); const v = st.get(d);
+      if (i.store?.indexed === false && v) i.store = { ...i.store, check: "pending check", queued_at: v.queued_at,
+        note: "Store not indexed yet. It is queued for KlickyBot's normal check: robots.txt first, then the store's terms (if they ban automation we record that and stop), then public pages only (pay methods incl. Shop Pay/Link, guest checkout, shipping policy). Facts stay null until then." };
+    }
+  };
+  /** Why a named store has no product rows (instead of a silent 0). */
+  const coverageNote = (domain: string, live: boolean) => {
+    const d = domain.toLowerCase().replace(/^www\./, "");
+    const row = snap.rows.find((x) => x.d === d || x.d === `www.${d}`);
+    const raw = row ? parseRaw(row.raw_json) : null;
+    const fb = (raw?.checkout_map as { first_blocker?: { kind?: string; evidence?: string } } | undefined)?.first_blocker;
+    const parts = [`0 products for ${d}.`];
+    parts.push(row ? `KlickyMart indexes the store (co=${row.co ?? "unknown"}) but has no product offers for it: our offer crawler reads only public structured product data (schema.org JSON-LD or Shopify product JSON), and ${d}'s product pages did not expose readable structured prices to KlickyBot${fb?.kind === "network-error" ? ` (its site also reset our connections: ${fb.evidence ?? "network error"})` : ""}.` : `${d} is not in KlickyMart's index.`);
+    parts.push(live ? `It is also absent from the live Shopify Catalog, which only covers Shopify stores; ${d} does not appear there.` : "Add live=1 to also search the live Shopify Catalog (Shopify stores only).");
+    return parts.join(" ");
+  };
   const offersFor = async (q: OfferQuery, live: boolean) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
     const r = findOffers(parseOffers(EMBEDDED_OFFERS_NDJSON || ""), snap, origin, q);
     if (r.ok && live && q.q) {
-      const lv = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain) as { ok: boolean; results?: { products?: unknown[] } } & Record<string, unknown>;
-      if (lv.ok) {
-        const li = liveItems((lv.results?.products ?? []) as Parameters<typeof liveItems>[0], snap, origin, q);
-        lv.items = li.items; lv.filters_applied_after_fetch = li.filters_applied_after_fetch; lv.dropped_by_filters = li.dropped_by_filters; if (li.note) lv.filter_note = li.note;
-        delete lv.results; // normalized items carry everything; raw catalog payload is not re-served
+      // Page through the live catalog (bounded) until filters leave enough rows. Catalog also gets price/condition natively.
+      const want = Math.min(q.limit ?? 10, 50), MAX_PAGES = 4;
+      let cursor: string | undefined; let pages = 0, scanned = 0, totalCount: number | null = null;
+      const products: unknown[] = []; let lv: { ok: boolean; results?: { products?: unknown[] } } & Record<string, unknown> = { ok: false };
+      const cond = q.condition ? (q.condition.split(",").some((c) => c !== "new") ? q.condition.split(",").includes("new") ? undefined : ["secondhand"] : ["new"]) : undefined;
+      do {
+        lv = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain, { maxMinor: q.max_price ? Math.round(q.max_price * 100) : undefined, condition: cond, cursor, pageSize: 25 }) as typeof lv;
+        if (!lv.ok) break;
+        pages++; const ps = lv.results?.products ?? []; scanned += ps.length; products.push(...ps);
+        const pg = lv.pagination as { has_next_page?: boolean; cursor?: string; total_count?: number } | null;
+        totalCount = pg?.total_count ?? totalCount; cursor = pg?.has_next_page ? pg.cursor : undefined;
+        const kept = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q).items.length;
+        if (kept >= want) break;
+      } while (cursor && pages < MAX_PAGES);
+      if (pages > 0) {
+        const li = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q);
+        const pf = applyProductFilters(dedupe(li.items.map((x) => annotate(x, q.q))).rows, { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
+        lv = { ...lv, ok: true, items: pf.rows.slice(0, want), filters_applied_after_fetch: [...li.filters_applied_after_fetch, ...(q.condition ? [`condition=${q.condition}`] : []), ...(q.type ? [`type=${q.type}`] : [])],
+          dropped_by_filters: li.dropped_by_filters + pf.dropped, pages_scanned: pages, products_scanned: scanned, catalog_total: totalCount,
+          filter_note: `Scanned ${scanned} live products over ${pages} page(s) (max ${MAX_PAGES}); KlickyMart applied ${[...li.filters_applied_after_fetch, ...(q.condition ? ["condition"] : []), ...(q.type ? ["type"] : [])].join(", ") || "no filters"} after fetching (dropped ${li.dropped_by_filters + pf.dropped}).${pf.rows.length === 0 ? " 0 matches in the scanned pages; this is not proof none exist, try a narrower query." : ""}` };
+        delete lv.results; delete lv.pagination; // normalized items only; raw catalog payload is not re-served or stored
+        await markPending(lv.items as Record<string, any>[]);
       }
       (r.body as Record<string, unknown>).live_shopify_catalog = lv;
+    }
+    if (r.ok && q.domain) {
+      const b = r.body as { items: unknown[]; live_shopify_catalog?: { items?: unknown[] } };
+      if (!b.items.length && !(b.live_shopify_catalog?.items ?? []).length) (r.body as Record<string, unknown>).coverage_note = coverageNote(q.domain, live && !!q.q);
     }
     return r;
   };
   const offerQuery = (g: (k: string) => string | null | undefined): OfferQuery | string => {
-    const zip = g("zip"); if (zip && !validZip(zip)) return "zip must be a 5-digit US ZIP code";
+    const zip = g("zip"); if (zip && !validZip(zip)) return ZIP_ERROR;
+    const cnd = g("condition"); if (cnd && !cnd.split(",").every((c) => (CONDITIONS as readonly string[]).includes(c))) return `condition must be one or more of ${CONDITIONS.join(", ")}`;
+    const ty = g("type"); if (ty && !ty.split(",").every((c) => (PRODUCT_TYPES as readonly string[]).includes(c))) return `type must be one or more of ${PRODUCT_TYPES.join(", ")}`;
     const mp = g("max_price");
     return { gtin: g("gtin") || undefined, mpn: g("mpn") || undefined, q: g("q") || undefined, domain: g("domain") || undefined, zip: zip || null,
-      in_stock: g("in_stock") === "1" || g("in_stock") === "true", max_price: mp ? Number(mp) : undefined, limit: g("limit") ? Number(g("limit")) : undefined };
+      in_stock: g("in_stock") === "1" || g("in_stock") === "true", max_price: mp ? Number(mp) : undefined, limit: g("limit") ? Number(g("limit")) : undefined,
+      condition: g("condition") || undefined, type: g("type") || undefined, brand_strict: g("brand_strict") === "1" || g("brand_strict") === "true" };
   };
 
   /** One call: a product's landed price at a ZIP across indexed offers (+ live Shopify Catalog with live=1), store facts on every row. */
   const landedCall = async (g: (k: string) => string | null | undefined) => {
     const zip = g("zip");
-    if (!zip || !validZip(zip)) return { ok: false as const, param: "zip", message: "zip=<5-digit US ZIP> is required" };
+    if (!zip) return { ok: false as const, param: "zip", message: "zip=<5-digit US ZIP> is required" };
+    if (!validZip(zip)) return { ok: false as const, param: "zip", message: ZIP_ERROR };
     const url = g("url");
     const q0 = offerQuery(g);
     if (typeof q0 === "string") return { ok: false as const, param: "zip", message: q0 };
@@ -316,10 +371,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const b = r.body as { items: Record<string, any>[]; live_shopify_catalog?: { items?: Record<string, any>[]; filter_note?: string; ok?: boolean; error?: string } };
     let rows: Record<string, any>[] = [...b.items.map((i) => ({ source: "klickymart-observed", ...i })), ...(b.live_shopify_catalog?.items ?? [])];
     if (url) { const m = rows.filter((i) => String(i.url ?? "").split("?")[0] === url.split("?")[0]); if (m.length) rows = m; }
-    const key = (i: Record<string, any>) => [i.landed?.est_total == null ? 1 : 0, i.landed?.est_total ?? i.price ?? 1e9];
+    const before = rows.length;
+    const pf = applyProductFilters(rows.map((i) => (i.source === "klickymart-observed" ? annotate(i, q.q) : i)), { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
+    const dd = dedupe(pf.rows); rows = dd.rows;
+    const key = (i: Record<string, any>) => [(i.brand_match === "lookalike" ? 2 : 0) + (i.landed?.est_total == null ? 1 : 0), i.landed?.est_total ?? i.price ?? 1e9];
     rows.sort((x, y) => { const a = key(x), c = key(y); return a[0] - c[0] || a[1] - c[1]; });
     return { ok: true as const, body: { query: { ...q, live }, zip, state: zipToState(zip), count: rows.length, items: rows,
-      ranking: "rows with a known landed total first (cheapest first), then the rest by item price; est_total is null unless price, shipping and tax are all known",
+      ranking: "rows with a known landed total first (cheapest first), then the rest by item price; brand look-alikes (e.g. 'B0SE') last; est_total is null unless price, shipping and tax are all known",
+      deduped: dd.removed, dropped_by_product_filters: pf.dropped, scanned_rows: before,
+      ...(rows.length === 0 && q.domain ? { coverage_note: coverageNote(q.domain, live) } : {}),
       ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
   };
   if (path === "/landed" && request.method === "GET") {
@@ -552,7 +612,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/.well-known/mcp.json") {
-    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: ["search_merchants", "get_record", "check_domain", "find_alternatives", "find_offers", "get_checkout_map", "recheck_domain", "watch_item", "get_reviews", "submit_review"], llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
+    return Response.json({ name: "KlickyMart", url: "/mcp", transport: "streamable-http (stateless, JSON responses only)", tools: (mcpToolsList() as { tools: { name: string }[] }).tools.map((t) => t.name), llms_txt: "/llms.txt" }, { headers: apiHeaders(snap.version, 0) });
   }
 
   if (path === "/.well-known/nostr.json") {
@@ -642,6 +702,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       resp = mcpErrorFor(e, parsed.id);
     }
     if (resp === undefined || resp === null) resp = { jsonrpc: "2.0", id: parsed.id ?? null, error: { code: -32603, message: "empty result", data: { retryable: true, retry_after_s: 2 } } };
+    for (const c of ((resp as { result?: { content?: { type?: string; text?: string }[] } }).result?.content ?? [])) if (c.type === "text" && !c.text?.trim()) c.text = "no matches: 0 results for these filters";
     return Response.json(resp, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
   }
 

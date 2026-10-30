@@ -1,4 +1,5 @@
-import { Q_CATEGORIES, STATUS_VALUES, CAT_CODES, SUBCATEGORIES, PAY_CODES, PAY_ALIASES, PAY_GROUP_NAMES, ALT_PAY_FILTERS, BLOCKER_KINDS } from "./vocab";
+import { CONDITIONS, PRODUCT_TYPES } from "./product-quality";
+import { Q_BOOL_FILTERS, Q_CATEGORIES, STATUS_VALUES, CAT_CODES, SUBCATEGORIES, PAY_CODES, PAY_ALIASES, PAY_GROUP_NAMES, ALT_PAY_FILTERS, BLOCKER_KINDS } from "./vocab";
 import type { QueryParams } from "./query";
 import { validateQueryParams } from "./query";
 
@@ -20,6 +21,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
             { name: "status", in: "query", schema: { type: "string" } },
             { name: "category", in: "query", schema: { type: "string", enum: Q_CATEGORIES } },
             { name: "cat", in: "query", schema: { type: "string" } },
+            ...Q_BOOL_FILTERS.map((n) => ({ name: n, in: "query", schema: { type: "string", enum: ["0", "1"] } })),
             { name: "pay", in: "query", schema: { type: "string" } },
             { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 500 } },
           ],
@@ -67,7 +69,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/summary.json": { get: { summary: "Counts by status and BTC grade", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/agents.json": { get: { summary: "Agent visit stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/stats/ingest.json": { get: { summary: "Relay ingest stats", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
-      "/landed": { get: { summary: "One call: landed price of a product at a ZIP (indexed offers + live Shopify Catalog with live=1), store facts on every row; est_total only when price, shipping and tax are all known", parameters: [{ name: "zip", in: "query", required: true, schema: { type: "string" } }, ...["q", "gtin", "mpn", "url", "domain"].map((n) => ({ name: n, in: "query", schema: { type: "string" } })), { name: "max_price", in: "query", schema: { type: "number" } }, { name: "in_stock", in: "query", schema: { type: "boolean" } }, { name: "live", in: "query", schema: { type: "string", enum: ["1"] } }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/landed": { get: { summary: "One call: landed price of a product at a ZIP (indexed offers + live Shopify Catalog with live=1), store facts on every row; est_total only when price, shipping and tax are all known", parameters: [{ name: "zip", in: "query", required: true, schema: { type: "string" } }, ...["q", "gtin", "mpn", "url", "domain"].map((n) => ({ name: n, in: "query", schema: { type: "string" } })), { name: "max_price", in: "query", schema: { type: "number" } }, { name: "in_stock", in: "query", schema: { type: "boolean" } }, { name: "live", in: "query", schema: { type: "string", enum: ["1"] } }, { name: "condition", in: "query", schema: { type: "string", enum: [...CONDITIONS] } }, { name: "type", in: "query", schema: { type: "string", enum: [...PRODUCT_TYPES] } }, { name: "brand_strict", in: "query", schema: { type: "string", enum: ["1"] } }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/mcp": { post: { summary: "MCP (JSON-RPC 2.0, streamable HTTP): tools/list, tools/call", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/claim": { get: { summary: "Merchant claim page", responses: { "200": { description: "HTML or text" } } }, post: { summary: "Merchant claim submit", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/contribute": { get: { summary: "How to contribute observations", responses: { "200": { description: "HTML or text" } } } },
@@ -129,6 +131,7 @@ export function mcpToolsList(): unknown {
             ag_min: { type: "integer" }, co_min: { type: "integer" }, ease_min: { type: "integer" },
             guest: { type: "integer", enum: [0, 1] },
             tos: { type: "string", enum: ["ok", "bans-automation", "unknown"] },
+            btc_indirect: { type: "integer", enum: [0, 1], description: "1 = stores where bitcoin works only indirectly (third-party processor such as BitPay/Confirmo/Coinbase Commerce/OpenNode, or a gift card bought with BTC); not native acceptance" },
             ship_pre: { type: "integer", enum: [0, 1], description: "1 = shows shipping and tax before the payment step (observed by the probe)" },
             ships_us: { type: "integer", enum: [0, 1] },
             free_ship_max: { type: "number", description: "free-shipping threshold at or below this many USD (publicly stated)" },
@@ -162,7 +165,7 @@ export function mcpToolsList(): unknown {
       {
         name: "get_landed_price",
         description: "One call: a product's landed price at a US ZIP. Searches KlickyMart-observed offers (and, with live=true, the live Shopify Catalog, never stored), and returns for every product: price, stock, url, checked_at, shipping (with source), est. tax with the rate used, est_total ONLY when price+shipping+tax are all known, plus store facts (pay methods incl. Shop Pay/Link/BTC, guest checkout, checkout depth, first blocker). Products from stores KlickyMart has not indexed say 'store not indexed'.",
-        inputSchema: { type: "object", required: ["zip"], properties: { zip: { type: "string", description: "5-digit US ZIP" }, q: { type: "string" }, gtin: { type: "string" }, mpn: { type: "string" }, url: { type: "string", description: "a product URL to price" }, domain: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 50 } } },
+        inputSchema: { type: "object", required: ["zip"], properties: { zip: { type: "string", description: "5-digit US ZIP" }, q: { type: "string" }, gtin: { type: "string" }, mpn: { type: "string" }, url: { type: "string", description: "a product URL to price" }, domain: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, condition: { type: "string", enum: [...CONDITIONS] }, type: { type: "string", enum: [...PRODUCT_TYPES] }, brand_strict: { type: "boolean" }, limit: { type: "integer", maximum: 50 } } },
       },
       {
         name: "get_checkout_map",
@@ -264,7 +267,7 @@ export function createMcpHandler(deps: {
         if (limit > 100) sp.set("limit", "100");
         const { body } = await deps.runQuery(sp);
         const items = (body as { items?: { d: string; name: string | null; record: string }[] }).items ?? [];
-        const text = items.map((i) => `${i.d} ${i.name ?? ""} ${i.record}`.trim()).join("\n");
+        const text = items.map((i) => `${i.d} ${i.name ?? ""} ${i.record}`.trim()).join("\n") || "no matches: 0 results for these filters";
         return {
           ...base,
           result: {

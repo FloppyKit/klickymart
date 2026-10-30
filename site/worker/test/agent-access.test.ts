@@ -29,14 +29,14 @@ describe("agent capabilities (embedded events)", () => {
     }) as {
       record_schema_version: string;
       nostr_kinds: { crawl_record: number };
-      endpoints: { query: string; summary: string };
+      endpoints: Record<string, string>;
       relays: string[];
       crawler: { npub: string };
     };
-    expect(doc.record_schema_version).toBe("0.3-draft");
+    expect(doc.record_schema_version).toBe("0.5-draft");
     expect(doc.nostr_kinds.crawl_record).toBe(NOSTR_KIND_CRAWL_RECORD);
-    expect(doc.endpoints.query).toBe("https://klickymart.com/q");
-    expect(doc.endpoints.summary).toBe("https://klickymart.com/summary.json");
+    expect(doc.endpoints["/q"]).toBe("https://klickymart.com/q");
+    expect(doc.endpoints["/summary.json"]).toBe("https://klickymart.com/summary.json");
     expect(doc.relays).toEqual(["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]);
     expect(doc.crawler.npub).toBe(CRAWLER_NPUB);
     expect(JSON.stringify(doc)).not.toContain(CRAWLER_HEX);
@@ -69,8 +69,8 @@ describe("agent routes (worker integration)", () => {
       relays?: string[];
       license?: { data?: { spdx?: string } };
     };
-    expect(j.record_schema_version).toBe("0.3-draft");
-    expect(j.endpoints?.summary).toContain("/summary.json");
+    expect(j.record_schema_version).toBe("0.5-draft");
+    expect((j.endpoints as Record<string, string> | undefined)?.["/summary.json"]).toContain("/summary.json");
     expect(j.relays?.length).toBeGreaterThan(0);
     expect(j.license?.data?.spdx).toBe("CC0-1.0");
   });
