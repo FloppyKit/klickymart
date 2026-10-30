@@ -1,3 +1,4 @@
+import { landedOptsFor } from "./offers";
 /** Store facts attached to every product result (indexed offers and live Shopify Catalog products). One source: storeFacts() + record. */
 import type { Snapshot } from "./index-mem";
 import { storeFacts, shipOf } from "./explain";
@@ -40,7 +41,8 @@ export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
 }
 
 /** Landed parts for any priced product at a ZIP, using the indexed record when the store is indexed. */
-export function landedForProduct(snap: Snapshot, domainOrUrl: string, zip: string, price: number, offerShip?: OfferShip | null) {
+export function landedForProduct(snap: Snapshot, domainOrUrl: string, zip: string, price: number, offerShip?: OfferShip | null, title = "") {
   const row = findRow(snap, domainOrUrl);
-  return landedFor(row ? parseRaw(row.raw_json) : {}, zip, price, offerShip ?? null);
+  const raw = row ? parseRaw(row.raw_json) : {};
+  return landedFor(raw, zip, price, offerShip ?? null, landedOptsFor(title, raw));
 }

@@ -1,3 +1,4 @@
+import { guestFreeMin, type RuleLike } from "./ship-rules";
 /** GO 5.7: explain verdicts (why), agent-ordering policy, checkout depth provenance and landed-cost signals. Pure, from raw records. */
 import type { IndexRow } from "./index-mem";
 
@@ -20,7 +21,9 @@ export function agentPolicyOf(raw: Record<string, unknown>): AgentPolicy | null 
 
 export function shipOf(raw: Record<string, unknown>): Ship {
   const s = (raw.ship ?? {}) as Partial<Ship>;
-  return { pre_pay: s.pre_pay ?? null, ships_us: s.ships_us ?? null, free_min_usd: s.free_min_usd ?? null, ...(s.pre_pay_ev ? { pre_pay_ev: s.pre_pay_ev } : {}), ...(s.ships_us_ev ? { ships_us_ev: s.ships_us_ev } : {}), ...(s.free_min_ev ? { free_min_ev: s.free_min_ev } : {}) };
+  // One shipping story per store: fall back to the published shipping policy (guest-applicable rules only).
+  const pol = raw.ship_policy as { rules?: RuleLike[]; ships_us?: boolean | null } | undefined;
+  return { pre_pay: s.pre_pay ?? null, ships_us: s.ships_us ?? pol?.ships_us ?? null, free_min_usd: s.free_min_usd ?? guestFreeMin(pol?.rules), ...(s.pre_pay_ev ? { pre_pay_ev: s.pre_pay_ev } : {}), ...(s.ships_us_ev ? { ships_us_ev: s.ships_us_ev } : {}), ...(s.free_min_ev ? { free_min_ev: s.free_min_ev } : {}) };
 }
 
 /** One source of truth for the headline store facts; every endpoint (check, alternatives, offers, MCP) uses this. */
@@ -31,9 +34,11 @@ export function storeFacts(row: IndexRow) {
 export function checkoutOf(row: IndexRow, raw: Record<string, unknown>) {
   const probe = raw.checkout_probe as { step_reached?: string; n?: string; ts?: number; pm_visible?: string } | undefined;
   return {
-    co: row.co, steps: typeof raw.steps === "number" ? raw.steps : ((raw.checkout_map as { steps?: unknown[] } | undefined)?.steps?.length ?? null),
+    // steps = stages the checkout probe walked (checkout_map). The record's older numeric `steps` counted crawl pages, not checkout steps.
+    co: row.co, steps: (raw.checkout_map as { steps?: unknown[] } | undefined)?.steps?.length ?? null,
     step_list: ((raw.checkout_map as { steps?: { n: number; stage: string; url?: string | null; action?: string | null; status?: unknown }[] } | undefined)?.steps ?? []).map((x) => ({ n: x.n, stage: x.stage, url: x.url ?? null, action: x.action ?? null, status: x.status ?? null })),
-    steps_src: typeof raw.steps === "number" ? "record" : (raw.checkout_map ? "checkout_map (probe)" : null),
+    steps_src: raw.checkout_map ? "checkout_map (probe)" : null,
+    ...(raw.checkout_map ? {} : { steps_note: probe?.step_reached ? `the probe reached "${probe.step_reached}" but no per-step map was recorded for this store yet` : "no checkout probe recorded for this store" }),
     guest: row.guest === null ? null : row.guest === 1,
     guest_source: (raw.guest_src as string | undefined) ?? null,
     guest_evidence: (raw.guest_ev as { url: string; q: string } | undefined) ?? null,

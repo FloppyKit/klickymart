@@ -4,9 +4,22 @@ import { storeCard, landedForProduct, hostOf } from "./store-card";
  * Shopify catalog (UCP) results are never stored: its usage guidelines forbid caching, so /offers can add them live (live=1). */
 import type { Snapshot } from "./index-mem";
 import { parseRaw } from "./records-api";
-import { landedFor } from "./landed";
+import { landedFor, type LandedOpts } from "./landed";
+import { productTypes } from "./product-quality";
+/** Landed options for a product: gift-card tax policy, and digital delivery for stores that only sell digital gift cards. */
+export function landedOptsFor(title: string, raw: Record<string, unknown>): LandedOpts {
+  const giftCard = productTypes(title).includes("gift-card");
+  const cats = [...((raw.category as string[] | undefined) ?? []), ...((raw.sub as string[] | undefined) ?? [])];
+  const digital = giftCard && cats.includes("gift-cards") && !/\b(physical|plastic|mailed|by mail)\b/i.test(title);
+  return { giftCard, digital, title };
+}
+/** One shipping status per row: the landed block's shipping when a ZIP was given, else the offer's own observation. */
+export function rowShipping(landed: Record<string, any> | undefined, sh: Offer["sh"] | null | undefined) {
+  if (landed?.shipping) return landed.shipping;
+  return sh ? { usd: sh.usd, label: "observed", source: { method: sh.me ?? "jsonld-shippingDetails", src: sh.src ?? null, note: sh.note ?? null } } : { usd: null, label: "unknown", note: "give zip= for shipping from the store's policy" };
+}
 
-export interface Offer { d: string; n: string; b?: string | null; g?: string | null; m?: string | null; s?: string | null; p: number; c: string; st?: string | null; cd?: string | null; sl?: string | null; u: string; me: string; src: string; t: string; sh?: import("./landed").OfferShip | null; dn?: { face_usd: number; range?: (number | null)[]; count?: number | null; fee?: number | null; note?: string } | null }
+export interface Offer { d: string; n: string; b?: string | null; g?: string | null; m?: string | null; s?: string | null; p: number; c: string; st?: string | null; cd?: string | null; sl?: string | null; u: string; me: string; src: string; t: string; sh?: import("./landed").OfferShip | null; dn?: { face_usd: number; range?: (number | null)[]; count?: number | null; fee?: number | null; fee_pct?: number | null; price_usd?: number | null; fee_src?: string; fee_checked_at?: string; note?: string } | null }
 let parsedFrom: string | null = null; let parsed: Offer[] = [];
 export function parseOffers(ndjson: string): Offer[] {
   if (parsedFrom === ndjson) return parsed;
@@ -44,14 +57,16 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   const items = scored.slice(0, limit).map(({ o, conf, how }) => {
     const row = rows.get(o.d);
     const raw = row ? parseRaw(row.raw_json) : {};
+    const pay = o.dn?.price_usd ?? o.p; // what the buyer pays (gift-card fee included when observed)
+    const landed = zip && o.c === "USD" ? landedFor(raw, zip, pay, o.sh ?? null, landedOptsFor(o.n, raw)) : undefined;
     return {
       domain: o.d, name: o.n, brand: o.b ?? null, gtin: o.g ?? null, mpn: o.m ?? null, sku: o.s ?? null,
       price: o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
-      ...(o.dn ? { denomination: o.dn } : {}),
-      shipping: o.sh ? { usd: o.sh.usd, method: o.sh.me ?? "jsonld-shippingDetails", src: o.sh.src ?? null, note: o.sh.note ?? null } : { usd: null, note: "unknown for this item; see landed (with zip) for store-level free-shipping thresholds" },
+      ...(o.dn ? { denomination: o.dn, ...(o.dn.price_usd != null ? { face_value: o.p, price_with_fee: o.dn.price_usd, fee: o.dn.fee ?? null, fee_src: o.dn.fee_src ?? null, fee_checked_at: o.dn.fee_checked_at ?? null } : {}) } : {}),
+      shipping: rowShipping(landed, o.sh),
       store: row ? { ...storeCard(snap, o.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
-      ...(zip && o.c === "USD" ? { landed: landedFor(raw, zip, o.p, o.sh ?? null) } : {}),
+      ...(landed ? { landed } : {}),
     };
   });
   return { ok: true as const, body: { query: qy, count: items.length, total: scored.length, items,
@@ -77,8 +92,9 @@ export function liveItems(products: LiveProduct[], snap: Snapshot, origin: strin
     out.push({
       source: "shopify-catalog-live", title: p.title || v.title || null, name: p.title || v.title || null, variant: v.title ?? null, price, currency: cur, stock: avail === true ? "in" : avail === false ? "out" : null,
       url: v.url ?? null, domain: hostOf(v.url), checked_at: new Date().toISOString(), store: card,
-      ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null) } : {}),
+      ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null, p.title || v.title || "") } : {}),
     });
+    const last = out[out.length - 1]!; last.shipping = rowShipping(last.landed as Record<string, any> | undefined, null);
   }
   if (qy.max_price !== undefined) applied.push(`max_price<=${qy.max_price} USD`);
   if (qy.in_stock) applied.push("in_stock");

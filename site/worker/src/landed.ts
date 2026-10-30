@@ -2,6 +2,7 @@
  * (rates as of July 1, 2026): state rate + population-weighted average combined rate. Local rates vary by address; the store's
  * own checkout is authoritative. Shipping comes only from the record (stated free-shipping threshold, observed ship quotes). */
 import { shipOf } from "./explain";
+import { ruleCondition } from "./ship-rules";
 
 export const TAX_SRC = "https://taxfoundation.org/data/all/state/2026-sales-tax-rates-midyear/";
 // state: [state rate %, average combined state+local %]
@@ -32,7 +33,7 @@ export const PLACEHOLDER_ZIPS = new Set(["00000", "11111", "12345", "99999", "22
 export function validZip(z: string | null | undefined): string | null { return z && /^\d{5}$/.test(z) && !PLACEHOLDER_ZIPS.has(z) && zipToState(z) ? z : null; }
 export const ZIP_ERROR = "zip must be a real 5-digit US ZIP code (placeholders such as 99999 or 00000 are rejected because they map to no address)";
 
-export type ShipRule = { type: "free" | "free_over" | "flat" | "per_region" | "calculated"; usd?: number | null; min_usd?: number | null; region?: string | null; method?: string | null; quote?: string };
+export type ShipRule = { type: "free" | "free_over" | "flat" | "per_region" | "calculated"; usd?: number | null; min_usd?: number | null; region?: string | null; method?: string | null; quote?: string; conditions?: string | null };
 export type ShipPolicy = { rules: ShipRule[]; src?: string | null; checked_at?: string; ships_us?: boolean | null };
 const regionHits = (region: string | null | undefined, st: string | null) => {
   if (!region || region === "US") return st !== null;
@@ -45,7 +46,8 @@ const regionHits = (region: string | null | undefined, st: string | null) => {
  * determines the price (never guesses). Region-specific rules beat generic ones. */
 export function policyShip(p: ShipPolicy | undefined, st: string | null, subtotal: number): { usd: number; rule: ShipRule } | null {
   if (!p?.rules?.length || st === null) return null;
-  const rs = p.rules.filter((r) => regionHits(r.region, st));
+  // Member-only / promo / conditional rules never apply to a guest agent.
+  const rs = p.rules.filter((r) => regionHits(r.region, st) && !ruleCondition(r));
   const specific = (r: ShipRule) => (r.region && r.region !== "US" ? 0 : 1);
   rs.sort((a, b) => specific(a) - specific(b));
   // "always free" next to a "free over $X" rule is ambiguous (members-only, promos): trust only the threshold then.
@@ -58,7 +60,12 @@ export function policyShip(p: ShipPolicy | undefined, st: string | null, subtota
 
 /** Landed-cost view of one record for a ZIP (and optional item price). Unknown stays null. */
 export type OfferShip = { usd: number; n?: number; src?: string; me?: string; note?: string };
-export function landedFor(raw: Record<string, unknown>, zip: string, price?: number | null, offerShip?: OfferShip | null) {
+/** Gift cards: a general gift card's sale is not taxed in any US state (tax is due when it is redeemed). Prepaid phone cards and
+ * vouchers for one named product can be taxed at sale, so those stay unknown. */
+export const GIFT_CARD_TAX = { taxed_at_sale: false, rule: "gift card sale is not taxable in US states; sales tax is charged when the card is redeemed", src: ["https://taxfreedates.com/items/gift-cards/", "https://dor.wa.gov/forms-publications/publications-subject/tax-topics/gift-cards-gift-certificates-and-layaway-purchases"] };
+const PHONE_CARD_RX = /\b(phone|airtime|top-?up|mobile|calling|prepaid (wireless|phone)|sim|data plan|voucher for)\b/i;
+export type LandedOpts = { giftCard?: boolean; digital?: boolean; title?: string };
+export function landedFor(raw: Record<string, unknown>, zip: string, price?: number | null, offerShip?: OfferShip | null, opts: LandedOpts = {}) {
   const st = zipToState(zip);
   const s = shipOf(raw);
   const t = st ? STATE_TAX[st] : undefined;
@@ -83,15 +90,23 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
     else if (quote) { ship = quote.amount; label = "observed"; shipSrc = { method: quote.method ?? "ship-quote", src: quote.src ?? null, checked_at: quote.checked_at ?? null }; }
     else if (ps) { ship = ps.usd; label = "policy-derived"; shipSrc = { method: "store shipping policy", rule: ps.rule.type, region: ps.rule.region ?? "US", ...(ps.rule.min_usd != null ? { min_usd: ps.rule.min_usd } : {}), quote: ps.rule.quote ?? null, src: pol?.src ?? null, checked_at: pol?.checked_at ?? null, note: `applies to ${st} for a $${price} cart; the store can change it at checkout` }; }
     else if (freeShip === true) { ship = 0; label = "policy-derived"; shipSrc = { method: "free-shipping-threshold", threshold_usd: s.free_min_usd }; }
+    else if (opts.digital) { ship = 0; label = "policy-derived"; shipSrc = { method: "digital delivery", note: "digital gift card delivered by email (the store's checkout asks for an email, not an address)" }; }
+    const skipped = (pol?.rules ?? []).filter((r) => regionHits(r.region, st) && ruleCondition(r)).map((r) => ({ rule: r.type, condition: ruleCondition(r), quote: r.quote ?? null }));
+    if (skipped.length) out.shipping_rules_not_for_guests = skipped;
     out.item_price = price;
     out.free_shipping_applies = freeShip;
     const why = pol?.rules?.length ? `unknown: the store's policy (${pol.rules.map((r) => r.type + (r.min_usd != null ? ">=$" + r.min_usd : "")).join(", ")}) does not set a price for a $${price} cart to ${st}` : "unknown: no public structured shipping cost, ZIP quote or published shipping policy for this store/item";
     out.shipping = { usd: ship, label, source: shipSrc, ...(ship === null ? { note: why } : {}) };
-    out.est_tax = t ? Math.round(price * t[1]) / 100 : null;
-    const known = ship !== null && t !== undefined;
-    out.est_total = known ? Math.round((price + ship! + (price * t![1]) / 100) * 100) / 100 : null;
+    let tax: number | null = t ? Math.round(price * t[1]) / 100 : null;
+    if (opts.giftCard) {
+      if (PHONE_CARD_RX.test(opts.title ?? "")) { tax = null; out.tax_policy = { status: "unknown", note: "prepaid phone/airtime cards and single-product vouchers can be taxed at sale; not determined" }; }
+      else { tax = t ? 0 : null; out.tax_policy = { status: "not-taxed", ...GIFT_CARD_TAX }; }
+    }
+    out.est_tax = tax;
+    const known = ship !== null && tax !== null;
+    out.est_total = known ? Math.round((price + ship! + tax!) * 100) / 100 : null;
     out.est_total_label = known ? (label === "observed" ? "observed shipping + estimated tax" : "policy-derived shipping + estimated tax") : "unknown";
-    if (!known) out.est_total_note = `no total: ${[ship === null ? "shipping" : null, t ? null : "tax rate"].filter(Boolean).join(" and ")} unknown; parts are given separately`;
+    if (!known) out.est_total_note = `no total: ${[ship === null ? "shipping" : null, tax === null ? "tax" : null].filter(Boolean).join(" and ")} unknown; parts are given separately`;
     else out.est_total_note = "price + shipping + estimated tax (state + average local rate; exact tax depends on the street address)";
   }
   return out;
