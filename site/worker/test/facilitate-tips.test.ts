@@ -7,6 +7,7 @@ import { bech32 } from "@scure/base";
 import { nostrEventId, verifyNostrEvent } from "../src/nostr-verify";
 import { ingestEvents, buildFilters, type Ev, type IngestCtx } from "../src/relay-ingest";
 import { facilitate, checkFacilitationProof, FACILITATOR_NPUB } from "../src/facilitate";
+import { encodeBolt11ForTest } from "../src/bolt11";
 import { loadTips, summarize, curators, tipWeight } from "../src/tips";
 import { loadAggregates, experienceTemplate } from "../src/experience";
 
@@ -26,21 +27,28 @@ function fakeBolt11(hashHex: string, hrp = "lnbc10u"): string {
   const hw = bech32.toWords(hexToBytes(hashHex));
   return bech32.encode(hrp, [...tsw, 1, Math.floor(hw.length / 32), hw.length % 32, ...hw, ...new Array(104).fill(0)], 10_000);
 }
+const NODE = key();
+/** A proper NIP-57 receipt: node-signed invoice whose description_hash commits to the 9734 request. */
 function zap(lnurlSk: Uint8Array, payerSk: Uint8Array, target: string, hrp = "lnbc10u"): Ev {
   const req = sign(payerSk, 9734, [["e", target], ["amount", "1000000"], ["relays", "wss://r.test"]]);
-  return sign(lnurlSk, 9735, [["e", target], ["bolt11", fakeBolt11("cd".repeat(32), hrp)], ["description", JSON.stringify(req)], ["P", req.pubkey]]);
+  const desc = JSON.stringify(req);
+  const inv = encodeBolt11ForTest(NODE, hrp, bytesToHex(sha256(new TextEncoder().encode(req.id + "x"))), { descriptionHashHex: bytesToHex(sha256(new TextEncoder().encode(desc))) });
+  return sign(lnurlSk, 9735, [["e", target], ["bolt11", inv], ["description", desc], ["P", req.pubkey]]);
 }
+/** fake LNURL-pay endpoint: every lud16 resolves to the given nostrPubkey */
+const lnurlFetcher = (nostrPubkey: string) => (async () => Response.json({ allowsNostr: true, nostrPubkey, callback: "https://ln.example/cb" })) as never;
 const kv = () => { const m = new Map<string, string>(); return { get: async (k: string) => m.get(k) ?? null, put: async (k: string, v: string) => void m.set(k, v) } as unknown as KVNamespace; };
 const SK = bytesToHex(key()); // local test key only
 const known = (d: string) => d === DOM;
 
 beforeEach(async () => {
-  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews", "experiences", "claims"]) { try { await env.DB.prepare(`DELETE FROM ${t}`).run(); } catch { /* table may not exist */ } }
+  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews", "experiences", "claims", "lnurl_cache"]) { try { await env.DB.prepare(`DELETE FROM ${t}`).run(); } catch { /* table may not exist */ } }
 });
 
 describe("POST /facilitate (facilitated 421)", () => {
-  it("preimage matching the bolt11 -> signed 421, verified-preimage, facilitator tags, not published", async () => {
-    const pre = bytesToHex(key()); const inv = fakeBolt11(bytesToHex(sha256(hexToBytes(pre))));
+  it("KM-001/002: preimage matching a node-signed bolt11 -> signed 421 labelled unverified-claim (never verified for an unclaimed store)", async () => {
+    const pre = bytesToHex(key()); const inv = encodeBolt11ForTest(NODE, "lnbc10u", bytesToHex(sha256(hexToBytes(pre))));
+    expect(checkFacilitationProof({ type: "preimage", preimage: pre, bolt11: fakeBolt11(bytesToHex(sha256(hexToBytes(pre)))) })).toMatchObject({ ok: false, code: "bad_proof" }); // zero-sig invoice
     const agent = pk(key());
     const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK }, { domain: DOM, agent_pubkey: agent, proof: { type: "preimage", preimage: pre, bolt11: inv } }, known, "1.1.1.1");
     expect(r.status).toBe(200);
@@ -48,21 +56,21 @@ describe("POST /facilitate (facilitated 421)", () => {
     expect(verifyNostrEvent(ev as never, 421).ok).toBe(true);
     expect(ev.pubkey).toBe(pk(hexToBytes(SK)));
     const t = Object.fromEntries(ev.tags.map((x) => [x[0], x[1]]));
-    expect(t).toMatchObject({ r: DOM, on_behalf_of: DOM, role: "facilitator", verification: "verified-preimage", p: agent, proof: "preimage", amount: "1000000" });
+    expect(t).toMatchObject({ r: DOM, on_behalf_of: DOM, role: "facilitator", verification: "unverified-claim", p: agent, proof: "preimage", amount: "1000000" });
     expect(r.body.published).toBe(false);
     expect(JSON.stringify(r.body).toLowerCase()).not.toContain("store confirmed");
   });
   it("wrong preimage is refused; hash-only proof is labelled unverified-claim", async () => {
-    const inv = fakeBolt11("ab".repeat(32));
+    const inv = encodeBolt11ForTest(NODE, "lnbc10u", "ab".repeat(32));
     expect(checkFacilitationProof({ type: "preimage", preimage: "11".repeat(32), bolt11: inv })).toMatchObject({ ok: false, code: "proof_mismatch" });
     const r = await facilitate({ KV: kv(), FACILITATOR_SK_HEX: SK }, { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, known, "ip");
     expect(r.status).toBe(200);
     expect((r.body.event as Ev).tags).toContainEqual(["verification", "unverified-claim"]);
     expect(String(r.body.label)).toMatch(/UNVERIFIED CLAIM/);
   });
-  it("valid NIP-57 zap receipt -> verified-zap; unsigned zap request refused", () => {
+  it("KM-001/002: well-formed NIP-57 zap receipt -> unverified-claim only; unsigned zap request refused", () => {
     const rc = zap(key(), key(), "aa".repeat(32));
-    expect(checkFacilitationProof({ type: "zap", receipt: rc })).toMatchObject({ ok: true, verification: "verified-zap" });
+    expect(checkFacilitationProof({ type: "zap", receipt: rc })).toMatchObject({ ok: true, verification: "unverified-claim" });
     const forged = sign(key(), 9735, [["bolt11", fakeBolt11("cd".repeat(32))], ["description", JSON.stringify({ kind: 9734, pubkey: "00".repeat(32), tags: [], content: "", created_at: 1, id: "00".repeat(32), sig: "00".repeat(64) })]]);
     expect(checkFacilitationProof({ type: "zap", receipt: forged })).toMatchObject({ ok: false });
   });
@@ -89,14 +97,18 @@ describe("tips on 422 notes (NIP-57)", () => {
     const a = key(), b = key(), lnurl = key();
     const n1 = sign(a, 422, [["r", DOM], ["depth", "paid"], ["basis", "visit"], ["rating", "5", "5"], ["attempt", "paid"]], "great");
     const n2 = sign(b, 422, [["r", DOM], ["depth", "browse"], ["basis", "visit"], ["rating", "2", "5"], ["attempt", "browse"]], "meh");
-    await ingestEvents(env.DB, [n1, n2].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
+    const prof = sign(a, 0, [], JSON.stringify({ lud16: "a@ln.example" }));
+    await ingestEvents(env.DB, [n1, n2, prof].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
     expect(JSON.stringify(buildFilters(ctx(), 0, [n1.id]))).toContain(n1.id);
     const tippers = Array.from({ length: 7 }, key);
-    for (const t of tippers) // tippers with other public activity (tip-only keys would be discounted by flags.ts)
+    for (const t of tippers) { // tippers KlickyMart first saw > 30 days ago (ingest time), with other public activity
       await env.DB.prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
         .bind(bytesToHex(key()), 422, "other.example", pk(t), 1, 0, "", "{}", "post", "2026-01-01", "visit").run();
+      await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)")
+        .bind(bytesToHex(key()), 1, pk(t), 1, null, "{}", Math.floor(Date.now() / 1000) - 60 * 86400, "wss://r.test").run();
+    }
     const receipts = [...tippers.map((t) => zap(lnurl, t, n1.id)), zap(lnurl, tippers[0]!, n1.id), zap(lnurl, a, n1.id)];
-    const res = await ingestEvents(env.DB, receipts.map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
+    const res = await ingestEvents(env.DB, receipts.map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(lnurl)) });
     expect(res.accepted).toBe(receipts.length); // receipts are not per-pubkey rate limited
     const t = await loadTips(env.DB, DOM);
     const s = summarize(t.byNote.get(n1.id)!);
@@ -110,6 +122,23 @@ describe("tips on 422 notes (NIP-57)", () => {
     expect(tj.per_review.find((x) => x.id === n1.id)?.sats).toBe(8000);
     const cj = await (await SELF.fetch("https://example.com/curators.json")).json() as { curators: unknown[] };
     expect(cj.curators.length).toBe(7);
+  });
+  it("KM-003: receipts not signed by the author's LNURL key, and backdated fresh tippers, add no weight", async () => {
+    const a = key(), lnurl = key(), attacker = key();
+    const n1 = sign(a, 422, [["r", DOM], ["depth", "paid"], ["basis", "visit"], ["rating", "5", "5"], ["attempt", "paid"]], "great");
+    const prof = sign(a, 0, [], JSON.stringify({ lud16: "a@ln.example" }));
+    await ingestEvents(env.DB, [n1, prof].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
+    const old = Math.floor(Date.now() / 1000) - 400 * 86400;
+    const tippers = Array.from({ length: 5 }, key);
+    const backdated = tippers.map((t) => sign(t, 0, [], "{}", old)); // mintable "history"
+    const forged = tippers.map((t) => zap(attacker, t, n1.id)); // self-made receipts
+    const legit = tippers.map((t) => zap(lnurl, t, n1.id)); // real LNURL key, but fresh tippers
+    await ingestEvents(env.DB, [...backdated, ...forged, ...legit].map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(lnurl)) });
+    const lt = await loadTips(env.DB, DOM);
+    const s = summarize(lt.byNote.get(n1.id)!);
+    expect(s.validated_tippers).toBe(5); // only the LNURL-signed receipts validate
+    expect(s.bonus_tippers).toBe(0); // backdated kind-0 is not history: first_seen is now
+    expect(s.weight).toBe(1);
   });
   it("template accepts a lud16 tag and rejects junk", () => {
     const ok = experienceTemplate({ domain: DOM, depth: "browse", lud16: "Me@Getalby.com" }, null);

@@ -5,7 +5,8 @@
 import * as secp from "@noble/secp256k1";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { decodeBolt11 } from "./bolt11";
+import { verifyBolt11 } from "./bolt11";
+import { checkZapReceipt } from "./pay-binding";
 import { nostrEventId, verifyNostrEvent } from "./nostr-verify";
 import { NOSTR_KIND_FULFILLMENT } from "./nostr-kinds";
 
@@ -27,28 +28,27 @@ const HEX64 = /^[0-9a-f]{64}$/;
 
 export interface FacilitateInput { domain?: unknown; agent_pubkey?: unknown; need_id?: unknown; proof?: unknown; amount_msat?: unknown }
 
-/** Check the proof; never throws. preimage+bolt11 -> verified-preimage; signed 9735 with valid 9734 + amount -> verified-zap; bare hash -> unverified-claim. */
+/** Check the proof; never throws. KM-001/KM-002: facilitation is only for stores that have NOT claimed their listing, so
+ * there is never a store-bound node key or LNURL nostrPubkey to check against. Every proof is therefore at most an
+ * "unverified-claim": KlickyMart never signs "verified" for a proof it cannot bind to the store. The preimage invoice must
+ * still carry a valid node signature and match the preimage; a zap must still pass the NIP-57 structure checks. */
 export function checkFacilitationProof(proof: unknown): { ok: true; verification: Verification; tags: string[][]; amount_msat: number | null } | { ok: false; code: string; message: string } {
   if (!proof || typeof proof !== "object") return { ok: false, code: "bad_proof", message: "proof must be {type:'preimage',preimage,bolt11} | {type:'zap',receipt} | {type:'hash',sha256}" };
   const p = proof as Record<string, unknown>;
   if (p.type === "preimage") {
     const pre = String(p.preimage ?? "").toLowerCase(); const inv = String(p.bolt11 ?? "");
     if (!HEX64.test(pre)) return { ok: false, code: "bad_proof", message: "preimage must be 64 hex chars" };
-    const dec = decodeBolt11(inv);
-    if (!dec) return { ok: false, code: "bad_proof", message: "bolt11 did not decode" };
+    const dec = verifyBolt11(inv);
+    if (!dec) return { ok: false, code: "bad_proof", message: "bolt11 did not decode or its node signature is invalid" };
     if (bytesToHex(sha256(hexToBytes(pre))) !== dec.payment_hash) return { ok: false, code: "proof_mismatch", message: "sha256(preimage) does not match the invoice payment_hash" };
-    return { ok: true, verification: "verified-preimage", tags: [["proof", "preimage", pre], ["bolt11", inv], ["payment_hash", dec.payment_hash]], amount_msat: dec.amount_msat };
+    return { ok: true, verification: "unverified-claim", tags: [["proof", "preimage", pre], ["bolt11", inv], ["payment_hash", dec.payment_hash], ["payee", dec.payee]], amount_msat: dec.amount_msat };
   }
   if (p.type === "zap") {
     const r = p.receipt as Ev;
     if (!r || typeof r !== "object" || !verifyNostrEvent(r as never, 9735).ok) return { ok: false, code: "bad_proof", message: "receipt must be a validly signed kind-9735 event" };
-    const inv = r.tags.find((t) => t[0] === "bolt11")?.[1]; const dec = inv ? decodeBolt11(inv) : null;
-    let req: Ev | null = null; try { req = JSON.parse(r.tags.find((t) => t[0] === "description")?.[1] ?? "null"); } catch { req = null; }
-    if (!dec || !(dec.amount_msat! > 0)) return { ok: false, code: "bad_proof", message: "receipt bolt11 missing or has no amount" };
-    if (!req || req.kind !== 9734 || !verifyNostrEvent(req as never, 9734).ok) return { ok: false, code: "bad_proof", message: "receipt description is not a validly signed kind-9734 zap request (NIP-57)" };
-    const reqAmt = req.tags.find((t) => t[0] === "amount")?.[1];
-    if (reqAmt && Number(reqAmt) !== dec.amount_msat) return { ok: false, code: "proof_mismatch", message: "zap request amount differs from the invoice amount" };
-    return { ok: true, verification: "verified-zap", tags: [["proof", "zap", r.id], ["bolt11", inv!]], amount_msat: dec.amount_msat };
+    const zc = checkZapReceipt(r, r.pubkey); // structure only: the signer cannot be bound to an unclaimed store
+    if (!zc.ok) return { ok: false, code: "bad_proof", message: `zap receipt failed NIP-57 checks (${zc.reason})` };
+    return { ok: true, verification: "unverified-claim", tags: [["proof", "zap", r.id], ["bolt11", tagv(r.tags, "bolt11")!]], amount_msat: zc.inv.amount_msat };
   }
   if (p.type === "hash") {
     const h = String(p.sha256 ?? "").toLowerCase();
@@ -57,6 +57,7 @@ export function checkFacilitationProof(proof: unknown): { ok: true; verification
   }
   return { ok: false, code: "bad_proof", message: "unknown proof.type (preimage | zap | hash)" };
 }
+const tagv = (tags: string[][], k: string) => tags.find((t) => t[0] === k)?.[1];
 
 export async function signEvent(skHex: string, tmpl: Omit<Ev, "id" | "pubkey" | "sig">): Promise<Ev> {
   const sk = hexToBytes(skHex);
@@ -95,7 +96,7 @@ export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILI
   for (const [k, lim] of [[`fac:g:${day}`, FACILITATE_LIMITS.globalPerDay], [`fac:ip:${bytesToHex(sha256(new TextEncoder().encode(`${day}:${ip}`))).slice(0, 16)}:${day}`, FACILITATE_LIMITS.perIpPerDay], [`fac:pk:${agent}:${day}`, FACILITATE_LIMITS.perAgentPerDay], [`fac:pkd:${agent}:${d}:${day}`, FACILITATE_LIMITS.perAgentDomainPerDay]] as const)
     if (!(await bump(env.KV, k, lim))) return bad("rate_limited", `facilitation limit reached (${JSON.stringify(FACILITATE_LIMITS)})`, 429);
   const amt = pr.amount_msat ?? (Number.isFinite(Number(input.amount_msat)) && Number(input.amount_msat) > 0 ? Math.floor(Number(input.amount_msat)) : null);
-  const label = pr.verification === "unverified-claim" ? "UNVERIFIED CLAIM: agent supplied only a hash; KlickyMart could not check payment." : `Payment proof checked by KlickyMart (${pr.verification}).`;
+  const label = pr.verification === "unverified-claim" ? "UNVERIFIED CLAIM: KlickyMart could not bind this payment to the store." : `Payment proof checked by KlickyMart (${pr.verification}).`;
   const tags: string[][] = [["r", d], ["on_behalf_of", d], ["role", "facilitator"], ["verification", pr.verification], ["p", agent],
     ...(need ? [["e", need, "", "need"]] : []), ...pr.tags, ...(amt ? [["amount", String(amt)]] : []),
     ["L", "klickymart.facilitated"], ["l", pr.verification, "klickymart.facilitated"]];

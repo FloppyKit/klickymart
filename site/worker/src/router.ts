@@ -40,6 +40,7 @@ import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, type Ev } from "./relay-ingest";
+import { storeBindings } from "./pay-binding";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
@@ -270,7 +271,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };
       const ev = body as Ev;
-      try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1])); } catch { proof_status = "unverified-claim"; }
+      try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1]), await storeBindings(env.DB, p.value.d), p.value.d); } catch { proof_status = "unverified-claim"; }
     }
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }

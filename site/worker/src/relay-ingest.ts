@@ -10,7 +10,7 @@ import type { NostrEventLine } from "./nostr-record-source";
 import { verifyNostrEvent } from "./nostr-verify";
 import { parseReviewEvent, storeReview } from "./reviews";
 import { KIND_NOTE, NOTE_HASHTAG, parseExperience, storeExperience } from "./experience";
-import { decodeBolt11 } from "./bolt11";
+import { lnurlNostrPubkey, lud16Of, type Fetcher, checkPreimage, checkZapReceipt, NO_BINDINGS, storeBindings, type StoreBindings } from "./pay-binding";
 
 export const ZAP_RECEIPT_KIND = 9735;
 export const DELETION_KIND = 5;
@@ -22,6 +22,8 @@ export interface IngestCtx {
   domains: Set<string>;
   ourPubkey: string | null;
   now?: number;
+  /** Outbound fetch for NIP-57 LNURL lookups (tests inject a fake). */
+  fetcher?: Fetcher;
 }
 
 export type Ev = Required<Pick<NostrEventLine, "id" | "pubkey" | "sig" | "kind" | "created_at" | "tags" | "content">>;
@@ -106,25 +108,25 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   return { ok: true, d };
 }
 
-/** Cheap proof checks. preimage: sha256(preimage) == payment_hash of the 421's bolt11.
- * zap: receipt is a valid signed 9735 that references the 421 and carries a bolt11 with an amount (receipt signer is
- * not yet checked against the recipient's LNURL nostrPubkey). */
-export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | null): "verified-preimage" | "verified-zap" | "unverified-claim" | "facilitated-unverified" | null {
+/** Payment proof checks (KM-001). Both proofs must be bound to the store:
+ * preimage: the cited 421's BOLT11 is node-signed by one of the store's ln_node keys and sha256(preimage) == payment_hash;
+ * zap: the 9735 receipt references the 421, is signed by one of the store's zap_pubkey keys (its LNURL nostrPubkey, NIP-57),
+ * and its BOLT11 is node-signed with description_hash == sha256(9734). Anything else is "unverified-claim".
+ * Store keys come from storeBindings() (claimed owners' own 31420 tags); an unclaimed store has none. */
+export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | null, bind: StoreBindings = NO_BINDINGS, d?: string | null): "verified-preimage" | "verified-zap" | "unverified-claim" | "facilitated-unverified" | null {
   const ful = review.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1];
   const pre = tagv(review.tags, "preimage"); const zap = tagv(review.tags, "zap"); const cashu = tagv(review.tags, "cashu");
   if (!ful && !pre && !zap && !cashu) return null;
   if (!ful || !fulfillment || fulfillment.id !== ful || fulfillment.kind !== NOSTR_KIND_FULFILLMENT) return "unverified-claim";
-  if (pre && /^[0-9a-f]{64}$/i.test(pre)) {
-    const inv = tagv(fulfillment.tags, "bolt11"); const dec = inv ? decodeBolt11(inv) : null;
-    if (dec && bytesToHex(sha256(hexToBytes(pre.toLowerCase()))) === dec.payment_hash) return "verified-preimage";
+  const fr = tagv(fulfillment.tags, "r")?.toLowerCase();
+  if (d && fr && fr !== d) return "unverified-claim"; // a 421 for another store proves nothing here
+  if (fulfillment.pubkey !== FACILITATOR_PUBKEY) {
+    if (pre && checkPreimage(pre, tagv(fulfillment.tags, "bolt11"), bind.nodes)) return "verified-preimage";
+    if (zap && zapReceipt && zapReceipt.id === zap && zapReceipt.tags.some((t) => t[0] === "e" && t[1] === ful)
+      && checkZapReceipt(zapReceipt, bind.zapKeys).ok) return "verified-zap";
   }
-  if (zap && zapReceipt && zapReceipt.id === zap && zapReceipt.kind === ZAP_RECEIPT_KIND && verifyNostrEvent(zapReceipt, ZAP_RECEIPT_KIND).ok) {
-    const refs = zapReceipt.tags.some((t) => t[0] === "e" && t[1] === ful);
-    const b = tagv(zapReceipt.tags, "bolt11"); const dec = b ? decodeBolt11(b) : null;
-    if (refs && dec && (dec.amount_msat ?? 0) > 0) return "verified-zap";
-  }
-  // A 421 KlickyMart signed as facilitator from a bare hash proves nothing: no proof bonus, plain-note weight.
-  if (fulfillment.pubkey === FACILITATOR_PUBKEY && tagv(fulfillment.tags, "verification") === "unverified-claim") return "facilitated-unverified";
+  // A 421 KlickyMart signed as facilitator is never store-bound: no proof bonus, plain-note weight.
+  if (fulfillment.pubkey === FACILITATOR_PUBKEY) return "facilitated-unverified";
   return "unverified-claim";
 }
 
@@ -242,7 +244,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), now, { maxAgeS: 10 * 365 * 86400 });
     if (!x.ok) continue;
     let ps: string | null = null;
-    if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap"))); } catch { ps = null; } }
+    if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap")), await storeBindings(db, x.value.d), x.value.d); } catch { ps = null; } }
     try { await storeExperience(db, x.value, ev, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: ps ?? (x.value.proof ? "proof-attached" : null) }, now); } catch { /* migration pending */ }
   }
   for (const ev of suggestions) {
@@ -255,7 +257,18 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     if (!p.ok) continue;
     const ful = await getEvent(db, p.value.fulfillment ?? undefined);
     const zap = await getEvent(db, tagv(ev.tags, "zap"));
-    await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: checkProof(ev, ful, zap) });
+    await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: checkProof(ev, ful, zap, await storeBindings(db, p.value.d), p.value.d) });
+  }
+  // KM-003: resolve the zapped author's LNURL nostrPubkey (NIP-57) so tips can be checked against it. Bounded per batch.
+  let lookups = 0;
+  for (const { ev } of valid) {
+    if (ev.kind !== ZAP_RECEIPT_KIND || lookups >= 10) continue;
+    const target = tagv(ev.tags, "e"); if (!target) continue;
+    try {
+      const a = await db.prepare("SELECT pubkey FROM experiences WHERE id = ? UNION SELECT pubkey FROM reviews WHERE id = ? LIMIT 1").bind(target, target).first<{ pubkey: string }>();
+      const lud = a ? await lud16Of(db, a.pubkey) : null;
+      if (lud) { lookups++; await lnurlNostrPubkey(db, lud, ctx.fetcher ?? fetch); }
+    } catch { /* tables missing */ }
   }
   if (res.accepted) await refreshFlagCache(db, ctx.flagStatic);
   const touched = new Set([...reviews, ...exps, ...valid.filter((x) => x.ev.kind === NOSTR_KIND_FULFILLMENT).map((x) => x.ev)].map((e) => eventDomain(e, ctx) ?? tagv(e.tags, "r")).filter((x): x is string => !!x));

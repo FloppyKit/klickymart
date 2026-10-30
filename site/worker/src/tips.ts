@@ -2,6 +2,7 @@
  * Display counts every receipt; ranking weight counts only DISTINCT tippers with a validated receipt, ignores self-zaps,
  * and is capped (see TIP_WEIGHT). Read-only over nostr_events; nothing is published. */
 import { decodeBolt11 } from "./bolt11";
+import { cachedZapKey, checkZapReceipt, lud16Of } from "./pay-binding";
 import { verifyNostrEvent } from "./nostr-verify";
 
 export const ZAP_RECEIPT = 9735;
@@ -16,8 +17,10 @@ type Ev = { id: string; pubkey: string; created_at: number; kind: number; tags: 
 export interface Tip { receipt: string; target: string; tipper: string | null; sats: number | null; validated: boolean; self: boolean; created_at: number; eligible?: boolean }
 export interface TipSummary { tips: number; sats: number; distinct_tippers: number; validated_tippers: number; bonus_tippers: number; self_zaps_ignored: number; weight: number }
 
-/** One receipt -> tip. tipper = pubkey of the embedded 9734 zap request (the payer); validated = receipt and request signatures check. */
-export function parseTip(r: Ev, authorOf: (id: string) => string | undefined): Tip | null {
+/** One receipt -> tip. tipper = pubkey of the embedded 9734 zap request (the payer). validated (KM-003) = NIP-57 binding:
+ * the receipt is signed by the nostrPubkey of the zapped author's LNURL (lud16) endpoint, the BOLT11 node signature and
+ * description_hash check, and the amount matches the request. Without a known author zap key nothing validates. */
+export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, zapKeyOf: (author: string) => string | null | undefined = () => null): Tip | null {
   const target = r.tags.find((t) => t[0] === "e")?.[1];
   if (!target) return null;
   const b = r.tags.find((t) => t[0] === "bolt11")?.[1];
@@ -25,8 +28,9 @@ export function parseTip(r: Ev, authorOf: (id: string) => string | undefined): T
   let req: Ev | null = null;
   try { req = JSON.parse(r.tags.find((t) => t[0] === "description")?.[1] ?? "null") as Ev | null; } catch { req = null; }
   const tipper = req?.pubkey ?? r.tags.find((t) => t[0] === "P")?.[1] ?? null;
-  const validated = verifyNostrEvent(r as never, ZAP_RECEIPT).ok && !!req && req.kind === 9734 && verifyNostrEvent(req as never, 9734).ok && (dec?.amount_msat ?? 0) > 0;
   const author = authorOf(target);
+  const zk = author ? zapKeyOf(author) : null;
+  const validated = !!zk && checkZapReceipt(r, zk).ok;
   return { receipt: r.id, target, tipper, sats: dec?.amount_msat != null ? Math.floor(dec.amount_msat / 1000) : null, validated, self: !!tipper && !!author && tipper === author, created_at: r.created_at };
 }
 
@@ -54,12 +58,15 @@ export async function loadTips(db: D1Database | undefined, d?: string): Promise<
     // key history for the bonus rule: a visit note, other activity (not reports/receipts), or old enough
     const hist = new Set<string>();
     const nowS = Math.floor(Date.now() / 1000);
-    for (const q of [db.prepare("SELECT DISTINCT pubkey FROM experiences WHERE IFNULL(basis,'visit') = 'visit'"),
-      db.prepare("SELECT DISTINCT pubkey FROM nostr_events WHERE kind NOT IN (1984, 9735, 0)"),
-      db.prepare("SELECT pubkey FROM nostr_events GROUP BY pubkey HAVING MIN(created_at) <= ?").bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
+    // KM-003: notes and profiles are mintable by throwaway keys, so only ingest-time key age counts as history.
+    for (const q of [
+      // KM-003/KM-007: key age is when KlickyMart first saw the key (first_seen), not an author-set created_at.
+      db.prepare("SELECT pubkey FROM nostr_events GROUP BY pubkey HAVING MIN(first_seen) <= ?").bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
       for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
+    const zapKeys = new Map<string, string | null>();
+    for (const a of new Set(author.values())) zapKeys.set(a, await cachedZapKey(db, await lud16Of(db, a)));
     for (const row of results ?? []) {
-      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id));
+      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a));
       if (!t || !author.has(t.target)) continue;
       t.eligible = !!t.tipper && hist.has(t.tipper);
       (byNote.get(t.target) ?? byNote.set(t.target, []).get(t.target)!).push(t);

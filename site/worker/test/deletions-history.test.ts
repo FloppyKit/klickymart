@@ -6,6 +6,7 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { bech32 } from "@scure/base";
 import { nostrEventId } from "../src/nostr-verify";
 import { ingestEvents, buildFilters, type Ev, type IngestCtx } from "../src/relay-ingest";
+import { encodeBolt11ForTest } from "../src/bolt11";
 import { facilitate, markFacilitatedHistory, FACILITATOR_PUBKEY } from "../src/facilitate";
 import { loadTips } from "../src/tips";
 import { loadAggregates } from "../src/experience";
@@ -82,9 +83,9 @@ describe("NIP-09 deletions", () => {
 });
 
 describe("facilitated 421s become history once the store claims", () => {
-  it("before claim: verified + weighted; after claim: labelled history, no weight, not a verified payment", async () => {
+  it("KM-001/002: before claim a facilitated proof is never verified; after claim: labelled history, no weight", async () => {
     const SK = bytesToHex(key());
-    const pre = bytesToHex(key()); const inv = fakeBolt11(bytesToHex(sha256(hexToBytes(pre))));
+    const pre = bytesToHex(key()); const inv = encodeBolt11ForTest(key(), "lnbc10u", bytesToHex(sha256(hexToBytes(pre))));
     const buyerSk = key(), other = key();
     const kv = new Map<string, string>();
     const r = await facilitate({ DB: env.DB, KV: { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => void kv.set(k, v) } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK },
@@ -96,9 +97,8 @@ describe("facilitated 421s become history once the store claims", () => {
     const rv = note(buyerSk, [["e", ful.id, R, "fulfillment"], ["preimage", pre]]);
     await ing([rv, note(other)]);
     const before = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
-    expect(((await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id) as any)?.proof_status).toBe("verified-preimage");
-    expect(before.success_score).toBe(1);
-    expect(before.proof_keys).toBe(1);
+    expect(((await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id) as any)?.proof_status).toBe("facilitated-unverified");
+    expect(before.proof_keys).toBe(0);
     await env.DB.prepare("INSERT INTO claims (d,pubkey,nip05,checked_at) VALUES (?,?,?,?)").bind(DOM, pk(key()), "_", Math.floor(Date.now() / 1000)).run();
     expect(await markFacilitatedHistory(env.DB, DOM)).toBeGreaterThan(0);
     const item = (await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id)!;

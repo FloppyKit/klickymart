@@ -7,7 +7,7 @@ import { bech32 } from "@scure/base";
 import { nostrEventId } from "../src/nostr-verify";
 import { buildFilters, catchUp, checkProof, ingestEvents, INGEST_LIMITS, type Connect, type Ev, type IngestCtx } from "../src/relay-ingest";
 import { getCommunity } from "../src/community";
-import { decodeBolt11 } from "../src/bolt11";
+import { decodeBolt11, encodeBolt11ForTest } from "../src/bolt11";
 
 const DOM = "store.google.com";
 const OUR = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242";
@@ -35,7 +35,7 @@ function fakeBolt11(hashHex: string, hrp = "lnbc10u"): string {
 }
 
 beforeEach(async () => {
-  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews"]) await env.DB.prepare(`DELETE FROM ${t}`).run();
+  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews", "claims"]) await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 
 describe("relay ingest: validation", () => {
@@ -104,32 +104,47 @@ describe("community view", () => {
 });
 
 describe("proof checks", () => {
-  it("verified preimage loop: 421 bolt11 hash == sha256(preimage)", async () => {
+  it("KM-001 preimage: verified only when the invoice is node-signed by the claimed store's ln_node key", async () => {
     const pre = bytesToHex(secp.utils.randomSecretKey());
     const hash = bytesToHex(sha256(hexToBytes(pre)));
-    const inv = fakeBolt11(hash);
-    expect(decodeBolt11(inv)?.payment_hash).toBe(hash);
+    const node = key(); const nodePub = bytesToHex(secp.getPublicKey(node));
+    const inv = encodeBolt11ForTest(node, "lnbc10u", hash);
     expect(decodeBolt11(inv)?.amount_msat).toBe(1_000_000);
-    const seller = key(), buyer = key();
-    const ful = sign(seller, 421, [aTag(), ["r", DOM], ["bolt11", inv]], "here you go");
+    const owner = key(), buyer = key();
+    const ful = sign(owner, 421, [aTag(), ["r", DOM], ["bolt11", inv]], "here you go");
+    const forgedFul = sign(key(), 421, [aTag(), ["r", DOM], ["bolt11", fakeBolt11(hash)]], "forged");
     const good = review(buyer, [["e", ful.id, R1, "fulfillment"], ["preimage", pre]]);
     const wrong = review(key(), [["e", ful.id, R1, "fulfillment"], ["preimage", "11".repeat(32)]]);
-    await ingestEvents(env.DB, [{ ev: ful, relay: R1 }], ctx());
-    await ingestEvents(env.DB, [{ ev: good, relay: R1 }, { ev: wrong, relay: R1 }], ctx());
+    const forged = review(key(), [["e", forgedFul.id, R1, "fulfillment"], ["preimage", pre]]);
+    // before the store binds its node: a valid invoice is still only a claim
+    expect(checkProof(good, ful, null)).toBe("unverified-claim");
+    await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?)").bind(DOM, bytesToHex(secp.schnorr.getPublicKey(owner)), `_@${DOM}`, 1).run();
+    const rec = sign(owner, 31420, [["d", DOM], ["ln_node", nodePub]], JSON.stringify({ d: DOM }));
+    await ingestEvents(env.DB, [{ ev: rec, relay: R1 }, { ev: ful, relay: R1 }, { ev: forgedFul, relay: R1 }], ctx());
+    await ingestEvents(env.DB, [{ ev: good, relay: R1 }, { ev: wrong, relay: R1 }, { ev: forged, relay: R1 }], ctx());
     const st = await env.DB.prepare("SELECT pubkey, proof_status FROM reviews").all<{ pubkey: string; proof_status: string }>();
     const by = Object.fromEntries((st.results ?? []).map((r) => [r.pubkey, r.proof_status]));
     expect(by[good.pubkey]).toBe("verified-preimage");
     expect(by[wrong.pubkey]).toBe("unverified-claim");
+    expect(by[forged.pubkey]).toBe("unverified-claim"); // zero-signature invoice (audit KM-001 repro)
     const c = await getCommunity(env.DB, DOM, OUR);
     expect(c.verified_payments).toBe(1);
-    expect(c.pay_reports[0]!.summary).toContain("1 verified");
   });
-  it("zap receipt check: signed 9735 referencing the 421 with an amount", () => {
+  it("KM-001 zap: verified only when the 9735 is signed by the store's bound zap key (NIP-57)", () => {
     const ful = sign(key(), 421, [aTag()], "f");
-    const receipt = sign(key(), 9735, [["e", ful.id], ["bolt11", fakeBolt11("ab".repeat(32), "lnbc21u")]], "");
+    const lnurl = key(); const lnurlPk = bytesToHex(secp.schnorr.getPublicKey(lnurl)); const node = key();
+    const req = sign(key(), 9734, [["e", ful.id], ["amount", "2100000"]]);
+    const desc = JSON.stringify(req);
+    const inv = encodeBolt11ForTest(node, "lnbc21u", "ab".repeat(32), { descriptionHashHex: bytesToHex(sha256(new TextEncoder().encode(desc))) });
+    const receipt = sign(lnurl, 9735, [["e", ful.id], ["bolt11", inv], ["description", desc]], "");
+    const attacker = sign(key(), 9735, [["e", ful.id], ["bolt11", inv], ["description", desc]], "");
     const rv = review(key(), [["e", ful.id, R1, "fulfillment"], ["zap", receipt.id]]);
-    expect(checkProof(rv, ful, receipt)).toBe("verified-zap");
-    expect(checkProof(rv, ful, null)).toBe("unverified-claim");
+    const rvA = review(key(), [["e", ful.id, R1, "fulfillment"], ["zap", attacker.id]]);
+    const bind = { nodes: new Set<string>(), zapKeys: new Set([lnurlPk]) };
+    expect(checkProof(rv, ful, receipt, bind)).toBe("verified-zap");
+    expect(checkProof(rv, ful, receipt)).toBe("unverified-claim"); // no binding
+    expect(checkProof(rvA, ful, attacker, bind)).toBe("unverified-claim"); // any-key receipt (audit KM-001 zap variant)
+    expect(checkProof(rv, ful, null, bind)).toBe("unverified-claim");
     expect(checkProof(review(key(), [["cashu", "x"]]), null, null)).toBe("unverified-claim");
   });
 });
