@@ -16,12 +16,25 @@ export function findRow(snap: Snapshot, domainOrUrl: string) {
   return null;
 }
 
+/** Wallet booleans from the store's full pay list (pay + pay_online + unscoped). true = seen; false only when the store's own
+ * wallet list was read; null = not observed. Same function for /check and every product row, so they can't disagree. */
+export function walletFacts(raw: Record<string, unknown>, payAll?: string[]) {
+  const pay = payAll ?? [...new Set([...(raw.pay as string[] ?? []), ...(raw.pay_online as string[] ?? [])])];
+  return {
+    pay_shop_pay: pay.includes("spay") ? true : raw.wallets_checked ? false : null,
+    pay_link: pay.includes("link") ? true : (raw.link_checked || raw.wallets_checked ? false : null),
+    pay_apple_pay: pay.includes("apay") ? true : raw.wallets_checked ? false : null,
+    pay_google_pay: pay.includes("gpay") ? true : raw.wallets_checked ? false : null,
+    pay_paypal: pay.includes("pp") ? true : null,
+  };
+}
+
 export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
   const row = findRow(snap, domainOrUrl);
   const domain = domainOrUrl.includes("/") ? hostOf(domainOrUrl) : domainOrUrl;
   if (!row) return { domain, indexed: false, note: "store not indexed: no KlickyMart record, so checkout, pay and shipping facts are unknown" };
   const raw = parseRaw(row.raw_json);
-  const pay = Array.isArray(raw.pay) ? (raw.pay as string[]) : [];
+  const pay = [...new Set([...(Array.isArray(raw.pay) ? (raw.pay as string[]) : []), ...(Array.isArray(raw.pay_online) ? (raw.pay_online as string[]) : [])])];
   const has = (c: string) => (pay.includes(c) ? true : pay.length ? false : null);
   const sh = shipOf(raw);
   const cm = raw.checkout_map as { stage?: string; first_blocker?: { kind?: string } } | undefined;
@@ -29,7 +42,7 @@ export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
     domain: row.d, indexed: true, verdict: row.status === "crawled" ? "reachable" : row.status,
     ...storeFacts(row),
     // Wallets are "false" only when the store's own wallet list was read (a Shopify product page's accelerated-checkout list); otherwise unknown.
-    pay, pay_shop_pay: pay.includes("spay") ? true : raw.wallets_checked ? false : null, pay_link: pay.includes("link") ? true : (raw.link_checked || raw.wallets_checked ? false : null),
+    pay, ...walletFacts(raw, pay),
     ...(raw.wallets_checked ? { wallets_src: raw.wallets_checked } : {}), pay_btc_onchain: has("btc"), pay_lightning: pay.length ? pay.includes("ln") || pay.includes("lnurl") : null,
     btc_indirect: (raw.btc_indirect as unknown[] | undefined) ?? null,
     ships_us: sh.ships_us, free_ship_min_usd: sh.free_min_usd, tax_shown_before_payment: sh.pre_pay,

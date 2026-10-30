@@ -1,3 +1,4 @@
+import { walletFacts } from "./store-card";
 import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
@@ -37,8 +38,11 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       ...storeFacts(row),
       ...checkExtras(row, raw),
       checkout_depth: checkoutOf(row, raw),
-      steps: checkoutOf(row, raw).steps,
+      // steps = the step list the checkout probe walked (stage, url, action, status); steps_count = its length.
+      steps: checkoutOf(row, raw).step_list,
+      steps_count: checkoutOf(row, raw).steps,
       pay: c.pay,
+      ...walletFacts(raw, (c.pay as unknown as { all?: string[] }).all),
       btc_grade: row.btc,
       btc_any: row.btc_any === null ? null : row.btc_any === 1,
       btc_indirect: (raw.btc_indirect as unknown[] | undefined) ?? null,
