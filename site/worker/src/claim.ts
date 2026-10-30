@@ -31,7 +31,7 @@ export async function fetchNostrJson(domain: string, timeoutMs = 5000): Promise<
     const res = await fetch(url, {
       redirect: "manual",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", "User-Agent": "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com; owner-claim)" },
     });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("Location");
@@ -70,8 +70,8 @@ export async function fetchNostrJson(domain: string, timeoutMs = 5000): Promise<
   }
 }
 
-/** hex to npub bech32 simplified — use minimal encoder for tests */
+import { hexToNpub as npubOf } from "./crawler-pubkey";
+/** KM-004: real NIP-19 bech32 npub (was a truncated display stub that no real npub could match). Non-hex input is returned as is. */
 export function hexToNpub(hex: string): string {
-  if (hex.length !== 64) return hex;
-  return `npub1${hex.slice(0, 8)}…${hex.slice(-4)}`;
+  try { return npubOf(hex); } catch { return hex; }
 }

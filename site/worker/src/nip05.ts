@@ -1,7 +1,10 @@
 /** NIP-05 checks for keys that have posted notes, used only as a public same-operator hint in flags.ts.
  * Mirrors crawler/gate.py: robots.txt first with our honest UA (404 = allowed; 403/5xx/timeout = disallowed), refuse
  * domains our index marks as not-welcome, public hostnames only, no redirects (NIP-05), small timeouts, few per pass. */
-export const NIP05_UA = "KlickyMartBot/1.0 (+https://klickymart.com/bot; bot@klickymart.com)";
+/** KM-016: one honest identity for every server-initiated fetch. The documented opt-out token is FloppyKitMapBot;
+ * the legacy "KlickyMartBot" token is honoured too. */
+export const BOT_TOKENS = "floppykitmapbot klickymartbot";
+export const NIP05_UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com; nip05-check)";
 export const NIP05_LIMITS = { perPass: 10, recheckS: 7 * 86400, timeoutMs: 5000 };
 /** Large public NIP-05 providers: many unrelated people share these, so they never give more than a weak flag. */
 export const BIG_NIP05_PROVIDERS = new Set(["primal.net", "iris.to", "snort.social", "nostrplebs.com", "nostr.com", "getalby.com", "damus.io", "nostrcheck.me", "zaps.lol",
@@ -18,7 +21,7 @@ export function parseNip05(s: unknown): { name: string; domain: string } | null 
 }
 
 /** Is `path` allowed for our UA (or *) by this robots.txt? Longest-match Allow/Disallow, as gate.py's robotparser roughly does. */
-export function robotsAllows(txt: string, path: string, token = "klickymartbot"): boolean {
+export function robotsAllows(txt: string, path: string, token = BOT_TOKENS): boolean {
   const groups: { agents: string[]; rules: [boolean, string][] }[] = [];
   let cur: { agents: string[]; rules: [boolean, string][] } | null = null; let lastWasAgent = false;
   for (const raw of txt.split(/\r?\n/)) {

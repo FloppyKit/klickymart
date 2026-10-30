@@ -3,7 +3,7 @@ import { takeAll } from "./ratelimit";
  * Limits: at most 1 live recheck per domain per 10 minutes (else the cached result plus next_allowed_at) and 60 per hour overall.
  * Only domains already in the index; never follows links, never submits anything. */
 export const RECHECK_UA = "FloppyKitMapBot/0.2 Agent/KlickyBot (+https://klickymart.com/bot; bot@klickymart.com)";
-export const RECHECK_TOKEN = "floppykitmapbot";
+export const RECHECK_TOKEN = "floppykitmapbot"; // KM-016: same token as the crawler, NIP-05 checker and docs
 export const PER_DOMAIN_S = 600, GLOBAL_PER_HOUR = 60;
 
 /** Minimal robots.txt evaluation for one path: the group naming our token, else '*'. Longest match wins; Allow wins ties. */

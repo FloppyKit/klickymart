@@ -37,7 +37,7 @@ describe("NIP-05 same-operator", () => {
     const pk = "ab".repeat(32);
     const calls: string[] = [];
     const fake = (robots: [number, string], json: [number, unknown]) => async (u: string, i?: RequestInit) => {
-      calls.push(u); expect(i?.redirect).toBe("manual"); expect(String((i?.headers as Record<string, string>)["User-Agent"])).toMatch(/KlickyMartBot/);
+      calls.push(u); expect(i?.redirect).toBe("manual"); expect(String((i?.headers as Record<string, string>)["User-Agent"])).toMatch(/^FloppyKitMapBot\//);
       return u.endsWith("/robots.txt") ? new Response(robots[1], { status: robots[0] }) : new Response(JSON.stringify(json[1]), { status: json[0] });
     };
     expect((await checkNip05(pk, "bob@ops.example", fake([404, ""], [200, { names: { bob: pk } }]), () => undefined)).status).toBe("verified");

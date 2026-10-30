@@ -412,7 +412,7 @@ export function renderClaim(origin: string, domain: string, resultHtml: string, 
 <h1>Claim your domain.</h1>
 <p class="km-lead">Prove you control the domain with a Nostr address (NIP-05), then publish your own record or a dispute. We re-check your site after you do.</p>
 <ol><li>Publish /.well-known/nostr.json on your domain with a <code>_</code> name pointing to your public key.</li><li>Check it here.</li><li>Publish a kind ${NOSTR_KIND_CRAWL_RECORD} record (or a dispute) signed by that key. Self-publishing is coming; for now, open an issue and we will handle it by hand.</li></ol>
-<form method="get" action="/claim"><label>Domain <input name="domain" value="${esc(domain)}" required></label><button type="submit">Check domain</button></form>
+<form method="post" action="/claim"><label>Domain <input name="domain" value="${esc(domain)}" required></label><button type="submit">Check nostr.json and claim</button></form>
 ${resultHtml}`;
   return pageLayout({ title: "Claim", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/claim" }, shell);
 }

@@ -7,11 +7,8 @@ const HEX64 = /^[0-9a-f]{64}$/i;
 
 export function hexToNpub(hex: string): string {
   if (!HEX64.test(hex)) throw new Error("invalid pubkey hex");
-  const pk = hexToBytes(hex.toLowerCase());
-  const data = new Uint8Array(33);
-  data[0] = 0;
-  data.set(pk, 1);
-  return bech32.encode("npub", bech32.toWords(data));
+  // NIP-19: bech32("npub", the 32 key bytes). (KM-004: a leading zero byte here produced npubs no client could decode.)
+  return bech32.encode("npub", bech32.toWords(hexToBytes(hex.toLowerCase())));
 }
 
 export function discoverCrawlerPubkeyHex(rows: RecordRow[]): string | null {

@@ -41,7 +41,8 @@ import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
-import { take } from "./ratelimit";
+import { EPHEMERAL_SALT } from "./submissions";
+import { take, takeAll } from "./ratelimit";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
@@ -244,8 +245,8 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (env.DB && (p.ok || x.ok)) {
     const ev0 = body as Ev;
     try {
-      const tb = await env.DB.prepare("SELECT pubkey FROM tombstones WHERE id = ?").bind(ev0.id).first<{ pubkey: string }>();
-      if (tb && tb.pubkey === ev0.pubkey) return { status: 410, body: { ok: false, error: { code: "deleted", message: "this event was deleted by its author (NIP-09) and cannot be resubmitted" } } };
+      const tb = await env.DB.prepare("SELECT pubkey FROM tombstones WHERE id = ? AND pubkey = ?").bind(ev0.id, ev0.pubkey).first<{ pubkey: string }>(); // KM-010
+      if (tb) return { status: 410, body: { ok: false, error: { code: "deleted", message: "this event was deleted by its author (NIP-09) and cannot be resubmitted" } } };
     } catch { /* migration pending */ }
   }
   if (!p.ok && !x.ok) return { status: 400, body: { ok: false, error: { code: x.code === "not_an_experience" || x.code === "bad_kind" ? p.code : x.code, message: x.code === "not_an_experience" || x.code === "bad_kind" ? p.message : x.message } } };
@@ -319,7 +320,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const t = await allTiers();
     return { ...snap, rows: snap.rows.filter((r) => meetsMinTrust(t.get(r.d)?.trust_tier, minTrust)) };
   };
-  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || "km-dev-salt", ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
+  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || EPHEMERAL_SALT, ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
   const handleSubmit = async (body: Record<string, unknown>, via: "post" | "mcp", dryRun: boolean) => {
     const evIn = body.event ?? (typeof body.kind === "number" ? body : null);
     if (evIn) {
@@ -351,7 +352,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
   if (path === "/claim/dns" && request.method === "POST") {
     let b: unknown;
-    try { b = JSON.parse(await request.text()); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON: {event} (signed kind 1423 with [\"claim\",\"dns\"|\"revoke\"]) or {domain} to re-check" } }, { status: 400 }); }
+    const raw = await request.text();
+    if (raw.length > 8192) return Response.json({ ok: false, error: { code: "too_large", message: "body too large" } }, { status: 413 });
+    try { b = JSON.parse(raw); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON: {event} (signed kind 1423 with [\"claim\",\"dns\"|\"revoke\"]) or {domain} to re-check" } }, { status: 400 }); }
     if (!b || typeof b !== "object") return Response.json({ ok: false, error: { code: "bad_json", message: "body must be a JSON object" } }, { status: 400 });
     const r = await handleDnsClaim(env.DB, b as Record<string, unknown>, { dryRun: url.searchParams.get("dry_run") === "1" });
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
@@ -982,27 +985,51 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json(resp, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
   }
 
+  // KM-011: GET /claim is read-only (form + stored claim status, no outbound fetch, no writes). The nostr.json check and
+  // the claim write happen only on POST /claim from our own form (same-origin), rate-limited per domain and globally.
   if (path === "/claim" && request.method === "GET") {
     const domain = url.searchParams.get("domain") ?? "";
     let resultHtml = "";
     if (domain) {
       const v = validateClaimDomain(domain);
       if (!v.ok) resultHtml = `<p class="km-err">${escHtml(v.message)}</p>`;
-      else {
-        const res = await fetchNostrJson(v.domain);
-        if (!res.ok) resultHtml = `<p>Not found: ${escHtml(res.error ?? "unknown")}</p>`;
-        else {
-          const entries = Object.entries(res.names).map(([n, pk]) => `<li><code>${escHtml(n)}</code>: ${escHtml(pk)} (${escHtml(hexToNpub(pk))})${n === "_" ? " ← domain key" : ""}</li>`).join("");
-          resultHtml = `<p>Found nostr.json (HTTP ${res.status}). CORS: ${res.cors ? "yes" : "no"}</p><ul>${entries}</ul>`;
-          if (res.underscore && env.DB) {
-            await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?)").bind(v.domain, res.underscore, `_${v.domain}`, Math.floor(Date.now() / 1000)).run();
-            await markFacilitatedHistory(env.DB, v.domain);
-            await refreshFlagCache(env.DB, await buildFlagStatic(snap));
-          }
-        }
+      else if (env.DB) {
+        try {
+          const rows = (await env.DB.prepare("SELECT pubkey, checked_at FROM claims WHERE d = ?").bind(v.domain).all<{ pubkey: string; checked_at: number }>()).results ?? [];
+          resultHtml = rows.length ? `<p>Claimed by NIP-05 <code>_@${escHtml(v.domain)}</code>:</p><ul>${rows.map((r) => `<li>${escHtml(hexToNpub(r.pubkey))} (checked ${escHtml(new Date(r.checked_at * 1000).toISOString().slice(0, 10))})</li>`).join("")}</ul>` : `<p>No NIP-05 claim stored for ${escHtml(v.domain)} yet.</p>`;
+        } catch { resultHtml = ""; }
       }
     }
     return new Response(renderClaim(origin, domain, resultHtml, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
+  if (path === "/claim" && request.method === "POST") {
+    const o = request.headers.get("Origin");
+    if (o && o !== origin && o !== `${url.protocol}//${url.host}`) return new Response("cross-site claim refused", { status: 403 });
+    const text = (await request.text()).slice(0, 2048);
+    let domain = "";
+    try { domain = (request.headers.get("content-type") ?? "").includes("json") ? String((JSON.parse(text) as { domain?: unknown }).domain ?? "") : new URLSearchParams(text).get("domain") ?? ""; } catch { domain = ""; }
+    const v = validateClaimDomain(domain);
+    let resultHtml: string;
+    if (!v.ok) resultHtml = `<p class="km-err">${escHtml(v.message)}</p>`;
+    else if (env.DB && await takeAll(env.DB, [{ k: `claim:d:${v.domain}:${Math.floor(Date.now() / 600_000)}`, limit: 2, ttlS: 1200 }, { k: `claim:g:${Math.floor(Date.now() / 3_600_000)}`, limit: 120, ttlS: 7200 }]).catch(() => null))
+      resultHtml = `<p class="km-err">Too many checks for this domain right now; try again in 10 minutes.</p>`;
+    else {
+      const res = await fetchNostrJson(v.domain);
+      if (!res.ok) resultHtml = `<p>Not found: ${escHtml(res.error ?? "unknown")}</p>`;
+      else {
+        const entries = Object.entries(res.names).map(([n, pk]) => `<li><code>${escHtml(n)}</code>: ${escHtml(pk)} (${escHtml(hexToNpub(pk))})${n === "_" ? " ← domain key" : ""}</li>`).join("");
+        resultHtml = `<p>Found nostr.json (HTTP ${res.status}). CORS: ${res.cors ? "yes" : "no"}</p><ul>${entries}</ul>`;
+        if (res.underscore && /^[0-9a-f]{64}$/.test(res.underscore) && env.DB) {
+          try { // KM-017: idempotent upsert; never surface raw DB errors
+            await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?) ON CONFLICT(d, pubkey) DO UPDATE SET checked_at = excluded.checked_at").bind(v.domain, res.underscore, `_@${v.domain}`, Math.floor(Date.now() / 1000)).run();
+            await markFacilitatedHistory(env.DB, v.domain);
+            await refreshFlagCache(env.DB, await buildFlagStatic(snap));
+            resultHtml += `<p>Claim stored for ${escHtml(v.domain)}.</p>`;
+          } catch { resultHtml += `<p class="km-err">Could not store the claim right now; please try again.</p>`; }
+        }
+      }
+    }
+    return new Response(renderClaim(origin, v.ok ? v.domain : domain, resultHtml, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
   }
 
   if (path === "/_ingest" && request.method === "POST") {

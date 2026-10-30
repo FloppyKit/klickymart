@@ -43,6 +43,7 @@
 <p>Add this to your robots.txt; the crawler will stop visiting on its next run:</p>
 <pre class="km-codeblock"><code>User-agent: FloppyKitMapBot
 Disallow: /</code></pre>
+<p>The same token covers every fetch KlickyMart's servers make on their own: the crawler, store re-checks, and NIP-05 checks of <code>/.well-known/nostr.json</code> (all honour <code>FloppyKitMapBot</code>; the older <code>KlickyMartBot</code> token is honoured too). Their user agents all start with <code>FloppyKitMapBot/0.2</code> and end with a purpose (<code>nip05-check</code>, <code>lnurl-nip57</code>, <code>owner-claim</code>). Two fetches are not crawling and do not read robots.txt: a NIP-57 LNURL-pay lookup of a lightning address someone published for tips, and the claim check a store owner starts on <a href="/claim">/claim</a>. Relay connections use <code>KlickyMartIngest/1.0</code>.</p>
 <p>You can also disallow only certain paths. The opt-out and any blocks are noted in the site's record, so the directory shows that the site is not available to agents.</p>
 <p>To ask for a correction, a re-check or removal, open an issue at <a href="https://github.com/FloppyKit/klickymart/issues">github.com/FloppyKit/klickymart/issues</a>. Or email <a href="mailto:bot@klickymart.com">bot@klickymart.com</a>.</p>
 

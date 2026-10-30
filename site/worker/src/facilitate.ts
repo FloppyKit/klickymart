@@ -8,6 +8,7 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { verifyBolt11 } from "./bolt11";
 import { checkZapReceipt, claimedKeys } from "./pay-binding";
 import { take } from "./ratelimit";
+import { ipHash } from "./submissions";
 import { nostrEventId, verifyNostrEvent } from "./nostr-verify";
 import { NOSTR_KIND_FULFILLMENT } from "./nostr-kinds";
 
@@ -77,7 +78,7 @@ async function bump(kv: KVNamespace, key: string, limit: number, db?: D1Database
   return true;
 }
 
-export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILITATOR_SK_HEX?: string }, input: FacilitateInput, known: (d: string) => boolean, ip: string, now = Date.now()): Promise<Res> {
+export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILITATOR_SK_HEX?: string; SUBMIT_SALT?: string }, input: FacilitateInput, known: (d: string) => boolean, ip: string, now = Date.now()): Promise<Res> {
   if (input && typeof input === "object" && Object.keys(input).some((k) => /nsec|secret|private|sk$/i.test(k)))
     return bad("secret_sent", "Never send a secret key. Send only your public key (hex) as agent_pubkey.");
   const d = String(input.domain ?? "").toLowerCase().replace(/^www\./, "");
@@ -97,7 +98,7 @@ export async function facilitate(env: { DB?: D1Database; KV: KVNamespace; FACILI
   if (!pr.ok) return bad(pr.code, pr.message);
   if (!env.FACILITATOR_SK_HEX || !HEX64.test(env.FACILITATOR_SK_HEX)) return bad("not_configured", "facilitator key not configured", 503);
   const day = new Date(now).toISOString().slice(0, 10);
-  for (const [k, lim] of [[`fac:g:${day}`, FACILITATE_LIMITS.globalPerDay], [`fac:ip:${bytesToHex(sha256(new TextEncoder().encode(`${day}:${ip}`))).slice(0, 16)}:${day}`, FACILITATE_LIMITS.perIpPerDay], [`fac:pk:${agent}:${day}`, FACILITATE_LIMITS.perAgentPerDay], [`fac:pkd:${agent}:${d}:${day}`, FACILITATE_LIMITS.perAgentDomainPerDay]] as const)
+  for (const [k, lim] of [[`fac:g:${day}`, FACILITATE_LIMITS.globalPerDay], [`fac:ip:${ipHash(ip, env.SUBMIT_SALT ?? "", now)}:${day}`, FACILITATE_LIMITS.perIpPerDay], [`fac:pk:${agent}:${day}`, FACILITATE_LIMITS.perAgentPerDay], [`fac:pkd:${agent}:${d}:${day}`, FACILITATE_LIMITS.perAgentDomainPerDay]] as const)
     if (!(await bump(env.KV, k, lim, env.DB))) return bad("rate_limited", `facilitation limit reached (${JSON.stringify(FACILITATE_LIMITS)})`, 429);
   const amt = pr.amount_msat ?? (Number.isFinite(Number(input.amount_msat)) && Number(input.amount_msat) > 0 ? Math.floor(Number(input.amount_msat)) : null);
   const label = pr.verification === "unverified-claim" ? "UNVERIFIED CLAIM: KlickyMart could not bind this payment to the store." : `Payment proof checked by KlickyMart (${pr.verification}).`;

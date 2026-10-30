@@ -312,10 +312,15 @@ describe("min_trust", () => {
 
 describe("DNS TXT store claims", () => {
   const signClaim = (d: string, action: string, sk = secp.utils.randomSecretKey()) => sign1423([["r", d], ["claim", action]], "", sk);
-  it("txtNames matches bare or prefixed npub only", () => {
-    expect(txtNames("npub1abc", ["npub1abc"])).toBe(true);
-    expect(txtNames("npub1abc", ["klickymart-claim=npub1abc"])).toBe(true);
-    expect(txtNames("npub1abc", ["npub1abcd", "v=spf1"])).toBe(false);
+  it("KM-004: txtNames matches the full npub or hex (bare or prefixed), never a truncated stub", () => {
+    const hex = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242"; const npub = hexToNpub(hex);
+    expect(npub).toBe("npub18tzyhkgafgz5gsp6phlyahzx3s85u8kg5fhjkt6ca9u6hc6dxfpqe6z979");
+    expect(txtNames(npub, [npub], hex)).toBe(true);
+    expect(txtNames(npub, [`klickymart-claim=${npub}`], hex)).toBe(true);
+    expect(txtNames(npub, [hex], hex)).toBe(true);
+    expect(txtNames(npub, [`npub1${hex.slice(0, 8)}…${hex.slice(-4)}`, "v=spf1"], hex)).toBe(false); // old stub no longer matches
+    const other = hex.slice(0, 8) + "0".repeat(52) + hex.slice(-4); // same first-8/last-4 (old collision)
+    expect(txtNames(hexToNpub(other), [npub], other)).toBe(false);
   });
   it("claim -> verified (store claim: DNS TXT); other key cannot revoke; same key revokes; TXT removal -> dns-removed", async () => {
     const d = uniq("dns"); const sk = secp.utils.randomSecretKey(); const ev = signClaim(d, "dns", sk); const npub = hexToNpub(ev.pubkey);

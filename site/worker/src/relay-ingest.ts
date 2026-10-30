@@ -17,7 +17,7 @@ export const ZAP_RECEIPT_KIND = 9735;
 export const DELETION_KIND = 5;
 /** KIMI-008: frame and buffer bounds applied when a frame is received, before it is buffered. */
 export const BUFFER_LIMITS = { maxFrameBytes: 65536 + 1024, liveMaxEvents: 2000, liveMaxBytes: 4 * 1024 * 1024, catchupMaxEvents: 5000, catchupMaxBytes: 8 * 1024 * 1024 };
-export const INGEST_LIMITS = { perPubkeyPerDay: 200, receiptsPerSignerPerDay: 1000, suggestionsPerDay: 50, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 120 };
+export const INGEST_LIMITS = { perPubkeyPerDay: 200, receiptsPerSignerPerDay: 1000, suggestionsPerDay: 50, maxEventBytes: 65536, catchupTimeoutMs: 12_000, catchupOverlapS: 600 }; // KIMI-009: overlap >= the 600 s future-skew we accept
 /** KM-007: relay-ingested notes/reviews older than this are rejected (was ~10 years), and nothing more than
  * MAX_FUTURE_S ahead of our clock is accepted. Key age is judged on first_seen (ingest time), never on created_at. */
 export const RELAY_NOTE_MAX_AGE_S = 60 * 86400;
@@ -188,15 +188,15 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   }
   if (valid.length) {
     const ids0 = [...new Set(valid.map((x) => x.ev.id))];
-    const tomb = new Map<string, string>();
+    const tomb = new Set<string>(); // KM-010: (id, author) pairs
     for (let k = 0; k < ids0.length; k += 90) {
       const chunk = ids0.slice(k, k + 90);
       try {
         const { results } = await db.prepare(`SELECT id, pubkey FROM tombstones WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all<{ id: string; pubkey: string }>();
-        for (const r of results ?? []) tomb.set(r.id, r.pubkey);
+        for (const r of results ?? []) tomb.add(`${r.id}|${r.pubkey}`);
       } catch { /* migration pending */ }
     }
-    for (let k = valid.length - 1; k >= 0; k--) if (tomb.get(valid[k]!.ev.id) === valid[k]!.ev.pubkey) { valid.splice(k, 1); reject("deleted by author (tombstone)"); }
+    for (let k = valid.length - 1; k >= 0; k--) if (tomb.has(`${valid[k]!.ev.id}|${valid[k]!.ev.pubkey}`)) { valid.splice(k, 1); reject("deleted by author (tombstone)"); }
   }
   if (!valid.length) { if (res.accepted) await refreshFlagCache(db, ctx.flagStatic); return res; }
   const existing = new Map<string, string>();
@@ -345,7 +345,7 @@ export async function saveState(db: D1Database, relay: string, u: { maxCreated?:
       last_error_at = COALESCE(excluded.last_error_at, ingest_state.last_error_at),
       events_total = ingest_state.events_total + excluded.events_total,
       rejected = ingest_state.rejected + excluded.rejected`)
-    .bind(relay, u.maxCreated ?? 0, u.events ? now : null, u.ok ? now : null, u.error ?? null, u.error ? now : null, u.events ?? 0, u.rejected ?? 0).run();
+    .bind(relay, Math.min(u.maxCreated ?? 0, now), u.events ? now : null, u.ok ? now : null, u.error ?? null, u.error ? now : null, u.events ?? 0, u.rejected ?? 0).run();
 }
 
 async function knownFulfillments(db: D1Database): Promise<string[]> {
@@ -365,7 +365,7 @@ export async function catchUp(db: D1Database, relays: string[], ctx: IngestCtx, 
   // Reads run in parallel; D1 writes are serialized so cross-relay dedupe (and relay lists) stay exact.
   let writeChain: Promise<unknown> = Promise.resolve();
   await Promise.all(relays.map(async (relay) => {
-    const since = Math.max(0, (state[relay]?.last_seen ?? 0) - INGEST_LIMITS.catchupOverlapS);
+    const since = Math.max(0, Math.min(state[relay]?.last_seen ?? 0, Math.floor((ctx.now ?? Date.now()) / 1000)) - INGEST_LIMITS.catchupOverlapS); // KIMI-009: a future-dated watermark cannot skip events
     const filters = buildFilters(ctx, since, fulIds, authors);
     const events: { ev: unknown; relay: string }[] = [];
     let error: string | undefined; let bytes = 0;

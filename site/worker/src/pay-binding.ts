@@ -89,7 +89,7 @@ export async function lnurlNostrPubkey(db: D1Database | undefined, lud16: string
   let pk: string | null = null;
   try {
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 5000);
-    const res = await fetcher(`https://${m[2]}/.well-known/lnurlp/${encodeURIComponent(m[1]!)}`, { redirect: "manual", signal: ctl.signal, headers: { Accept: "application/json" } });
+    const res = await fetcher(`https://${m[2]}/.well-known/lnurlp/${encodeURIComponent(m[1]!)}`, { redirect: "manual", signal: ctl.signal, headers: { Accept: "application/json", "User-Agent": "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com; lnurl-nip57)" } });
     clearTimeout(t);
     if (res.ok) {
       const txt = (await res.text()).slice(0, 65536);

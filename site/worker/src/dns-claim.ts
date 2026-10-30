@@ -1,3 +1,4 @@
+import { takeAll } from "./ratelimit";
 import { markFacilitatedHistory } from "./facilitate";
 /** DNS TXT store claims (Path 3, trust_tier verified via "store claim: DNS TXT").
  * Owner: publish TXT at _klickymart.<domain> containing their npub (bare or "klickymart-claim=npub1..."), then POST a kind 1423
@@ -18,8 +19,10 @@ export const dohTxt: TxtLookup = async (name) => {
     return (j.Answer ?? []).filter((a) => a.type === 16).map((a) => (a.data.match(/"((?:[^"\\]|\\.)*)"/g) ?? [a.data]).map((x) => x.replace(/^"|"$/g, "")).join(""));
   } catch { return null; }
 };
-export function txtNames(npub: string, txts: string[]): boolean {
-  return txts.some((t) => t.trim().split(/[\s;,]+/).some((w) => w === npub || w === `klickymart-claim=${npub}`));
+/** KM-004: the TXT must carry the FULL key: the bech32 npub or the 64-hex pubkey, bare or as klickymart-claim=<value>. */
+export function txtNames(npub: string, txts: string[], hex?: string): boolean {
+  const ok = new Set([npub, ...(hex ? [hex.toLowerCase()] : [])].filter((x) => x.length >= 63));
+  return txts.some((t) => t.trim().replace(/^"|"$/g, "").split(/[\s;,]+/).some((w) => { const v = w.replace(/^klickymart-claim=/, ""); return ok.has(v) || ok.has(v.toLowerCase()); }));
 }
 
 type Res = { status: number; body: Record<string, unknown> };
@@ -32,16 +35,23 @@ export async function handleDnsClaim(db: D1Database | undefined, body: Record<st
     const n = normalizeSubmitDomain(body.domain);
     if (!n.ok) return bad(n.code, n.message);
     const rows = (await db.prepare("SELECT pubkey FROM store_claims WHERE domain = ? AND status = 'active'").bind(n.domain).all<{ pubkey: string }>()).results ?? [];
+    if (!rows.length) return { status: 200, body: { ok: true, domain: n.domain, rechecked: [], dry_run: !!opts.dryRun } }; // KIMI-010: no lookup when nothing to re-check
+    if (await recheckThrottled(db, n.domain, nowS)) return bad("rate_limited", "re-check limit: once per domain per 10 minutes, 120 per hour overall", 429);
     const txts = await lookup(`_klickymart.${n.domain}`);
     if (txts === null) return bad("dns_error", "TXT lookup failed; nothing changed", 502);
     const out = [];
     for (const r of rows) {
-      const still = txtNames(hexToNpub(r.pubkey), txts);
+      const still = txtNames(hexToNpub(r.pubkey), txts, r.pubkey);
       if (!opts.dryRun) await db.prepare(still ? "UPDATE store_claims SET checked_at = ? WHERE domain = ? AND pubkey = ?" : "UPDATE store_claims SET status = 'dns-removed', checked_at = ?, revoked_at = ? WHERE domain = ? AND pubkey = ?").bind(...(still ? [nowS, n.domain, r.pubkey] : [nowS, nowS, n.domain, r.pubkey])).run();
       out.push({ npub: hexToNpub(r.pubkey), status: still ? "active" : "dns-removed" });
     }
     if (!opts.dryRun) clearTierCache();
     return { status: 200, body: { ok: true, domain: n.domain, rechecked: out, dry_run: !!opts.dryRun } };
+  }
+  { // KIMI-010: admission limit before signature checks and DNS work for signed claims (per claimed domain + global)
+    const tags = (body.event as { tags?: unknown })?.tags;
+    const rd = Array.isArray(tags) ? String((tags.find((t) => Array.isArray(t) && t[0] === "r") as string[] | undefined)?.[1] ?? "") : "";
+    if (await recheckThrottled(db, rd, nowS, 10, "dnsev")) return bad("rate_limited", "claim limit reached; try again later", 429);
   }
   const ev = body.event as { id: string; pubkey: string; kind: number; created_at: number; tags: string[][]; content: string; sig: string };
   if (JSON.stringify(ev).length > 4096) return bad("too_large", "event too large", 413);
@@ -63,7 +73,7 @@ export async function handleDnsClaim(db: D1Database | undefined, body: Record<st
   }
   const txts = await lookup(name);
   if (txts === null) return bad("dns_error", `TXT lookup for ${name} failed; try again`, 502);
-  if (!txtNames(npub, txts)) return { status: 422, body: { ok: false, domain: n.domain, npub, error: { code: "txt_missing", message: `no TXT record at ${name} contains ${npub} (bare or klickymart-claim=${npub})` }, found: txts.slice(0, 5) } };
+  if (!txtNames(npub, txts, pk)) return { status: 422, body: { ok: false, domain: n.domain, npub, error: { code: "txt_missing", message: `no TXT record at ${name} contains ${npub} (bare or klickymart-claim=${npub})` }, found: txts.slice(0, 5) } };
   if (!opts.dryRun) {
     await db.prepare(`INSERT INTO store_claims (domain,pubkey,method,status,txt,event_id,claimed_at,checked_at) VALUES (?,?,'dns','active',?,?,?,?)
       ON CONFLICT(domain,pubkey) DO UPDATE SET status='active', txt=excluded.txt, event_id=excluded.event_id, checked_at=excluded.checked_at, revoked_at=NULL, revoke_event_id=NULL`).bind(n.domain, pk, txts.join(" | ").slice(0, 500), ev.id, nowS, nowS).run();
@@ -77,4 +87,11 @@ const dryRunStatus = (d?: boolean) => (d ? 200 : 201);
 export async function claimStatus(db: D1Database | undefined, domain: string) {
   if (!db) return [];
   try { return ((await db.prepare("SELECT pubkey, status, method, claimed_at, checked_at, revoked_at FROM store_claims WHERE domain = ?").bind(domain).all<Record<string, unknown>>()).results ?? []).map((r) => ({ npub: hexToNpub(String(r.pubkey)), status: r.status, method: r.method, claimed_at: new Date(Number(r.claimed_at) * 1000).toISOString(), checked_at: new Date(Number(r.checked_at) * 1000).toISOString(), revoked_at: r.revoked_at ? new Date(Number(r.revoked_at) * 1000).toISOString() : null })); } catch { return []; }
+}
+
+/** KIMI-010: atomic throttles before any DNS-over-HTTPS lookup: per domain per 10 min (default 1) and 120 per hour overall. */
+async function recheckThrottled(db: D1Database, domain: string, nowS: number, perDomain = 1, prefix = "dns"): Promise<boolean> {
+  try {
+    return !!(await takeAll(db, [{ k: `${prefix}:d:${domain.toLowerCase()}:${Math.floor(nowS / 600)}`, limit: perDomain, ttlS: 1200 }, { k: `${prefix}:g:${Math.floor(nowS / 3600)}`, limit: 120, ttlS: 7200 }], nowS));
+  } catch { return false; /* migration pending */ }
 }

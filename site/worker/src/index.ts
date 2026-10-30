@@ -33,7 +33,9 @@ export default {
         let id: unknown = null; try { id = (JSON.parse(body) as { id?: unknown }).id ?? null; } catch { /* */ }
         return Response.json(mcpErrorFor(e, id), { headers: { "Access-Control-Allow-Origin": "*" } });
       }
-      return Response.json({ error: { code: "internal", message: String(e instanceof Error ? e.message : e).slice(0, 200), retryable: true, retry_after_s: 2 } },
+      // KM-017: never echo raw error text (DB schema, engine details) to clients.
+      console.error("unhandled", e instanceof Error ? e.message : String(e));
+      return Response.json({ error: { code: "internal", message: "temporary error, please retry", retryable: true, retry_after_s: 2 } },
         { status: 503, headers: { "Retry-After": "2", "Access-Control-Allow-Origin": "*" } });
     }
   },

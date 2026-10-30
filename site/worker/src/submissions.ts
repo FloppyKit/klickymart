@@ -1,3 +1,4 @@
+import { hmac } from "@noble/hashes/hmac.js";
 import { takeAll } from "./ratelimit";
 import { BIG_NIP05_PROVIDERS } from "./nip05";
 /** Path 3: community store submission + trust ladder (trust_tier). Separate from the record's `trust` (domain-age) object.
@@ -149,12 +150,16 @@ export function cleanCategory(c: unknown): string | null {
   return t || null;
 }
 
-/** Salted, week-bucketed hash prefix. Never stores or returns the IP itself. */
+/** KM-013: keyed, week-bucketed HMAC-SHA256 prefix of the IP. The key is the SUBMIT_SALT secret; without it a random
+ * per-isolate key is used (never a committed default), so the hash cannot be reversed by sweeping the IPv4 space.
+ * Never stores or returns the IP itself. */
 export function ipHash(ip: string | null, salt: string, now = Date.now()): string | null {
   if (!ip) return null;
   const week = Math.floor(now / (7 * 86400_000));
-  return bytesToHex(sha256(utf8ToBytes(`km-submit:${salt}:${week}:${ip}`))).slice(0, 24);
+  return bytesToHex(hmac(sha256, utf8ToBytes(salt || EPHEMERAL_SALT), utf8ToBytes(`km-submit:${week}:${ip}`))).slice(0, 24);
 }
+/** Random per-isolate key used only when no SUBMIT_SALT secret is configured (KM-013: no committed default salt). */
+export const EPHEMERAL_SALT = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
 export function agentId(name: string, salt: string): string {
   return "agent:" + bytesToHex(sha256(utf8ToBytes(`km-agent:${salt}:${name.trim().toLowerCase().slice(0, 64)}`))).slice(0, 16);
 }

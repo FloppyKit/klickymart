@@ -72,6 +72,16 @@ describe("NIP-09 deletions", () => {
     await ing([n]);
     expect(await count("experiences", n.id)).toBe(0);
   });
+  it("KM-010: a stranger's kind 5 for an event id we have not seen yet cannot pre-tombstone it", async () => {
+    const a = key(), mallory = key();
+    const n = note(a);
+    await ing([sign(mallory, 5, [["e", n.id], ["k", "422"]], "griefing")]);
+    const r = await ing([n]);
+    expect(r.reasons["deleted by author (tombstone)"]).toBeUndefined();
+    expect(await count("nostr_events", n.id)).toBe(1);
+    const post = await SELF.fetch("https://example.com/reviews", { method: "POST", body: JSON.stringify(n) });
+    expect(post.status).not.toBe(410);
+  });
   it("filters subscribe to kind 5 by id and by k tag; the self-test note stays tombstoned", async () => {
     const f = JSON.stringify(buildFilters(ctx(), 0, ["ab".repeat(32)]));
     expect(f).toContain('"kinds":[5,1984],"#e"');
