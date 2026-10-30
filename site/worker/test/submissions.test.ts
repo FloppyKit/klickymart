@@ -243,11 +243,13 @@ describe("trust ladder", () => {
     await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage" });
     const t = await tier(d);
     expect(t.trust_tier).toBe("verified");
-    expect(t.trust_label).toBe("Verified (payment proof)");
+    expect(t.trust_label).toBe("Verified (payment proof: verified 422)");
     const u = await tier(uniq("ucp"), { ucp: { present: true, endpoint: "https://x.myshopify.com/api/ucp/mcp", src: "https://x/.well-known/ucp" } });
-    expect(u.trust_label).toBe("Verified (protocol endpoint)");
+    expect(u.trust_label).toBe("Verified (protocol endpoint: UCP)");
+    expect(u.trust_proofs).toEqual(["protocol endpoint: UCP"]);
     expect((await tier(uniq("ucp"), { ucp: { present: false, endpoint: null } })).trust_tier).toBe("unverified");
-    expect((await tier(uniq("x4"), { an_402: { result: "verified-402", proto: "l402", endpoint: "https://api.x/pay" } })).trust_label).toBe("Verified (protocol endpoint)");
+    expect((await tier(uniq("x4"), { an_402: { result: "verified-402", http: 402, proto: "l402", endpoint: "https://api.x/pay" } })).trust_label).toBe("Verified (protocol endpoint: l402 challenge)");
+    expect((await tier(uniq("x4"), { an_402: { result: "verified-402", proto: "l402" } })).trust_tier).toBe("unverified"); // no real HTTP 402 recorded
     expect((await tier(uniq("x4"), { an_rails: ["l402"], an_402: { result: "claimed" }, agent_api: { endpoint: "https://api.x" } })).trust_tier).toBe("unverified");
   });
   it("verified by store claim: NIP-05 key on the domain that signed its own 31420", async () => {
@@ -255,7 +257,7 @@ describe("trust ladder", () => {
     await env.DB.prepare("INSERT INTO nip05_checks (pubkey,nip05,domain,status,checked_at) VALUES (?,?,?,?,?)").bind(k, `_@${d}`, d, "verified", nowS()).run();
     expect((await tier(d)).trust_tier).toBe("unverified");
     await env.DB.prepare("INSERT INTO site_records (pubkey,d,id,created_at,raw_json,relays) VALUES (?,?,?,?,?,?)").bind(k, d, "e".repeat(64), nowS(), "{}", "").run();
-    expect((await tier(d)).trust_label).toBe("Verified (store claim)");
+    expect((await tier(d)).trust_label).toBe("Verified (store claim: NIP-05)");
   });
   it("tiers appear on /check, /chart.json, merchant pages, llms.txt and openapi", async () => {
     const c = await (await SELF.fetch("https://km.test/check?domain=amazon.com")).json() as Record<string, unknown>;
@@ -268,5 +270,98 @@ describe("trust ladder", () => {
     expect(llms).toMatch(/Trust tiers \(trust_tier\)/); expect(llms).toMatch(/kind 1423/); expect(llms).toMatch(/submit_store/);
     const oa = await (await SELF.fetch("https://km.test/openapi.json")).json() as { paths: Record<string, unknown> };
     expect(oa.paths["/submit"]).toBeTruthy();
+  });
+});
+
+import { GATE_BLOCKLIST } from "../src/submit-blocklist";
+import { PROBE_402 } from "../src/probe-402";
+import gateJson from "../../../crawler/gate_blocklist.json";
+import probeJson from "../../../data/verify-402.agent-native.json";
+import { handleDnsClaim, txtNames } from "../src/dns-claim";
+import { setQueueStatus } from "../src/submissions";
+import { hexToNpub } from "../src/claim";
+
+describe("generated data matches the crawler JSON", () => {
+  it("submit-blocklist.ts == crawler/gate_blocklist.json", () => { expect(GATE_BLOCKLIST).toEqual(gateJson); });
+  it("probe-402.ts == data/verify-402.agent-native.json (slim)", () => {
+    expect(PROBE_402.map((p) => [p.d, p.result, p.http])).toEqual((probeJson as { d: string; result: string; http?: number }[]).map((p) => [p.d, p.result, p.http ?? null]));
+  });
+  it("a verified-402 from the probe file counts even when the record lacks an_402 (bitrefill); not-probed / no-402 never do", async () => {
+    const v = PROBE_402.find((p) => p.result === "verified-402" && p.http === 402)!;
+    const t = await tier(v.d, { ucp: { present: false, endpoint: null } });
+    expect(t.trust_tier).toBe("verified");
+    expect(t.trust_proofs[0]).toMatch(/challenge$/);
+    for (const p of PROBE_402.filter((x) => x.result !== "verified-402")) expect((await tier(p.d, null)).trust_proofs.some((x) => x.includes("challenge"))).toBe(false);
+  });
+});
+
+describe("min_trust", () => {
+  it("total is exact (filtered before paging) and MCP search_merchants accepts it", async () => {
+    const all = await (await SELF.fetch("https://km.test/q?limit=500")).json() as { items: { trust_tier: string }[] };
+    const want = all.items.filter((x) => x.trust_tier !== "flagged").length;
+    const r = await (await SELF.fetch("https://km.test/q?min_trust=unverified&limit=2")).json() as { total: number; count: number };
+    expect(r.total).toBe(want); expect(r.count).toBe(2);
+    const v = await (await SELF.fetch("https://km.test/q?min_trust=verified&limit=1")).json() as { total: number };
+    expect(v.total).toBe(all.items.filter((x) => x.trust_tier === "verified").length);
+    const m = await (await SELF.fetch("https://km.test/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search_merchants", arguments: { min_trust: "verified", limit: 5 } } }) })).json() as { result: { structuredContent: { total: number } } };
+    expect(m.result.structuredContent.total).toBe(v.total);
+    const bad = await (await SELF.fetch("https://km.test/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "search_merchants", arguments: { min_trust: "gold" } } }) })).json() as { error?: { code: number } };
+    expect(bad.error?.code).toBe(-32602);
+  });
+});
+
+describe("DNS TXT store claims", () => {
+  const signClaim = (d: string, action: string, sk = secp.utils.randomSecretKey()) => sign1423([["r", d], ["claim", action]], "", sk);
+  it("txtNames matches bare or prefixed npub only", () => {
+    expect(txtNames("npub1abc", ["npub1abc"])).toBe(true);
+    expect(txtNames("npub1abc", ["klickymart-claim=npub1abc"])).toBe(true);
+    expect(txtNames("npub1abc", ["npub1abcd", "v=spf1"])).toBe(false);
+  });
+  it("claim -> verified (store claim: DNS TXT); other key cannot revoke; same key revokes; TXT removal -> dns-removed", async () => {
+    const d = uniq("dns"); const sk = secp.utils.randomSecretKey(); const ev = signClaim(d, "dns", sk); const npub = hexToNpub(ev.pubkey);
+    const lookups: string[] = [];
+    const has = async (n: string) => { lookups.push(n); return [`klickymart-claim=${npub}`]; };
+    expect((await handleDnsClaim(env.DB, { event: ev }, { lookup: async () => ["something-else"] })).status).toBe(422);
+    expect((await handleDnsClaim(env.DB, { event: ev }, { lookup: has, dryRun: true })).body).toMatchObject({ ok: true, stored: false });
+    expect((await tier(d)).trust_tier).toBe("unverified");
+    const ok = await handleDnsClaim(env.DB, { event: ev }, { lookup: has });
+    expect(ok.status).toBe(201); expect(lookups[0]).toBe(`_klickymart.${d}`);
+    const t = await tier(d); expect(t.trust_label).toBe("Verified (store claim: DNS TXT)");
+    expect((await handleDnsClaim(env.DB, { event: signClaim(d, "revoke") }, { lookup: has })).status).toBe(404);
+    expect((await tier(d)).trust_tier).toBe("verified");
+    expect((await handleDnsClaim(env.DB, { event: signClaim(d, "revoke", sk) }, { lookup: has })).body).toMatchObject({ status: "revoked" });
+    expect((await tier(d)).trust_tier).toBe("unverified");
+    await handleDnsClaim(env.DB, { event: signClaim(d, "dns", sk) }, { lookup: has });
+    expect((await tier(d)).trust_tier).toBe("verified");
+    expect((await handleDnsClaim(env.DB, { domain: d }, { lookup: async () => [] })).body).toMatchObject({ rechecked: [{ status: "dns-removed" }] });
+    expect((await tier(d)).trust_tier).toBe("unverified");
+  });
+  it("rejects bad signatures, stale events, sub-domains, missing claim tag; /submit refuses claim events", async () => {
+    const d = uniq("dns"); const ev = signClaim(d, "dns");
+    expect((await handleDnsClaim(env.DB, { event: { ...ev, content: "x" } }, { lookup: async () => [] })).body).toMatchObject({ error: { code: "bad_signature" } });
+    expect((await handleDnsClaim(env.DB, { event: sign1423([["r", d], ["claim", "dns"]], "", undefined, nowS() - 3 * DAY) }, { lookup: async () => [] })).body).toMatchObject({ error: { code: "bad_time" } });
+    expect((await handleDnsClaim(env.DB, { event: signClaim("shop." + d, "dns") }, { lookup: async () => [] })).body).toMatchObject({ error: { code: "bad_domain" } });
+    expect((await handleDnsClaim(env.DB, { event: sign1423([["r", d]]) }, { lookup: async () => [] })).body).toMatchObject({ error: { code: "bad_claim" } });
+    const r = await SELF.fetch("https://km.test/submit?dry_run=1", { method: "POST", body: JSON.stringify({ event: ev }) });
+    expect(r.status).toBe(400);
+    expect((await SELF.fetch(`https://km.test/claim/dns?domain=${d}`)).status).toBe(200);
+  });
+});
+
+describe("queue status (box crawler)", () => {
+  it("token-gated route; crawled/refused/error with reason; dry_run changes nothing", async () => {
+    expect((await SELF.fetch("https://km.test/submit/queue/sub_x/status", { method: "POST", body: "{}" })).status).toBe(404); // no INGEST_TOKEN in tests = disabled
+    const d = uniq("qs");
+    const s = await submitStore({ domain: d }, ctx({ ip: "198.51.100.77" }));
+    const id = String(s.body.id);
+    expect((await setQueueStatus(env.DB, id, "done", null)).status).toBe(400);
+    expect((await setQueueStatus(env.DB, "sub_" + "0".repeat(20), "crawled", null)).status).toBe(404);
+    expect((await setQueueStatus(env.DB, id, "refused", "robots.txt disallow", true)).body).toMatchObject({ dry_run: true, state: "refused" });
+    expect(await env.DB.prepare("SELECT state FROM crawl_queue WHERE domain = ?").bind(d).first("state")).toBe("pending");
+    expect((await setQueueStatus(env.DB, id, "refused", "robots.txt disallow")).body).toMatchObject({ previous: "pending", state: "refused" });
+    const g = await (await SELF.fetch(`https://km.test/submit/${id}`)).json() as { crawl: { state: string; note: string } };
+    expect(g.crawl).toMatchObject({ state: "refused", note: "robots.txt disallow" });
+    const q = await (await SELF.fetch("https://km.test/submit/queue.json?state=refused")).json() as { items: { id: string }[] };
+    expect(q.items.some((x) => x.id === id)).toBe(true);
   });
 });

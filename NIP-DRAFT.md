@@ -447,6 +447,10 @@ The signature is the submitter identity. KlickyMart also accepts the same fields
 
 **Number check (2026-10-30).** `1423` is not in the NIP README kinds table (nearest: `1337` code snippets, `1617`–`1633` git). GitHub search of nostr-protocol/nips for "kind 1423" and "1423" matched only PR #1423 (NIP-113, by PR number) and PR #1816 (workout events, kind 1301); neither defines kind 1423. No collision found; TO-CONFIRM at submission.
 
+### Store claim by DNS TXT
+
+The store owner publishes a TXT record at `_klickymart.<domain>` containing their npub (bare, or `klickymart-claim=npub1...`) and sends a kind 1423 signed by that key with tags `["r", "<domain>"]` and `["claim", "dns"]` (KlickyMart: `POST /claim/dns`). The indexer checks the TXT itself. A kind 1423 with `["claim", "revoke"]` signed by the same key revokes the claim; removing the TXT revokes it at the next re-check. Claim events are not store suggestions and are not queued for crawling.
+
 ### Trust tiers for listed stores (`trust_tier`)
 
 Indexers SHOULD label, never hide. KlickyMart publishes `trust_tier`, `trust_why[]` and `src` (`crawler` | `community`) with every record:
@@ -456,7 +460,7 @@ Indexers SHOULD label, never hide. KlickyMart publishes `trust_tier`, `trust_why
 | `flagged` | a strong abuse signal: spam note, affiliate redirect, look-alike of an indexed domain (edit distance <= 2, confusable or punycode spelling), more than 3 sub-domains of one domain from one submitter |
 | `unverified` | newly submitted, or crawler-indexed with no shopper basis |
 | `seen` | >= 3 weighted distinct unflagged keys with visit-basis notes (421, or 422 `basis=visit`) in 60 days; new or anonymous keys weigh 0.5; >= 2 real keys (>= 30 days old or unflagged notes on >= 2 other stores); the submitter, keys first seen within 24 h of the submission, and keys with reputation below -3 do not count; drops back when > 40% of basis notes are flagged |
-| `verified` | a verified payment proof (422) from an unflagged key that is not the submitter, a store claim (NIP-05 on the domain plus a self-signed 31420), or a crawler-observed protocol endpoint (`/.well-known/ucp` present, or a real HTTP 402 challenge from the indexer's own probe; directory-claimed rails do not count) |
+| `verified` | any one of: a verified payment proof (422) from an unflagged key that is not the submitter, a store claim (DNS TXT plus a signed claim, or NIP-05 on the domain plus a self-signed 31420), or a crawler-observed protocol endpoint (`/.well-known/ucp` present, or a real HTTP 402 challenge from the indexer's own probe; directory-claimed rails do not count) |
 
 Submitter reputation = submissions whose store reached `seen` or `verified`, minus 2 x flagged submissions.
 

@@ -1,0 +1,414 @@
+[
+ {
+  "d": "taskhawktech.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "satsdns.com",
+  "cat": "l402",
+  "endpoint": "https://api.satsdns.com/v1/zones/create/30d",
+  "http": 402,
+  "proto": "l402",
+  "challenge": "WWW-Authenticate L402",
+  "price_seen": {
+   "amount": 500.0,
+   "asset": "BTC-sats (LN invoice)"
+  },
+  "result": "verified-402",
+  "ts": 1793386592
+ },
+ {
+  "d": "sats4ai.com",
+  "cat": "l402",
+  "endpoint": "https://sats4ai.com/api/l402/generate-text",
+  "http": 200,
+  "result": "no-402",
+  "ts": 1793386594
+ },
+ {
+  "d": "clankfeed.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "arknode.ai",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "ganamos.earth",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "speedread.fit",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "sms4sats.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "lightningfaucet.com",
+  "cat": "l402",
+  "endpoint": "https://lightningfaucet.com/api/l402/memory",
+  "http": 400,
+  "result": "no-402",
+  "ts": 1793386595
+ },
+ {
+  "d": "webbersites.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "jittator.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "halmarket.dev",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "bittuitive.ai",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "agentpaywire.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "satring.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "lightning.engineering",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "fewsats.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "lnvps.net",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "lnvpn.net",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "ppq.ai",
+  "cat": "l402",
+  "endpoint": "https://api.ppq.ai/chat/completions",
+  "http": 200,
+  "result": "no-402",
+  "ts": 1793386597
+ },
+ {
+  "d": "unleashed.chat",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "bitrefill.com",
+  "cat": "x402",
+  "endpoint": "https://api.bitrefill.com/x402/gift-cards/search",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "2000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 7
+  },
+  "result": "verified-402",
+  "ts": 1793385708
+ },
+ {
+  "d": "blockrun.ai",
+  "cat": "x402",
+  "endpoint": "https://blockrun.ai/api/v1/chat/completions",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "2000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793385710
+ },
+ {
+  "d": "api-xpay.com",
+  "cat": "x402",
+  "endpoint": "https://www.api-xpay.com/x402/quote",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "stableenrich.dev",
+  "cat": "x402",
+  "endpoint": "https://stableenrich.dev/api/fullenrich/people-search",
+  "http": 405,
+  "result": "no-402",
+  "ts": 1793385711
+ },
+ {
+  "d": "stabletravel.dev",
+  "cat": "x402",
+  "endpoint": "https://stabletravel.dev/api/google-flights/search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "stableupload.dev",
+  "cat": "x402",
+  "endpoint": "https://stableupload.dev/api/upload",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "laso.finance",
+  "cat": "x402",
+  "endpoint": "https://laso.finance/auth",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "scvd.store",
+  "cat": "x402",
+  "endpoint": "https://scvd.store/api/buy/spot_check",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "exa.ai",
+  "cat": "x402",
+  "endpoint": "https://api.exa.ai/search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "nansen.ai",
+  "cat": "x402",
+  "endpoint": "https://api.nansen.ai/api/v1/profiler/address/current-balance",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "minifetch.com",
+  "cat": "x402",
+  "endpoint": "https://minifetch.com/api/v1/x402/preflight/url-check",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "glim.sh",
+  "cat": "x402",
+  "endpoint": "https://glim.sh/api/v1/twitter/search",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "trezalabs.com",
+  "cat": "x402",
+  "endpoint": "https://www.trezalabs.com/api/x402/speech",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "agentmercantile.com",
+  "cat": "x402",
+  "endpoint": "https://api.agentmercantile.com/v1/web-change-snapshot",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "toll402.dev",
+  "cat": "x402",
+  "endpoint": "https://toll402.dev/v1/t/cin_in_validate",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "x402atlas.com",
+  "cat": "x402",
+  "endpoint": "https://twitter.use.x402atlas.com/search",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "onesource.io",
+  "cat": "x402",
+  "endpoint": "https://api.onesource.io/api/chain/erc20-balance",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "trycorpus.ai",
+  "cat": "x402",
+  "endpoint": "https://cloud.trycorpus.ai/v1/tokens/quotes",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "10000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 14
+  },
+  "result": "verified-402",
+  "ts": 1793385713
+ },
+ {
+  "d": "pocket.network",
+  "cat": "x402",
+  "endpoint": "https://agent.pocket.network/v1/meadow",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "5000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793385715
+ },
+ {
+  "d": "asterpay.io",
+  "cat": "x402",
+  "endpoint": "https://x402.asterpay.io/v1/market/price/bitcoin",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "7500",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 6
+  },
+  "result": "verified-402",
+  "ts": 1793385716
+ },
+ {
+  "d": "agentreader.dev",
+  "cat": "x402",
+  "endpoint": "https://agentreader.dev/dns",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "tariffmonkee.com",
+  "cat": "x402",
+  "endpoint": "https://tariffmonkee.com/paid/ping",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "1000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 2
+  },
+  "result": "verified-402",
+  "ts": 1793385719
+ },
+ {
+  "d": "x402-list.com",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "x402scan.com",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "x402.new",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "agent402.tools",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ }
+]

@@ -7,13 +7,15 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { verifyNostrEvent } from "./nostr-verify";
 import { NOSTR_KIND_STORE_SUGGESTION } from "./nostr-kinds";
 import { GATE_BLOCKLIST } from "./submit-blocklist";
+import { PROBE_402 } from "./probe-402";
+const PROBE_BY_D = new Map(PROBE_402.filter((p) => p.result === "verified-402" && p.http === 402).map((p) => [p.d, p]));
 
 export const SUBMIT_LIMITS = { perDay: 10, perWeek: 50, lowRepPerDay: 1, noteMax: 280, maxSubdomainsPerRegistrable: 3, reviewRepBelow: -3 };
 export const TIERS = ["flagged", "unverified", "seen", "verified"] as const;
 export type Tier = (typeof TIERS)[number];
 export const TIER_RANK: Record<Tier, number> = { flagged: 0, unverified: 1, seen: 2, verified: 3 };
 export const SEEN_RULE = { windowS: 60 * 86400, weighted: 3, realKeys: 2, newKeyWeight: 0.5, realAgeS: 30 * 86400, realOtherDomains: 2, sybilWindowS: 86400, dropFlaggedShare: 0.4 };
-export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = a payment proof (verified 422 from an unflagged key that is not the submitter), a store claim (a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count).";
+export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = any ONE real proof, shown in trust_proofs[] and the label (seen is not required first): a payment proof (verified 422 from an unflagged key that is not the submitter), a store claim (DNS TXT at _klickymart.<domain> naming the npub plus a claim signed by that key, or a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count).";
 
 export interface SubmitFlag { flag: string; strength: "weak" | "strong"; detail: string }
 const STRONG_TIER_FLAGS = new Set(["spam", "affiliate-redirect", "lookalike?", "subdomain-stuffing"]);
@@ -268,12 +270,12 @@ export async function submitterRep(db: D1Database, submitter: string): Promise<n
 
 // ---------- trust ladder ----------
 export interface TrustWhy { kind: string; ref?: string; detail: string }
-export interface TrustInfo { trust_tier: Tier; trust_label: string; trust_why: TrustWhy[]; src: "crawler" | "community"; submitted_by?: string; submitted_at?: string; seen: { weighted: number; keys: number; real_keys: number; basis_notes: number; flagged_notes: number }; trust_ts: string }
+export interface TrustInfo { trust_tier: Tier; trust_proofs: string[]; trust_label: string; trust_why: TrustWhy[]; src: "crawler" | "community"; submitted_by?: string; submitted_at?: string; seen: { weighted: number; keys: number; real_keys: number; basis_notes: number; flagged_notes: number }; trust_ts: string }
 export function tierLabel(t: Tier, o: { src: string; flags?: SubmitFlag[]; n?: number; how?: string[] }): string {
   if (t === "flagged") return `Flagged: ${(o.flags ?? []).filter((f) => f.strength === "strong").map((f) => f.flag).join(", ") || "abuse signal"}`;
   if (t === "unverified") return o.src === "community" ? "Unverified · community-submitted" : "Unverified · crawler-indexed";
   if (t === "seen") return `Seen by shoppers · ${o.n ?? 0} visits`;
-  return `Verified${o.how?.length ? ` (${o.how.join(", ")})` : ""}`;
+  return `Verified${o.how?.length ? ` (${o.how.join("; ")})` : ""}`;
 }
 
 type RawLike = Record<string, unknown> | null;
@@ -289,7 +291,7 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
   const subs = new Map<string, { submitter: string; submitter_kind: string; created_at: number; flags: SubmitFlag[] }>();
   type B = { id: string; d: string; pubkey: string; created_at: number; proof_status: string | null; kind: number };
   let notes: B[] = []; const flagW = new Map<string, number>(); const firstSeen = new Map<string, number>();
-  const claims = new Set<string>(); const rep = new Map<string, number>();
+  const claims = new Set<string>(); const rep = new Map<string, number>(); const dnsClaims = new Map<string, string>();
   if (db) {
     try {
       for (const r of (await db.prepare("SELECT domain, submitter, submitter_kind, created_at, flags_json FROM store_submissions WHERE status = 'queued' ORDER BY created_at ASC").all<{ domain: string; submitter: string; submitter_kind: string; created_at: number; flags_json: string }>()).results ?? []) {
@@ -304,6 +306,7 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     try { notes.push(...((await db.prepare("SELECT id, d, pubkey, created_at, NULL AS proof_status, kind FROM nostr_events WHERE kind = 421 AND d IS NOT NULL").all<B>()).results ?? [])); } catch { /* */ }
     try { for (const r of (await db.prepare("SELECT id, weight, reasons_json FROM note_flags").all<{ id: string; weight: number; reasons_json: string }>()).results ?? []) if (r.reasons_json !== "[]") flagW.set(r.id, r.weight); } catch { /* */ }
     try { for (const r of (await db.prepare("SELECT pubkey, MIN(created_at) AS t FROM nostr_events GROUP BY pubkey").all<{ pubkey: string; t: number }>()).results ?? []) firstSeen.set(r.pubkey, r.t); } catch { /* */ }
+    try { for (const r of (await db.prepare("SELECT domain, pubkey FROM store_claims WHERE status = 'active'").all<{ domain: string; pubkey: string }>()).results ?? []) dnsClaims.set(r.domain, r.pubkey); } catch { /* migration pending */ }
     try { for (const r of (await db.prepare("SELECT n.domain AS d, n.pubkey AS pk FROM nip05_checks n JOIN site_records s ON s.pubkey = n.pubkey AND s.d = n.domain WHERE n.status = 'verified'").all<{ d: string; pk: string }>()).results ?? []) claims.add(`${r.d}|${r.pk}`); } catch { /* */ }
   }
   for (const n of notes) { const t = firstSeen.get(n.pubkey); if (t === undefined || n.created_at < t) firstSeen.set(n.pubkey, n.created_at); }
@@ -337,18 +340,22 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     if (seen) why.push({ kind: "shopper-notes", detail: `${perKey.size} distinct unflagged keys (weighted ${weighted}, ${real} real) posted visit-basis notes in 60 days`, ref: `/merchant/${d}#community` });
     const how: string[] = [];
     const pay = (byD.get(d) ?? []).find((n) => n.proof_status?.startsWith("verified") && !flagW.has(n.id) && !strongKeys.has(n.pubkey) && n.pubkey !== sub?.submitter);
-    if (pay) { how.push("payment proof"); why.push({ kind: "payment-proof", ref: pay.id, detail: "a 422 with a verified payment proof from an unflagged key that is not the submitter" }); }
+    if (pay) { how.push("payment proof: verified 422"); why.push({ kind: "payment-proof", ref: pay.id, detail: "a 422 with a verified payment proof from an unflagged key that is not the submitter" }); }
     const claimKey = [...claims].find((c) => c.startsWith(d + "|"));
-    if (claimKey) { how.push("store claim"); why.push({ kind: "store-claim", ref: claimKey.split("|")[1], detail: "a key verified by NIP-05 on this domain signed its own 31420 record" }); }
-    const raw = rawOf(d) as { ucp?: { present?: boolean; endpoint?: string | null; src?: string }; an_402?: { result?: string; proto?: string; endpoint?: string | null; url?: string } } | null;
-    // Only crawler-observed endpoints count: /.well-known/ucp present, or our own unauthenticated probe got a real 402 challenge. Directory-claimed rails (an_rails, agent_api) do not.
-    const ep = raw?.ucp?.present && raw.ucp.endpoint ? raw.ucp.endpoint : raw?.an_402?.result === "verified-402" ? (raw.an_402.endpoint ?? raw.an_402.url ?? "402 challenge") : null;
-    if (ep) { how.push("protocol endpoint"); why.push({ kind: "protocol-endpoint", ref: ep, detail: raw?.ucp?.present ? `crawler observed /.well-known/ucp (${raw.ucp.src ?? ""})` : `our probe got an HTTP 402 challenge (${raw?.an_402?.proto ?? "402"}); never paid` }); }
+    if (claimKey) { how.push("store claim: NIP-05"); why.push({ kind: "store-claim", ref: claimKey.split("|")[1], detail: "a key verified by NIP-05 on this domain signed its own 31420 record" }); }
+    const raw = rawOf(d) as { ucp?: { present?: boolean; endpoint?: string | null; src?: string; checked_at?: string }; an_402?: { result?: string; http?: number | null; proto?: string | null; endpoint?: string | null; challenge?: string | null } } | null;
+    // Only crawler-observed evidence: a valid /.well-known/ucp JSON doc naming an MCP endpoint, or our own unauthenticated probe
+    // that got a real HTTP 402 challenge (record an_402 or data/verify-402.agent-native.json). Directory claims never count.
+    if (raw?.ucp?.present === true && raw.ucp.endpoint) { how.push("protocol endpoint: UCP"); why.push({ kind: "protocol-endpoint", ref: raw.ucp.src ?? `https://${d}/.well-known/ucp`, detail: `crawler fetched /.well-known/ucp (robots-first) on ${raw.ucp.checked_at ?? "?"}: a UCP document naming MCP endpoint ${raw.ucp.endpoint}` }); }
+    const rp = raw?.an_402?.result === "verified-402" && raw.an_402.http === 402 ? raw.an_402 : PROBE_BY_D.get(d) ?? null;
+    if (rp) { how.push(`protocol endpoint: ${rp.proto ?? "402"} challenge`); why.push({ kind: "protocol-endpoint", ref: rp.endpoint ?? d, detail: `our probe got HTTP 402 with ${rp.challenge ?? "a payment challenge"} (${rp.proto ?? "402"}); never paid` }); }
+    const dc = dnsClaims.get(d);
+    if (dc) { how.push("store claim: DNS TXT"); why.push({ kind: "store-claim", ref: dc, detail: `_klickymart.${d} TXT names this key, and the key signed the claim` }); }
     const sflags = sub?.flags ?? [];
     let tier: Tier = how.length ? "verified" : seen ? "seen" : "unverified";
-    if (isTierFlagged(sflags) && !how.includes("store claim")) { tier = "flagged"; for (const f of sflags.filter((x) => x.strength === "strong")) why.unshift({ kind: f.flag, detail: f.detail }); }
+    if (isTierFlagged(sflags) && !how.some((h) => h.startsWith("store claim"))) { tier = "flagged"; for (const f of sflags.filter((x) => x.strength === "strong")) why.unshift({ kind: f.flag, detail: f.detail }); }
     if (!why.length) why.push({ kind: src === "community" ? "community-submitted" : "crawler-indexed", detail: src === "community" ? "submitted by the community; facts come from the gated crawl only" : "indexed by the KlickyMart crawler; no shopper basis notes yet" });
-    out.set(d, { trust_tier: tier, trust_label: tierLabel(tier, { src, flags: sflags, n: list.length - flaggedNotes.length, how }), trust_why: why, src,
+    out.set(d, { trust_tier: tier, trust_proofs: how, trust_label: tierLabel(tier, { src, flags: sflags, n: list.length - flaggedNotes.length, how }), trust_why: why, src,
       ...(sub ? { submitted_by: sub.submitter_kind === "anon" ? "anonymous" : sub.submitter, submitted_at: new Date(sub.created_at * 1000).toISOString() } : {}),
       seen: { weighted, keys: perKey.size, real_keys: real, basis_notes: list.length, flagged_notes: flaggedNotes.length }, trust_ts: new Date(now).toISOString() });
   }
@@ -367,11 +374,11 @@ export async function getSubmission(db: D1Database | undefined, id: string, orig
   try {
     const r = await db.prepare("SELECT id, domain, category, note, evidence_url, via, submitter_kind, submitter, status, reason, flags_json, review, created_at FROM store_submissions WHERE id = ?").bind(id).first<Record<string, unknown>>();
     if (!r) return null;
-    const q = await db.prepare("SELECT state, submissions, queued_at FROM crawl_queue WHERE domain = ?").bind(r.domain).first<Record<string, unknown>>();
+    const q = await db.prepare("SELECT state, submissions, queued_at, crawl_note FROM crawl_queue WHERE domain = ?").bind(r.domain).first<Record<string, unknown>>();
     const t = (await computeTrustTiers(db, [String(r.domain)], () => null, Date.now(), { noCache: true })).get(String(r.domain));
     return { id: r.id, domain: r.domain, status: r.status, reason: r.reason, category_hint: r.category, note: r.note, evidence_url: r.evidence_url, via: r.via,
       submitted_by: r.submitter_kind === "anon" ? "anonymous" : r.submitter, submitted_at: new Date(Number(r.created_at) * 1000).toISOString(), flags: JSON.parse(String(r.flags_json)),
-      crawl: q ? { state: q.state, submissions: q.submissions } : null, trust_tier: t?.trust_tier, trust_label: t?.trust_label, trust_why: t?.trust_why, check: `${origin}/check?domain=${r.domain}` };
+      crawl: q ? { state: q.state, submissions: q.submissions, note: q.crawl_note ?? null } : null, trust_tier: t?.trust_tier, trust_label: t?.trust_label, trust_why: t?.trust_why, check: `${origin}/check?domain=${r.domain}` };
   } catch { return null; }
 }
 
@@ -380,8 +387,8 @@ export async function exportQueue(db: D1Database | undefined, opts: { state?: st
   if (!db) return [];
   try {
     const st = opts.state ?? "pending";
-    return ((await db.prepare("SELECT domain, category_hint, submissions, state, flags_json, queued_at FROM crawl_queue WHERE state = ? AND queued_at >= ? ORDER BY queued_at ASC LIMIT ?").bind(st, opts.since ?? 0, Math.min(opts.limit ?? 500, 2000)).all<{ domain: string; category_hint: string | null; submissions: number; state: string; flags_json: string; queued_at: number }>()).results ?? [])
-      .map((r) => ({ domain: r.domain, category_hint: r.category_hint, submissions: r.submissions, state: r.state, flags: (JSON.parse(r.flags_json) as SubmitFlag[]).map((f) => f.flag), queued_at: new Date(r.queued_at * 1000).toISOString(), src: "community", gate: "crawler/gate.py: tos.py then crawl.py --require-tos; robots.txt first, error/403 = disallow" }));
+    return ((await db.prepare("SELECT domain, first_submission_id, category_hint, submissions, state, flags_json, queued_at FROM crawl_queue WHERE state = ? AND queued_at >= ? ORDER BY queued_at ASC LIMIT ?").bind(st, opts.since ?? 0, Math.min(opts.limit ?? 500, 2000)).all<{ domain: string; first_submission_id: string; category_hint: string | null; submissions: number; state: string; flags_json: string; queued_at: number }>()).results ?? [])
+      .map((r) => ({ id: r.first_submission_id, domain: r.domain, category_hint: r.category_hint, submissions: r.submissions, state: r.state, flags: (JSON.parse(r.flags_json) as SubmitFlag[]).map((f) => f.flag), queued_at: new Date(r.queued_at * 1000).toISOString(), src: "community", gate: "crawler/gate.py: tos.py then crawl.py --require-tos; robots.txt first, error/403 = disallow" }));
   } catch { return []; }
 }
 
@@ -399,5 +406,17 @@ export function tierBadgeHtml(t: TrustInfo | undefined): string {
   return `<p class="km-trust-tier" data-trust-tier="${t.trust_tier}"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${BADGE[t.trust_tier]}" title="${why}">${escH(t.trust_label)}</span> <a href="/llms.txt#trust" style="font-size:12px">trust ladder</a>${t.submitted_by ? ` <small>submitted by ${escH(t.submitted_by === "anonymous" ? "an anonymous agent" : t.submitted_by.slice(0, 16) + "…")} on ${escH(t.submitted_at?.slice(0, 10) ?? "")}</small>` : ""}</p>`;
 }
 export function tierFields(t: TrustInfo | undefined) {
-  return t ? { trust_tier: t.trust_tier, trust_label: t.trust_label, trust_why: t.trust_why, src: t.src, ...(t.submitted_by ? { submitted_by: t.submitted_by, submitted_at: t.submitted_at } : {}) } : { trust_tier: "unverified" as Tier, trust_label: "Unverified · crawler-indexed", trust_why: [], src: "crawler" as const };
+  return t ? { trust_tier: t.trust_tier, trust_proofs: t.trust_proofs, trust_label: t.trust_label, trust_why: t.trust_why, src: t.src, ...(t.submitted_by ? { submitted_by: t.submitted_by, submitted_at: t.submitted_at } : {}) } : { trust_tier: "unverified" as Tier, trust_label: "Unverified · crawler-indexed", trust_why: [], src: "crawler" as const };
+}
+
+/** Box crawler reports the gated-crawl outcome for a queued submission (behind INGEST_TOKEN). */
+export async function setQueueStatus(db: D1Database | undefined, id: string, status: unknown, reason: unknown, dryRun = false): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (!db) return { status: 503, body: { ok: false, error: { code: "storage_error", message: "queue not ready" } } };
+  if (status !== "crawled" && status !== "refused" && status !== "error") return { status: 400, body: { ok: false, error: { code: "bad_status", message: "status must be crawled | refused | error" } } };
+  const why = typeof reason === "string" ? reason.replace(/[\u0000-\u001f]/g, " ").slice(0, 300) : null;
+  const sub = await db.prepare("SELECT domain FROM store_submissions WHERE id = ?").bind(id).first<{ domain: string }>();
+  const q = sub ? await db.prepare("SELECT domain, state FROM crawl_queue WHERE domain = ?").bind(sub.domain).first<{ domain: string; state: string }>() : null;
+  if (!q) return { status: 404, body: { ok: false, error: { code: "not_found", message: "no queued domain for that submission id" } } };
+  if (!dryRun) { await db.prepare("UPDATE crawl_queue SET state = ?, crawl_note = ?, updated_at = ? WHERE domain = ?").bind(status, why, Math.floor(Date.now() / 1000), q.domain).run(); clearTierCache(); }
+  return { status: 200, body: { ok: true, id, domain: q.domain, previous: q.state, state: status, reason: why, dry_run: dryRun } };
 }

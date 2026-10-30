@@ -3,6 +3,10 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-08-22"
 workers_dev = true
 
+# Build step: regenerate submit-blocklist.ts / probe-402.ts from crawler JSON (runs on wrangler deploy and dev).
+[build]
+command = "node scripts/gen-submit-data.js"
+
 [assets]
 directory = "./public"
 binding = "ASSETS"

@@ -47,6 +47,8 @@ import { agentStats, recordAgentVisit, visitsToday } from "./agent-visits";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
+import { handleDnsClaim, claimStatus } from "./dns-claim";
+import { setQueueStatus } from "./submissions";
 import { computeTrustTiers, exportQueue, getSubmission, meetsMinTrust, parseSuggestionEvent, queuedStatus, submitStore, tierBadgeHtml, tierFields, TIERS, TRUST_RULES, type SubmitInput, type TrustInfo } from "./submissions";
 import {
   renderHome,
@@ -305,10 +307,17 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return computeTrustTiers(env.DB, ds, (d) => { const r = rawBy.get(d); return r ? parseRaw(r.raw_json) : null; });
   };
   const allTiers = () => tiersFor(snap.rows.map((r) => r.d));
+  /** min_trust filters the snapshot BEFORE paging, so total/next stay correct. */
+  const trustSnap = async (minTrust: string | null): Promise<Snapshot> => {
+    if (!minTrust) return snap;
+    const t = await allTiers();
+    return { ...snap, rows: snap.rows.filter((r) => meetsMinTrust(t.get(r.d)?.trust_tier, minTrust)) };
+  };
   const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || "km-dev-salt", ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
   const handleSubmit = async (body: Record<string, unknown>, via: "post" | "mcp", dryRun: boolean) => {
     const evIn = body.event ?? (typeof body.kind === "number" ? body : null);
     if (evIn) {
+      if (Array.isArray((evIn as { tags?: unknown }).tags) && ((evIn as { tags: unknown[][] }).tags).some((t) => Array.isArray(t) && t[0] === "claim")) return { status: 400, body: { ok: false, status: "rejected", reason: "claim events go to POST /claim/dns", error: { code: "use_claim_endpoint", message: "claim events go to POST /claim/dns" } } };
       const p = parseSuggestionEvent(evIn);
       if (!p.ok) return { status: 400, body: { ok: false, status: "rejected", reason: p.message, error: { code: p.code, message: p.message } } };
       return submitStore(body as SubmitInput, { ...submitCtx(via, dryRun), via: "nostr", signed: p.value });
@@ -325,9 +334,30 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const r = await handleSubmit(body as Record<string, unknown>, "post", url.searchParams.get("dry_run") === "1" || (body as { dry_run?: unknown }).dry_run === true);
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", ...(r.status === 429 ? { "Retry-After": "3600" } : {}) } });
   }
+  const qs = path.match(/^\/submit\/queue\/([^/]+)\/status$/);
+  if (qs && request.method === "POST") {
+    if (!env.INGEST_TOKEN) return Response.json({ ok: false, error: { code: "disabled", message: "queue status updates are not enabled" } }, { status: 404 });
+    if (request.headers.get("Authorization") !== `Bearer ${env.INGEST_TOKEN}`) return Response.json({ ok: false, error: { code: "unauthorized", message: "Bearer token required" } }, { status: 401 });
+    let b: { status?: unknown; reason?: unknown };
+    try { b = await request.json(); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON {status, reason?}" } }, { status: 400 }); }
+    const r = await setQueueStatus(env.DB, decodeURIComponent(qs[1]!), b.status, b.reason, url.searchParams.get("dry_run") === "1");
+    return Response.json(r.body, { status: r.status, headers: { "Cache-Control": "no-store" } });
+  }
+  if (path === "/claim/dns" && request.method === "POST") {
+    let b: unknown;
+    try { b = JSON.parse(await request.text()); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON: {event} (signed kind 1423 with [\"claim\",\"dns\"|\"revoke\"]) or {domain} to re-check" } }, { status: 400 }); }
+    if (!b || typeof b !== "object") return Response.json({ ok: false, error: { code: "bad_json", message: "body must be a JSON object" } }, { status: 400 });
+    const r = await handleDnsClaim(env.DB, b as Record<string, unknown>, { dryRun: url.searchParams.get("dry_run") === "1" });
+    return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
+  if (path === "/claim/dns" && request.method === "GET") {
+    const d = (url.searchParams.get("domain") ?? "").toLowerCase().replace(/^www\./, "");
+    if (!d) return Response.json({ how: "1) Add a TXT record at _klickymart.<domain> containing your npub (bare, or klickymart-claim=npub1...). 2) POST /claim/dns {event} with a kind 1423 you signed: tags [[\"r\", <domain>], [\"claim\", \"dns\"]]. Revoke with [\"claim\", \"revoke\"] signed by the same key. POST {domain} re-checks the TXT; if it is gone the claim becomes dns-removed. ?dry_run=1 validates without storing." }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ domain: d, claims: await claimStatus(env.DB, d) }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  }
   if ((path === "/submit/queue.ndjson" || path === "/submit/queue.json") && request.method === "GET") {
     const st = url.searchParams.get("state") ?? "pending";
-    if (!["pending", "review", "crawled", "refused"].includes(st)) return err400("state", "state is pending | review | crawled | refused");
+    if (!["pending", "review", "crawled", "refused", "error"].includes(st)) return err400("state", "state is pending | review | crawled | refused | error");
     const items = await exportQueue(env.DB, { state: st, since: Number(url.searchParams.get("since") ?? 0) || 0, limit: Number(url.searchParams.get("limit") ?? 500) || 500 });
     if (path.endsWith(".ndjson")) return new Response(items.map((x) => JSON.stringify(x)).join("\n") + (items.length ? "\n" : ""), { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
     return Response.json({ ...licenseMetaBlock(), count: items.length, state: st, items, note: "Community-submitted domains waiting for the gated crawl (run on the KlickyMart box via crawler/gate.py, never from the Worker). Submitters only gave a domain, a category hint and a note." }, { headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
@@ -690,9 +720,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (!validated.ok) return err400(validated.param, validated.message);
     const minTrust = url.searchParams.get("min_trust");
     if (minTrust && !(TIERS as readonly string[]).includes(minTrust)) return err400("min_trust", "min_trust is flagged | unverified | seen | verified");
-    const result = querySnapshot(snap, validated.params);
+    const result = querySnapshot(await trustSnap(minTrust), validated.params);
     const tq = await allTiers();
-    const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) })).filter((x) => meetsMinTrust(x.trust_tier, minTrust));
+    const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) }));
     const body = {
       ...licenseMetaBlock(),
       version: snap.version,
@@ -875,11 +905,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (!parsed) return Response.json({ jsonrpc: "2.0", error: { code: -32700, message: "parse error" }, id: null });
     if (parsed.isNotification) return new Response(null, { status: 202, headers: { "Access-Control-Allow-Origin": "*" } });
     const handler = createMcpHandler({
-      runQuery: async (sp) => {
+      runQuery: async (sp0) => {
+        const minTrust = sp0.get("min_trust"); const sp = new URLSearchParams(sp0); sp.delete("min_trust");
+        if (minTrust && !(TIERS as readonly string[]).includes(minTrust)) throw new InputError("min_trust: must be flagged | unverified | seen | verified");
         const v = validateQueryParams(sp);
         if (!v.ok) throw new InputError(`${v.param}: ${v.message}`);
-        const result = querySnapshot(snap, v.params);
-        const items = result.items.map((r) => rowToCompact(r, origin));
+        const result = querySnapshot(await trustSnap(minTrust), v.params);
+        const tq = await allTiers();
+        const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) }));
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
       checkDomain: async (domain) => { const r = checkDomain(snap, domain, origin); if (r.ok && r.body.verdict !== "not-in-index") Object.assign(r.body, tierFields((await tiersFor([String(r.body.domain)])).get(String(r.body.domain)))); return r; },

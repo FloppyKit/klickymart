@@ -247,6 +247,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   }
   for (const ev of suggestions) {
     const p = parseSuggestionEvent(ev, now, 365 * 86400);
+    if (ev.tags.some((t) => t[0] === "claim")) continue; // claims need a live DNS check: POST /claim/dns
     if (p.ok) { try { await submitStore({}, { db, indexed: ctx.domains, salt: "", ip: null, via: "nostr", signed: p.value, now, origin: "https://klickymart.com" }); } catch { /* migration pending */ } }
   }
   for (const ev of reviews) {
