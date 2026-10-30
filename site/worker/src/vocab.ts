@@ -15,7 +15,7 @@ export const PAY_ALIASES: Record<string, string> = {
 };
 /** /alternatives pay filter names (what each expands to). */
 export const ALT_PAY_FILTERS: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], "btc-onchain": ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"], ecash: ["cashu"] };
-export const BLOCKER_KINDS = ["none", "login-wall", "bot-wall", "http-refusal", "network-error", "no-product-link", "no-add-to-cart", "form-gate", "robots", "unclassified"] as const;
+export const BLOCKER_KINDS = ["none", "login-wall", "bot-wall", "http-refusal", "network-error", "no-product-link", "no-add-to-cart", "form-gate", "no-checkout-button", "probe-error", "robots", "unclassified"] as const;
 /** Categories accepted by /q `category`: the v1 vertical plus coarse product categories. */
 export const Q_CATEGORIES = [...V1_CATEGORIES, ...COARSE_CATEGORIES] as string[];
 

@@ -382,6 +382,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       ...(rows.length === 0 && q.domain ? { coverage_note: coverageNote(q.domain, live) } : {}),
       ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
   };
+  if (path === "/pending.json" && request.method === "GET") {
+    // Our own queue of store domains surfaced by live results that we haven't checked yet (domain + queue time only).
+    const out: { domain: string; queued_at: string | null }[] = [];
+    try {
+      const l = env.KV ? await env.KV.list({ prefix: "pending:", limit: 1000 }) : { keys: [] as { name: string }[] };
+      for (const k of l.keys) { const d = k.name.slice(8); if (!snap.rows.some((x) => x.d === d || x.d === `www.${d}`)) out.push({ domain: d, queued_at: ((await env.KV.get<{ queued_at: string }>(k.name, "json")) ?? { queued_at: null }).queued_at }); }
+    } catch { /* KV optional */ }
+    return Response.json({ count: out.length, items: out, note: "Store domains seen in live Shopify Catalog results that KlickyMart has not checked yet. KlickyBot checks them in order: robots.txt, then the store's terms (a ban is recorded as the fact and the store is not crawled), then public pages only. No catalog product data is kept." }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
+  }
   if (path === "/landed" && request.method === "GET") {
     const r = await landedCall((k) => url.searchParams.get(k));
     if (!r.ok) return err400(r.param, r.message);
