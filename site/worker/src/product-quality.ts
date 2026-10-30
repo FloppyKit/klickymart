@@ -27,26 +27,60 @@ const TYPE_RX: [string, RegExp][] = [
   ["grinder", /\bgrinder\b/],
   ["accessory", /\b(case|cable|cushion|ear ?pads?|charger|adapter|stand|replacement)\b/],
 ];
-export function productTypes(text: string): string[] {
-  const t = text.toLowerCase(); const out: string[] = [];
-  for (const [k, rx] of TYPE_RX) if (rx.test(t)) out.push(k);
-  return out;
+const OVER_EAR = /\b(over[\s-]?ear|on[\s-]?ear|around[\s-]?(the[\s-]?)?ear|over[\s-]the[\s-]ear|wh-\d|wh-?1000)\b/i;
+const IN_EAR = /\b(ear ?buds?|in-ear|true wireless|tws|wf-\d|wf-?1000)\b/i;
+function typesOf(t: string): string[] { const out: string[] = []; for (const [k, rx] of TYPE_RX) if (rx.test(t)) out.push(k); return out; }
+/** Product type from the TITLE first (URLs often carry a category like /headphones/ for earbuds); the URL is used only when the title says nothing.
+ * Over-ear vs earbuds: explicit form-factor words or model prefixes (Sony WH- = over-ear, WF- = earbuds) win. */
+export function productTypes(text: string, url = ""): string[] {
+  const title = text.toLowerCase();
+  let out = typesOf(title);
+  if (!out.length && url) out = typesOf(url.toLowerCase().replace(/[-_/]+/g, " "));
+  const over = OVER_EAR.test(title), inear = IN_EAR.test(title);
+  if (out.includes("earbuds") && out.includes("headphones") && !out.includes("bundle")) {
+    if (over && !/\b(ear ?buds?|wf-\d|true wireless|tws)\b/i.test(title)) out = out.filter((x) => x !== "earbuds");
+    else if (inear && !over) out = out.filter((x) => x !== "headphones");
+  }
+  if (over && !out.includes("headphones")) { out = out.filter((x) => x !== "earbuds" || inear); out.push("headphones"); }
+  return [...new Set(out)];
 }
 
+const STOP: Set<string> = new Set(["the", "anc", "over-ear", "on-ear", "for", "and", "with", "under", "best", "cheap", "new", "used", "manual", "electric", "noise", "wireless", "over", "coffee", "gift", "headphones", "earbuds", "bluetooth", "cheapest"]);
 const fold = (s: string) => s.toLowerCase().replace(/0/g, "o").replace(/[1|]/g, "l").replace(/5/g, "s").replace(/3/g, "e").replace(/4/g, "a").replace(/@/g, "a");
-/** Flags a title that spells a query brand with look-alike characters (e.g. "B0SE" for "Bose"), or omits the brand. */
-export function brandCheck(query: string | undefined, title: string, domain = ""): { brand_match: "ok" | "lookalike" | "absent" | null; brand_note?: string } {
-  if (!query) return { brand_match: null };
-  const brand = query.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-  if (!/^[a-z][a-z&-]{2,}$/.test(brand) || STOP.has(brand)) return { brand_match: null };
-  const words = title.split(/[^A-Za-z0-9&|@-]+/).filter(Boolean);
-  if (words.some((w) => w.toLowerCase() === brand)) return { brand_match: "ok" };
-  if (domain.replace(/^www\./, "").split(".").some((p) => p === brand)) return { brand_match: "ok", brand_note: "sold on the brand's own store" };
-  const look = words.find((w) => fold(w) === brand && w.toLowerCase() !== brand);
-  if (look) return { brand_match: "lookalike", brand_note: `title spells the brand "${look}" (look-alike characters for "${brand}"); likely not genuine` };
-  return { brand_match: "absent", brand_note: `"${brand}" does not appear in the title` };
+/** Known brands: a starter list plus brand words from our offers and brand store domains. Only these count as a query brand. */
+const KNOWN = new Set<string>(["bose", "sony", "apple", "samsung", "sennheiser", "skullcandy", "jbl", "beats", "anker", "soundcore", "audio-technica", "jabra", "marshall", "edifier", "sonos", "shure", "akg", "beyerdynamic",
+  "baratza", "fellow", "breville", "hario", "timemore", "kinu", "comandante", "1zpresso", "wacaco", "turin", "eureka", "rancilio", "trezor", "ledger", "coldcard", "bitbox", "chanel", "hermes", "gucci", "prada", "vuitton"]);
+export function addKnownBrands(words: Iterable<string>) { for (const w of words) { const x = w.toLowerCase(); if (/^[a-z][a-z0-9&-]{2,}$/.test(x) && !STOP.has(x)) KNOWN.add(x); } }
+/** The brand a query names (exact or written with look-alike characters such as "B0SE"). */
+export function queryBrand(query: string | undefined): { brand: string; written: string; lookalike: boolean } | null {
+  if (!query) return null;
+  for (const w of query.trim().split(/\s+/)) {
+    const lw = w.toLowerCase().replace(/[^a-z0-9&|@-]/g, "");
+    if (!lw || STOP.has(lw)) continue;
+    if (KNOWN.has(lw)) return { brand: lw, written: w, lookalike: false };
+    const f = fold(lw);
+    if (f !== lw && KNOWN.has(f)) return { brand: f, written: w, lookalike: true };
+  }
+  return null;
 }
-const STOP = new Set(["the", "best", "cheap", "new", "used", "manual", "electric", "noise", "wireless", "over", "coffee", "gift", "headphones", "earbuds", "bluetooth", "cheapest"]);
+/** brand_match: ok (title, the row's brand field, or the brand's own store), lookalike (B0SE for Bose in the title), absent (a brand
+ * was asked for and the row doesn't show it), null (the query names no known brand). A look-alike query is flagged in brand_note. */
+export function brandCheck(query: string | undefined, title: string, domain = "", rowBrand: string | null = null): { brand_match: "ok" | "lookalike" | "absent" | null; brand?: string | null; brand_src?: string; brand_note?: string; query_lookalike?: string } {
+  const qb = queryBrand(query);
+  const host = domain.replace(/^www\./, "");
+  const ownBrand = host.split(".").find((p) => KNOWN.has(p)) ?? null;
+  const words = title.split(/[^A-Za-z0-9&|@-]+/).filter(Boolean);
+  const titleBrand = words.find((w) => KNOWN.has(w.toLowerCase()))?.toLowerCase() ?? null;
+  const rb = rowBrand?.split(/\s+/)[0]?.toLowerCase() || null;
+  const brand = rb || titleBrand || ownBrand;
+  const brandSrc = rb ? "store's structured data" : titleBrand ? "title" : ownBrand ? "the brand's own store domain" : undefined;
+  const base = { brand: brand ?? null, ...(brandSrc ? { brand_src: brandSrc } : {}), ...(qb?.lookalike ? { query_lookalike: `the query writes "${qb.written}", a look-alike spelling of "${qb.brand}"` } : {}) };
+  if (!qb) return { brand_match: null, ...base };
+  const look = words.find((w) => fold(w) === qb.brand && w.toLowerCase() !== qb.brand);
+  if (look) return { brand_match: "lookalike", ...base, brand_note: `title spells the brand "${look}" (look-alike characters for "${qb.brand}"); likely not genuine` };
+  if (brand === qb.brand || words.some((w) => w.toLowerCase() === qb.brand)) return { brand_match: "ok", ...base };
+  return { brand_match: "absent", ...base, brand_note: `"${qb.brand}" is not in the title, the row's brand or the store domain` };
+}
 
 /** Model-number tokens in the query (contain a digit and >=4 chars), matched against title+url. */
 export function modelMatch(query: string | undefined, text: string): string | null {
@@ -65,8 +99,11 @@ export function dedupe<T extends Record<string, any>>(rows: T[]): { rows: T[]; r
     const d = String(r.domain ?? r.d ?? "").replace(/^www\./, "");
     let k = "";
     try { k = r.url ? new URL(String(r.url)).pathname.replace(/\/$/, "") : ""; } catch { /* */ }
-    const key = `${d}|${k || String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${r.variant ?? ""}`;
-    const key2 = `${d}|${String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${r.price ?? ""}`;
+    // Same store + same product page = one row (colour/size variants collapse; the cheapest comes first after sort).
+    // Gift-card denominations share a page, so they are told apart by face value.
+    const denom = r.denomination?.face_usd ?? (r.sku && /:\d+(\.\d+)?$/.test(String(r.sku)) ? String(r.sku) : "");
+    const key = `${d}|${k || String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${denom}`;
+    const key2 = `${d}|${String(r.title ?? r.name ?? "").toLowerCase().replace(/\W+/g, " ").trim()}|${denom || (r.price ?? "")}`;
     if (seen.has(key) || seen.has(key2)) continue;
     seen.add(key); seen.add(key2); out.push(r);
   }
@@ -77,9 +114,11 @@ export function dedupe<T extends Record<string, any>>(rows: T[]): { rows: T[]; r
 export function annotate<T extends Record<string, any>>(row: T, q: string | undefined): T & Record<string, unknown> {
   const title = String(row.title ?? row.name ?? "");
   const text = `${title} ${row.variant ?? ""} ${row.url ?? ""}`;
-  const c = conditionOf(text, String(row.domain ?? row.d ?? ""));
+  const c0 = conditionOf(text, String(row.domain ?? row.d ?? ""));
+  // The store's own structured data (schema.org itemCondition) beats "not stated" in the title.
+  const c = c0.condition === null && typeof row.condition === "string" && (CONDITIONS as readonly string[]).includes(row.condition) ? { condition: row.condition as Condition, condition_src: "store's structured data (itemCondition)" } : c0;
   const mm = modelMatch(q, text);
-  return { ...row, ...c, product_type: productTypes(`${title} ${row.url ?? ""}`), ...brandCheck(q, title, String(row.domain ?? row.d ?? "")), ...(mm ? { match: { by: "model", token: mm } } : {}) };
+  return { ...row, ...c, product_type: productTypes(title, String(row.url ?? "")), ...brandCheck(q, title, String(row.domain ?? row.d ?? ""), typeof row.brand === "string" ? row.brand : null), ...(mm ? { match: { by: "model", token: mm } } : {}) };
 }
 
 export function applyProductFilters<T extends Record<string, any>>(rows: T[], f: { condition?: string; type?: string; brand_strict?: boolean }) {
@@ -87,11 +126,10 @@ export function applyProductFilters<T extends Record<string, any>>(rows: T[], f:
   const out = rows.filter((r) => {
     if (f.condition) {
       const want = f.condition.split(",");
-      const c = r.condition ?? (want.includes("new") && !r.condition ? "new?" : null);
-      if (!(want.includes(r.condition) || (c === "new?" && want.includes("new")))) { dropped++; return false; }
+      if (!want.includes(r.condition)) { dropped++; return false; } // unknown condition never passes a condition filter
     }
     if (f.type && !(r.product_type ?? []).some((t: string) => f.type!.split(",").includes(t))) { dropped++; return false; }
-    if (f.brand_strict && r.brand_match === "lookalike") { dropped++; return false; }
+    if (f.brand_strict && r.brand_match !== "ok" && r.brand_match !== null) { dropped++; return false; } // strict: look-alikes and rows without the brand are out
     return true;
   });
   return { rows: out, dropped };
