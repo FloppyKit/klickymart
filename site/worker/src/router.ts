@@ -1,4 +1,5 @@
 import { mcpToolsList } from "./mcp";
+import { addKnownBrands } from "./product-quality";
 import { experienceTemplate, loadAggregates, parseExperience, storeExperience } from "./experience";
 import { buildChart } from "./chart";
 import { checkExtras, checkoutOf } from "./explain";
@@ -330,7 +331,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   };
   const offersFor = async (q: OfferQuery, live: boolean) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
-    const r = findOffers(parseOffers(EMBEDDED_OFFERS_NDJSON || ""), snap, origin, q);
+    const allOffers = parseOffers(EMBEDDED_OFFERS_NDJSON || "");
+    addKnownBrands(allOffers.map((o) => (o.b ?? "").split(/\s+/)[0] ?? "").filter((w) => w.length >= 3 && !/gift|card|the/i.test(w)));
+    const r = findOffers(allOffers, snap, origin, q);
     if (r.ok && live && q.q) {
       // Page through the live catalog (bounded) until filters leave enough rows. Catalog also gets price/condition natively.
       const want = Math.min(q.limit ?? 10, 50), MAX_PAGES = 4;
@@ -478,6 +481,22 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/check" && request.method === "GET") {
+    const many = url.searchParams.get("domains");
+    if (many !== null) {
+      // Batch: up to 10 stores in one call (e.g. a user's saved stores). Same facts as single /check, without alternatives.
+      const ds = [...new Set(many.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))];
+      if (!ds.length || ds.length > 10) return err400("domains", "domains= takes 1 to 10 comma-separated store domains");
+      const zipB = url.searchParams.get("zip");
+      if (zipB !== null && !validZip(zipB)) return err400("zip", ZIP_ERROR);
+      const items = ds.map((d) => {
+        const c = checkDomain(snap, d, origin);
+        if (!c.ok) return { domain: d, error: c.message };
+        const row = snap.rows.find((r) => r.d === c.body.domain);
+        if (zipB && row) c.body.landed = landedFor(parseRaw(row.raw_json), zipB);
+        return c.body;
+      });
+      return Response.json({ ...licenseMetaBlock(), count: items.length, items }, { headers: apiHeaders(snap.version, 0) });
+    }
     const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
     if (!res0.ok) return err400("domain", res0.message);
     const res = res0;

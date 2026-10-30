@@ -15,6 +15,21 @@ export const PAY_ALIASES: Record<string, string> = {
 };
 /** /alternatives pay filter names (what each expands to). */
 export const ALT_PAY_FILTERS: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], "btc-onchain": ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"], ecash: ["cashu"] };
+/** What each first_blocker kind means (rendered in llms.txt and /vocab.json). */
+export const BLOCKER_DESCRIPTIONS: Record<string, string> = {
+  none: "the probe reached the payment-method screen; nothing stopped it",
+  "login-wall": "checkout requires signing in or creating an account (guest checkout not offered)",
+  "bot-wall": "a challenge or captcha page appeared; KlickyBot never tries to get past it",
+  "http-refusal": "the site answered 403, 429 or 503 to our honest user agent",
+  "network-error": "connection resets or timeouts on every retry; not a refusal, so co stays null and a retry is scheduled",
+  "no-product-link": "the probe could not find a link to any product page from the public pages it may read",
+  "no-add-to-cart": "a product page loaded but no add-to-cart control was found or it did nothing",
+  "form-gate": "the checkout form was reached but a required field (needs: email, phone, address...) stopped the probe; it never types real personal data",
+  "no-checkout-button": "the item was added to the cart but the cart page had no checkout button or link the probe could find",
+  "probe-error": "the probe itself failed (browser crash, script error or page timeout) before reaching a verdict; the store is not at fault",
+  robots: "robots.txt disallows the next page the probe needed (cart or checkout), so it stopped there",
+  unclassified: "the probe stopped for a reason not yet classified; see the record's why/evidence",
+};
 export const BLOCKER_KINDS = ["none", "login-wall", "bot-wall", "http-refusal", "network-error", "no-product-link", "no-add-to-cart", "form-gate", "no-checkout-button", "probe-error", "robots", "unclassified"] as const;
 /** Categories accepted by /q `category`: the v1 vertical plus coarse product categories. */
 export const Q_CATEGORIES = [...V1_CATEGORIES, ...COARSE_CATEGORIES] as string[];
@@ -27,7 +42,7 @@ export function isPayCode(c: string): boolean {
 }
 export function vocabulary() {
   return { q_bool_filters: [...Q_BOOL_FILTERS], btc_processors: [...BTC_PROCESSORS], pay_codes: [...PAY_CODES], pay_aliases: PAY_ALIASES, pay_groups: PAY_GROUP_NAMES, alternatives_pay: Object.keys(ALT_PAY_FILTERS),
-    cat_codes: [...CAT_CODES], categories: [...COARSE_CATEGORIES], q_categories: Q_CATEGORIES, subs: [...SUBCATEGORIES], status: [...STATUS_VALUES], first_blocker_kinds: [...BLOCKER_KINDS] };
+    cat_codes: [...CAT_CODES], categories: [...COARSE_CATEGORIES], q_categories: Q_CATEGORIES, subs: [...SUBCATEGORIES], status: [...STATUS_VALUES], first_blocker_kinds: [...BLOCKER_KINDS], first_blocker_descriptions: BLOCKER_DESCRIPTIONS };
 }
 
 /** /q boolean filters (0|1). Kept here so llms.txt, openapi and MCP list the same set. */

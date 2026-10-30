@@ -37,6 +37,7 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       ...storeFacts(row),
       ...checkExtras(row, raw),
       checkout_depth: checkoutOf(row, raw),
+      steps: checkoutOf(row, raw).steps,
       pay: c.pay,
       btc_grade: row.btc,
       btc_any: row.btc_any === null ? null : row.btc_any === 1,

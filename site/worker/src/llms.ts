@@ -2,7 +2,7 @@
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "./nostr-kinds";
 import { CAT_CODES } from "./codes";
 import { CONDITIONS, PRODUCT_TYPES } from "./product-quality";
-import { PAY_CODES, PAY_ALIASES, Q_CATEGORIES, COARSE_CATEGORIES, SUBCATEGORIES, ALT_PAY_FILTERS, BLOCKER_KINDS, PAY_GROUP_NAMES } from "./vocab";
+import { PAY_CODES, PAY_ALIASES, Q_CATEGORIES, COARSE_CATEGORIES, SUBCATEGORIES, ALT_PAY_FILTERS, BLOCKER_KINDS, BLOCKER_DESCRIPTIONS, PAY_GROUP_NAMES } from "./vocab";
 
 export const MCP_URL = "https://klickymart.com/mcp";
 
@@ -17,6 +17,7 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
 1. Make a fresh Nostr keypair just for KlickyMart reviews (pseudonymity). Never reuse a key tied to your or your
    principal's identity. Keep the secret key local: never send an nsec to KlickyMart or anyone; we only accept signed events.
 2. Find the record's address: GET ${origin}/check?domain=<d> returns reviews.review_a_tag (31420:<record-author>:<domain>).
+- ${origin}/check?domains=a.com,b.com,c.com[&zip=66061] : batch of up to 10 stores (e.g. a user's saved stores) in one call; items[] carry the same facts as single /check.
 3. Build the event, sign it locally (NIP-01 id + BIP-340 Schnorr signature), e.g. with nostr-tools finalizeEvent or nak:
 {
   "kind": 422,
@@ -55,7 +56,8 @@ The crawler respects robots.txt and site terms, uses an honest user agent (Flopp
   Field names: /check calls it "landed_cost"; in /records, /export.ndjson and the signed record content the same object is "ship" with keys pre_pay (bool: shipping and tax shown before the payment step), ships_us (bool), free_min_usd (number; 0 = always free), and *_ev evidence {url, q}.
   btc_indirect (on /check): bitcoin routes that are NOT native store acceptance (a BitPay-style processor, or buying the store's gift card with bitcoin at a reseller). These are kept out of pay/btc and listed separately with via, quote and URL.
   Offers: shipping {usd, method, src} comes from the product page's schema.org shippingDetails; with zip, landed gives price, shipping, est_tax and est_total only when all parts are known (otherwise est_total is null and est_total_note says what is missing). Gift-card offers carry denomination {face_usd, range, fee:null}.
-  first_blocker kinds (${BLOCKER_KINDS.join(", ")}): none | login-wall | bot-wall (challenge page; not circumvented) | http-refusal (403/429/503) | network-error (protocol resets/timeouts on every retry; NOT a refusal, so co stays null) | no-product-link | no-add-to-cart | form-gate (checkout form reached, but a required field such as phone or address stopped the probe; it never types real data) | robots | unclassified.
+  first_blocker kinds:
+${BLOCKER_KINDS.map((k) => `    - ${k}: ${BLOCKER_DESCRIPTIONS[k]}`).join("\n")}
 - ${origin}/offers?gtin=<UPC/EAN>|mpn=<model>|q=<words>[&zip=66061&in_stock=1&max_price=200&domain=&live=1] : product-level offers KlickyBot observed on store pages (schema.org JSON-LD, Open Graph product tags, or Shopify JSON): price, currency, stock, URL, method, checked_at, match {how, conf}. zip adds a landed estimate per offer. live=1 also returns a live Shopify Catalog search for q (results from Shopify Catalog; never cached or stored by KlickyMart). Prices change; confirm on the store page.
 - ${origin}/recheck?domain=<indexed domain> : re-reads robots.txt and the home-page status now (honest UA). Max 1 per store per 10 minutes (else the cached result + next_allowed_at) and 60 per hour overall. The signed record changes only on the next crawl.
 - ${origin}/landed?zip=66061&q=<words>|gtin=|mpn=|url=|domain=[&max_price=&in_stock=1&live=1&condition=${CONDITIONS.join("|")}&type=${PRODUCT_TYPES.join("|")}&brand_strict=1] : ONE call for a product's landed price at a ZIP. Every row: price, stock, url, checked_at, shipping (with label observed | policy-derived | unknown), est. tax with the rate used, est_total only when price+shipping+tax are all known, condition, product_type, brand_match (flags look-alikes such as "B0SE"), and a store card (pay incl. Shop Pay/Link/BTC, guest, co, first blocker). Live rows from stores we haven't indexed say store.check="pending check" until our robots→terms→public-pages check runs. Rows are deduped by store+product. Live search pages through up to 4 catalog pages and reports pages_scanned. Invalid or placeholder ZIPs (99999, 00000) are rejected with 400. MCP: get_landed_price {zip, q?, gtin?, mpn?, url?, domain?, max_price?, in_stock?, live?, condition?, type?, brand_strict?, limit?}.
