@@ -18,7 +18,7 @@ const fail = (code: string, message: string) => ({ ok: false as const, code, mes
 const tag = (tags: string[][], name: string) => tags.find((t) => t[0] === name);
 
 /** Schema + signature check. `knownDomain` says whether the merchant is in the index. */
-export function parseReviewEvent(input: unknown, knownDomain: (d: string) => boolean, now = Date.now()): Res<ParsedReview> {
+export function parseReviewEvent(input: unknown, knownDomain: (d: string) => boolean, now = Date.now(), opts: { maxAgeS?: number } = {}): Res<ParsedReview> {
   if (!input || typeof input !== "object") return fail("bad_event", "body must be a signed Nostr event JSON object");
   const ev = input as NostrEventLine & Record<string, unknown>;
   if ("nsec" in ev || "privkey" in ev || "seckey" in ev) return fail("secret_sent", "never send a secret key; sign locally and send only the signed event");
@@ -29,7 +29,7 @@ export function parseReviewEvent(input: unknown, knownDomain: (d: string) => boo
   const nowS = Math.floor(now / 1000);
   const ca = ev.created_at as number;
   if (ca > nowS + REVIEW_LIMITS.maxFutureS) return fail("bad_time", "created_at is in the future");
-  if (ca < nowS - REVIEW_LIMITS.maxAgeS) return fail("bad_time", "created_at older than 7 days; publish to relays instead");
+  if (ca < nowS - (opts.maxAgeS ?? REVIEW_LIMITS.maxAgeS)) return fail("bad_time", "created_at older than 7 days; publish to relays instead");
   const a = tag(tags, "a");
   const m = a?.[1]?.match(new RegExp(`^${NOSTR_KIND_CRAWL_RECORD}:([0-9a-f]{64}):([a-z0-9.-]+)$`));
   if (!m) return fail("missing_a", `review needs ["a","${NOSTR_KIND_CRAWL_RECORD}:<record-author-pubkey>:<domain>"]`);
@@ -63,10 +63,10 @@ export async function rateLimitCheck(db: D1Database, rv: ParsedReview, now = Dat
   return null;
 }
 
-export async function storeReview(db: D1Database, rv: ParsedReview, raw: unknown, now = Date.now()): Promise<"stored" | "duplicate"> {
+export async function storeReview(db: D1Database, rv: ParsedReview, raw: unknown, now = Date.now(), src: { source?: "post" | "relay"; relays?: string | null; proof_status?: string | null } = {}): Promise<"stored" | "duplicate"> {
   const r = await db.prepare(
-    "INSERT OR IGNORE INTO reviews (id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json,received_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).bind(rv.id, rv.d, rv.pubkey, rv.created_at, rv.rating, rv.rating_max, rv.attempt, rv.pay, rv.fulfillment, rv.proof, rv.content, JSON.stringify(raw), utcDay(now)).run();
+    "INSERT OR IGNORE INTO reviews (id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json,received_day,source,relays,proof_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  ).bind(rv.id, rv.d, rv.pubkey, rv.created_at, rv.rating, rv.rating_max, rv.attempt, rv.pay, rv.fulfillment, rv.proof, rv.content, JSON.stringify(raw), utcDay(now), src.source ?? "post", src.relays ?? null, src.proof_status ?? null).run();
   return (r.meta?.changes ?? 0) > 0 ? "stored" : "duplicate";
 }
 
@@ -81,10 +81,17 @@ export async function getReviews(db: D1Database | undefined, d: string, limit = 
     const agg = await db.prepare("SELECT COUNT(*) AS n, AVG(rating * 5.0 / rating_max) AS a FROM reviews WHERE d = ?").bind(d).first<{ n: number; a: number | null }>();
     out.count = agg?.n ?? 0;
     out.avg_rating_5 = agg?.a == null ? null : Math.round(agg.a * 10) / 10;
-    const { results } = await db.prepare("SELECT id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json FROM reviews WHERE d = ? ORDER BY created_at DESC LIMIT ?").bind(d, Math.min(100, limit)).all<ParsedReview & { raw_json: string }>();
-    out.items = (results ?? []).map(({ raw_json, ...r }) => ({ ...r, verified: r.fulfillment && r.proof ? "signature-ok, proof-attached (not verified)" : "signature-ok (claim)", event: JSON.parse(raw_json) }));
+    const { results } = await db.prepare("SELECT id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json,source,relays,proof_status FROM reviews WHERE d = ? ORDER BY created_at DESC LIMIT ?").bind(d, Math.min(100, limit)).all<ParsedReview & { raw_json: string; source: string; relays: string | null; proof_status: string | null }>();
+    out.items = (results ?? []).map(({ raw_json, ...r }) => ({ ...r, verified: verifiedLabel(r), event: JSON.parse(raw_json) }));
   } catch {
     /* migration pending */
   }
   return out;
+}
+
+export function verifiedLabel(r: { fulfillment: string | null; proof: string | null; proof_status?: string | null }): string {
+  if (r.proof_status === "verified-preimage") return "verified payment (preimage matches the 421 invoice)";
+  if (r.proof_status === "verified-zap") return "verified payment (zap receipt checked)";
+  if (r.fulfillment && r.proof) return "unverified claim (proof attached, not checkable yet)";
+  return "unverified claim";
 }

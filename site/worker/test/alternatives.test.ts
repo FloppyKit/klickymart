@@ -3,7 +3,6 @@ import { SELF } from "cloudflare:test";
 import { findAlternatives, resolveCategory } from "../src/alternatives";
 import { ingestFromNdjsonText } from "../src/ingest";
 import { rowsToSnapshot } from "../src/index-mem";
-// @ts-expect-error vite raw import
 import REAL from "../../../data/records.ndjson?raw";
 
 async function realSnap() {

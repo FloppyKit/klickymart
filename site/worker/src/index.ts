@@ -1,4 +1,7 @@
-import { handleRequest } from "./router";
+import { handleRequest, type Env as RouterEnv } from "./router";
+import { catchUp, relayList } from "./relay-ingest";
+import { ingestCtx } from "./ingester-do";
+export { RelayIngester } from "./ingester-do";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -21,6 +24,17 @@ export default {
 
     return handleRequest(request, env);
   },
+
+  /** Every 5 minutes: since-based catch-up from each relay, and make sure the live ingester DO is running. */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const e = env as unknown as RouterEnv;
+    ctx.waitUntil((async () => {
+      if (env.INGESTER) {
+        try { await env.INGESTER.get(env.INGESTER.idFromName("main")).fetch("https://ingester/ensure"); } catch { /* reported via ingest_state */ }
+      }
+      if (env.DB) await catchUp(env.DB, relayList(env.RELAY_URLS), await ingestCtx(e));
+    })());
+  },
 };
 
 export { handleRequest, bootstrapFixtures, loadSnapshot, resetSnapshotCache } from "./router";
@@ -38,4 +52,5 @@ interface Env {
   PREVIEW_DATA?: string;
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
+  INGESTER?: DurableObjectNamespace;
 }

@@ -12,6 +12,8 @@ import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
+import { getCommunity, ingestStats } from "./community";
+import { relayList, checkProof, type Ev } from "./relay-ingest";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
@@ -48,6 +50,7 @@ export interface Env {
   PREVIEW_DATA?: string;
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
+  INGESTER?: DurableObjectNamespace;
 }
 
 let cachedSnap: Snapshot | null = null;
@@ -187,7 +190,13 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     const rl = await rateLimitCheck(env.DB, p.value);
     if (rl) return { status: 429, body: { ok: false, error: rl } };
     if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false } };
-    const st = await storeReview(env.DB, p.value, body);
+    let proof_status: string | null = null;
+    if (p.value.fulfillment || p.value.proof) {
+      const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };
+      const ev = body as Ev;
+      try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1])); } catch { proof_status = "unverified-claim"; }
+    }
+    const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews` } };
   } catch {
     return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
@@ -256,12 +265,22 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         const alt = findAlternatives(snap, origin, { domain: String(res.body.domain), limit: 5 });
         if (alt.ok) res.body.alternatives = { categories: alt.body.categories, items: alt.body.items, more: `${origin}/alternatives?domain=${res.body.domain}` };
       }
+      res.body.community = await getCommunity(env.DB, String(res.body.domain), crawlerHex);
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
     }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderCheckResult(origin, res.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     return Response.json({ ...licenseMetaBlock(), ...res.body }, { headers: apiHeaders(snap.version, 0) });
+  }
+
+  if (path === "/stats/ingest.json" && request.method === "GET") {
+    const body = await ingestStats(env.DB, crawlerHex, relayList(env.RELAY_URLS)) as Record<string, unknown>;
+    if (env.INGESTER) {
+      try { body.live = await (await env.INGESTER.get(env.INGESTER.idFromName("main")).fetch("https://ingester/status")).json(); } catch { body.live = null; }
+    }
+    body.note = "Live WebSocket subscriptions (Durable Object) plus a 5-minute since-based catch-up. Events are signature- and schema-checked; nothing about the sender's network is stored.";
+    return Response.json(body, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
   }
 
   if (path === "/stats/agents.json" && request.method === "GET") {
@@ -332,6 +351,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         derived: rowToCompact(row, origin),
         nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null, a: aTagFor(domain) },
         reviews: await getReviews(env.DB, domain),
+        community: await getCommunity(env.DB, domain, crawlerHex),
       },
       { headers: apiHeaders(snap.version, 0) },
     );
@@ -342,7 +362,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const row = snap.rows.find((r) => r.d === domain);
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -454,7 +474,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       checkDomain: async (domain) => checkDomain(snap, domain, origin),
       findAlternatives: async (args) => findAlternatives(snap, origin, altParams(args)),
       submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
-      getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()) }),
+      getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex) }),
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());
         if (!row) return null;

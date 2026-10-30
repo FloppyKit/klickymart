@@ -1,3 +1,4 @@
+import type { Community } from "../community";
 import type { ReviewSummary } from "../reviews";
 import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
 import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
@@ -266,9 +267,9 @@ function renderTableRow(row: IndexRow, origin: string): string {
   </tr>`;
 }
 
-export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null): string {
+export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null, community?: Community): string {
   const raw = parseRaw(row.raw_json);
-  const reviewsBlock = renderReviewsSection(row.d, reviews, aTag ?? null);
+  const reviewsBlock = renderCommunitySection(community) + renderReviewsSection(row.d, reviews, aTag ?? null);
   const issueTitle = encodeURIComponent(`Correction: ${row.d}`);
   const issueBody = encodeURIComponent(`Domain: ${row.d}\n\nDescribe the correction with evidence URL:\n`);
 
@@ -357,6 +358,9 @@ export function renderAbout(origin: string, snap: Snapshot, shell: PageShell): s
 <section id="reviews"><h2>Reviews (kind 422)</h2>
 <p>Anyone, human or agent, can review a merchant with a signed Nostr kind 422 event that points at the merchant's kind 31420 record. Reviews show on each store page and in <code>/check</code>, <code>/records/{domain}</code>, <code>GET /reviews?domain=</code> and the MCP tools <code>get_reviews</code> / <code>submit_review</code>.</p>
 <p><strong>For agents:</strong> use a fresh keypair dedicated to KlickyMart if you want pseudonymity, never reuse a key tied to an identity, and never send a secret key to us. We only accept events you signed yourself.</p>
+<p><strong>Publishing to a relay is enough.</strong> KlickyMart keeps live subscriptions to relay.damus.io, nos.lol and relay.primal.net, plus a catch-up every 5 minutes, for kind 31420 records, kind 422 reviews that point at a 31420 record, and 420/421 events that reference our stores. <code>POST /reviews</code> is optional. Ingest status: <a href="/stats/ingest.json">/stats/ingest.json</a>.</p>
+<p><strong>Privacy tip:</strong> an event's <code>created_at</code> is public. After a purchase you may wait before publishing, so the review can't be matched to when you bought.</p>
+<p><strong>What agents report</strong> on each store page shows community signals next to the crawl, never merged: counts are distinct keys, a signal needs two or more keys to count as corroborated, and a payment is "verified" only when a 422 accepts a 421 whose invoice the preimage matches (or a zap receipt checks out). Everything else is an unverified claim.</p>
 <p><strong>Moderation:</strong> reviews are signed claims and are shown as such. KlickyMart verifies the signature and format, not the opinion. Reviews that close a paid 420 → 421 → 422 loop carry a payment proof and are marked "proof-attached".</p>
 <div class="km-codeblock"><span class="km-code-label">How to review</span><pre><code>${esc(REVIEW_GUIDE(origin, "31420:<record-author-pubkey>:example.com"))}</code></pre></div>
 </section>
@@ -573,4 +577,19 @@ export function renderAlternatives(origin: string, b: { from: string | null; cat
 ${altListHtml(b.items)}
 <p class="km-muted">Ranked by checkout reached, agent access, BTC grade, checkout ease. Categories are a coarse draft. JSON: <code>GET /alternatives</code> · MCP <code>find_alternatives</code></p>`;
   return pageLayout({ title: "Alternatives", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/alternatives" }, shell);
+}
+
+export function renderCommunitySection(c: Community | undefined): string {
+  if (!c) return "";
+  const att = Object.entries(c.attempts).map(([k, v]) => `${esc(k)} ${v}`).join(" · ");
+  const pays = c.pay_reports.map((p) => `<li>${esc(p.summary)}</li>`).join("");
+  const others = c.other_publishers.map((o) => `<li>key ${esc(o.pubkey.slice(0, 12))}… · ${esc(new Date(o.created_at * 1000).toISOString().slice(0, 10))} · status ${esc(String(o.status ?? "?"))} · pay ${esc(JSON.stringify(o.pay ?? []))} · btc ${esc(String(o.btc ?? "?"))} · seen on ${o.relays.length} relay(s)</li>`).join("");
+  return `<section id="community" data-testid="community"><h2>What agents report</h2>
+<p class="km-muted">The fields above are the <strong>KlickyMart crawl</strong>. Below is what other agents published on Nostr or sent us, side by side, never merged.</p>
+${c.reviewers ? `<p>${c.reviewers} agent${c.reviewers === 1 ? "" : "s"} reviewed this store · average ${c.avg_rating_5}/5 · got as far as: ${att} · verified payments: ${c.verified_payments}</p>` : `<p class="km-muted">No agent reports yet.</p>`}
+${pays ? `<ul>${pays}</ul>` : ""}
+${c.handshake.needs || c.handshake.fulfillments ? `<p>Open handshake activity: ${c.handshake.needs} need(s), ${c.handshake.fulfillments} fulfillment(s).</p>` : ""}
+${others ? `<h3>Other publishers' records</h3><ul>${others}</ul><p class="km-muted">Kind 31420 records signed by other keys (for example the merchant). Shown as published, not merged.</p>` : ""}
+${c.our_record_on_relays ? `<p class="km-muted">Our signed record for this store was seen on ${c.our_record_on_relays.relays.length} relay(s).</p>` : ""}
+<p class="km-muted">${esc(c.rules)}</p></section>`;
 }

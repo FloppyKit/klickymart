@@ -18,6 +18,18 @@ migrations_dir = "worker/migrations"
 binding = "KV"
 id = "REPLACE_AT_DEPLOY"
 
+[[durable_objects.bindings]]
+name = "INGESTER"
+class_name = "RelayIngester"
+
+[[migrations]]
+tag = "v1-ingester"
+new_sqlite_classes = ["RelayIngester"]
+
+# Relay catch-up (since = last seen per relay) and ingester keep-alive.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
@@ -48,6 +60,17 @@ migrations_dir = "worker/migrations"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "REPLACE_AT_DEPLOY"
+
+[[env.production.durable_objects.bindings]]
+name = "INGESTER"
+class_name = "RelayIngester"
+
+[[env.production.migrations]]
+tag = "v1-ingester"
+new_sqlite_classes = ["RelayIngester"]
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
 
 [env.production.vars]
 SITE_ORIGIN = "https://klickymart.com"
