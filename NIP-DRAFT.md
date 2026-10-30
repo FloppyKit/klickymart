@@ -144,6 +144,19 @@ Tags:
 }
 ```
 
+### Store claims its listing (draft)
+
+A store can stand beside the crawler's record for its domain with its own record. Nothing here replaces or removes the crawler record.
+
+1. **Prove the domain.** The store controls a key and proves it controls the domain in one of two ways:
+   - NIP-05: `https://<domain>/.well-known/nostr.json` returns `{"names":{"_":"<hex pubkey>"}}`; or
+   - DNS: a TXT record at `_nostr.<domain>` with value `nostr=<hex pubkey>` (or `npub1...`).
+   Indexers fetch the proof themselves (honest UA, robots.txt does not apply to `/.well-known/nostr.json`, which the store published for this purpose), record `checked_at`, and re-check at least every 30 days. If the proof disappears or points to another key, the claim lapses from that time; earlier events stay signed by the old key.
+2. **Publish its own 31420.** The store signs a 31420 with `d` = its domain and the same tag vocabulary (pay methods, checkout facts, shipping and tax policy, agent policy). It MAY add `["a","31420:<crawler-pubkey>:<domain>"]` to point at the record it is answering, and `["claim","nip05"|"dns"]` naming its proof.
+3. **Display.** Clients show the store's record **beside** the crawler record, labelled "from the store" (a claim, not an observation), and the crawler record labelled "observed by <crawler>" with its `crawled_at`. Where they disagree, both are shown; neither silently wins. Store-supplied facts MAY rank first in lists, with the observation still visible.
+4. **The crawler record is never deleted.** The crawler keeps observing and publishing its own 31420 for the domain. A store cannot request its removal through this mechanism (terms-of-service bans on crawling are handled by the crawler skipping the site, as before).
+5. **No custodial keys.** Indexers and crawlers MUST NOT generate, hold or hand over keys for a store. The store creates its own key; the indexer only learns its public key from the domain proof. (There is no "assigned key we give the store later": anything the indexer generated, the indexer could still sign with.)
+
 ## Kind 421: Fulfillment
 
 Published by the fulfiller. `.content` is the proof or a description of it.
@@ -258,6 +271,33 @@ A "completed paid loop" for fulfiller `F` is a tuple `(420, 421, 422)` where:
 Indexers SHOULD publish, per pubkey (and per `r` domain): `loops_paid` (count), `sats_paid` (sum), `distinct_requesters` (count), `loops_unpaid` (accepted, no verifiable payment), `rejected` (count). Raw counts are trivially gamed by self-dealing; indexers SHOULD weight by distinct requesters, requester account age and the requester's own web-of-trust standing, and SHOULD publish their weighting as a NIP-85 trusted assertion (kind `30382`) so clients can choose whose scoring to trust. This NIP does not mandate a single score.
 
 **Count everything, weight by source.** Indexers MUST count every verifiable paid loop, including cheap zap-receipt tips, and MUST record for each loop the requester (tipper) pubkey and the proof type (`zap`, `preimage`, `nutzap`). Raw counts stay public. Each loop and each review is then weighted by the credibility of the account it came from: established, web-of-trust-connected or NIP-05-verified accounts weigh more, and new or anonymous keys weigh less but are never dropped. Stronger proof types MAY add weight. Credibility is itself derived from an account's own loop history, so the weighting sharpens over time. The same source weighting applies to crawl-record disputes and domain reviews.
+
+### Facilitated 421 (for stores that have not claimed their listing)
+
+When an agent pays a store that has no claimed key, there is no fulfiller to sign the 421. An indexer MAY act as **facilitator**: it checks the agent's proof and signs a 421 with a **separate facilitator key** (never its crawler key), returned to the agent to publish. It never publishes it itself.
+
+Tags (in addition to the 421 tags above where they apply):
+- `["r","<domain>"]` and `["on_behalf_of","<domain>"]`: the store the purchase was at.
+- `["role","facilitator"]`: this 421 is not from the store.
+- `["verification","verified-preimage"|"verified-zap"|"unverified-claim"]`: what the facilitator checked.
+  - `verified-preimage`: `sha256(preimage) == payment_hash` of the supplied `bolt11` (and the invoice is unexpired at submission or was paid).
+  - `verified-zap`: a supplied 9735 receipt validates per NIP-57 (signature, embedded 9734, amount).
+  - `unverified-claim`: e.g. a redacted receipt hash (`order_hash` = sha256 of the confirmation); the facilitator could not check it and says so.
+- `["proof", <type>, <value>]` as above (the preimage, zap receipt id, or the hash; never the receipt itself).
+- `content` states plainly what was checked, e.g. "Facilitator checked a Lightning preimage against the invoice. The store did not sign or confirm this." A facilitated 421 MUST NOT say or imply the store confirmed anything.
+
+Rules: facilitators rate-limit per pubkey and per IP; clients weigh facilitated 421s below store-signed ones and `unverified-claim` lowest. **Once a store claims its listing**, only 421s signed by the store's key count toward its paid loops from the claim time on; earlier facilitated 421s stay visible as history, labelled facilitated.
+
+### Tips on 422 reviews
+
+Reviews (422 shopping-experience notes) can be zapped (NIP-57). A review MAY carry `["lud16","name@domain"]` so readers can zap its author directly; otherwise clients use the author's kind 0 `lud16`.
+
+Indexers read 9735 zap receipts whose `e` tag points at a 422 and SHOULD show, per review and per reviewer: tip count, distinct tippers and sats. For ranking:
+- only **distinct tippers** count (one tipper zapping ten times is one tip); a zap from the review's own author (`P` of the 9734 == review pubkey, or tipper == author) is ignored;
+- the weight added is **capped** (for example `1 + min(0.5, 0.1 * distinct_tippers)`), so tips amplify a review but cannot dominate;
+- receipts are validated per NIP-57 where possible; unvalidated receipts count in the display, not in the weight.
+
+**Curator record.** Indexers MAY publish a per-tipper summary (who tipped which reviews, sats and count) so tippers are visible as curators; this is public data already present in the receipts.
 
 ## Businesses
 

@@ -432,7 +432,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
   if (path === "/report" && request.method === "GET") {
     const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "true", account_required: "false", basis: "visit", pay_used: "ln", pay_offered: ["card", "ln", "spay"], btc_route: "native", shown_before_payment: "tax,shipping", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
-    return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8",
+      // In-browser signing page: scripts only from this origin, network only to this origin and wss:// relays, no framing.
+      "Content-Security-Policy": "default-src 'self'; script-src 'self'; connect-src 'self' wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      "Referrer-Policy": "no-referrer", "Cache-Control": "no-store" } });
   }
   if (path === "/pending.json" && request.method === "GET") {
     // Our own queue of store domains surfaced by live results that we haven't checked yet (domain + queue time only).

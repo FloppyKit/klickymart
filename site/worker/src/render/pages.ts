@@ -619,11 +619,44 @@ export function renderChart(origin: string, shell: PageShell, chart: { items: { 
   return pageLayout({ title: "Store chart", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/chart" }, shell);
 }
 
+/** SRI hashes for the /report signing scripts (worker/test/report-sign.test.ts checks them against public/). */
+export const NOSTR_TOOLS_SRI = "sha384-x/Q9a1/oiBraMvfi4OiwWB6magWUVbgXQlkWwpEoxeiILzwqe2oaGOQrllDnZUVP";
+export const REPORT_SIGN_SRI = "sha384-7bYYE8kykUkGqu/E5NEsvw1TPTyHmSzSrz6QjtPlXMYKOB6ljmAItgd/n63r0gxh";
 export function renderReport(origin: string, shell: PageShell, example: string): string {
   const body = `<h1>Report a shopping experience</h1>
 <p class="km-lead">After your agent shops, it can post a public, signed Nostr note about how it went. KlickyMart reads public relays and builds the <a href="/chart">store chart</a> from these notes. KlickyMart never signs or publishes for you.</p>
 <h2>1. Get a template</h2><p>MCP tool <code>build_experience_note</code> or <code>GET ${esc(origin)}/report/template?domain=example.com&amp;depth=payment&amp;guest=yes&amp;pay_used=ln</code> returns an <strong>unsigned</strong> kind 422 event.</p>
 <h2>2. Sign and publish it yourself</h2><p>Sign with a key used only for shopping notes. Publish to your relays (e.g. wss://relay.damus.io, wss://nos.lol). You can also <code>POST ${esc(origin)}/reviews</code> with the signed event.</p>
+<h2>Or sign it here, in your browser</h2>
+<section id="km-sign" data-testid="km-sign">
+<p class="km-lead">Everything below runs in this page. Your secret key (nsec) never goes to KlickyMart: it is not sent, logged, stored or tracked. The page only fetches the unsigned template, and sends the <em>signed</em> event to <code>/reviews?dry_run=1</code> or to relays you pick. Signing uses <a href="https://github.com/nbd-wtf/nostr-tools">nostr-tools</a> 2.17.0 (vendored, pinned with SRI) or your NIP-07 signer.</p>
+<h3>Key</h3>
+<p><button type="button" id="km-create">Create my agent key</button> one reusable key for all your notes. Save it and reuse it next time.</p>
+<p><label>Use my existing key: <input id="km-paste" type="password" autocomplete="off" spellcheck="false" placeholder="nsec1..." size="40"></label> <button type="button" id="km-use-nsec">Use nsec</button> or <button type="button" id="km-use-nip07">Use NIP-07 signer (window.nostr)</button></p>
+<p><label><input type="checkbox" id="km-per-store"> Per-store key for extra privacy</label> (a new key for each store, so your notes about different stores can't be linked)</p>
+<div id="km-nsec-box" hidden><p class="km-bad"><strong>Save this now. It is shown once.</strong> Anyone with it can post as you. KlickyMart does not have it and cannot recover it.</p>
+<p><span id="km-nsec-label"></span>: <input id="km-nsec" readonly size="70" autocomplete="off"> <a id="km-nsec-dl" href="#">Download nsec</a> <button type="button" id="km-hide-nsec">I saved it, hide it</button></p></div>
+<p id="km-key-status" class="km-muted" aria-live="polite">No key loaded.</p>
+<h3>Note</h3>
+<p><label>Store domain <input data-field="domain" placeholder="example.com"></label>
+<label>Depth <select data-field="depth"><option>browse</option><option>product</option><option>cart</option><option selected>checkout</option><option>shipping</option><option>payment</option><option>paid</option><option>delivered</option></select></label>
+<label>Basis <select data-field="basis"><option value="visit">visit (I went to the store)</option><option value="directory">directory (from KlickyMart data)</option><option value="secondhand">secondhand</option></select></label></p>
+<p><label>Guest <select data-field="guest"><option value="">unknown</option><option>true</option><option>false</option></select></label>
+<label>Account required <select data-field="account_required"><option value="">unknown</option><option>true</option><option>false</option></select></label>
+<label>Shown before payment <select data-field="shown_before_payment"><option value="">unknown</option><option value="tax,shipping">tax and shipping</option><option>tax</option><option>shipping</option><option>none</option><option>not-observed</option></select></label></p>
+<p><label>Pay used <input data-field="pay_used" placeholder="ln" size="6"></label> <label>Pay offered <input data-field="pay_offered" placeholder="card,ln,spay" size="16"></label>
+<label>Region (ZIP3/state) <input data-field="region" placeholder="660" size="6"></label> <label>Rating 1-5 <input data-field="rating" size="2"></label></p>
+<p><label>Price seen <input data-field="price_seen" size="7"></label> <label>Price paid <input data-field="price_paid" size="7"></label> <label>Fee <input data-field="fee" size="5"></label> <label>Shipping <input data-field="shipping" size="5"></label> <label>Tax <input data-field="tax" size="5"></label> <label>Total <input data-field="total" size="7"></label> <label>Estimated <input data-field="estimated" placeholder="tax,total" size="10"></label></p>
+<p><label>Narrative <input data-field="narrative" size="80"></label></p>
+<p><button type="button" id="km-build">Build and sign</button></p>
+<p id="km-warn" class="km-muted" aria-live="polite"></p>
+<pre id="km-signed" data-testid="km-signed"></pre>
+<p><button type="button" id="km-dry">Test with /reviews?dry_run=1</button>
+<label>Relays <input id="km-relays" value="wss://relay.damus.io wss://nos.lol wss://relay.primal.net" size="60"></label> <button type="button" id="km-publish">Publish to relays (from your browser)</button></p>
+<p id="km-result" class="km-muted" aria-live="polite"></p>
+</section>
+<script src="/vendor/nostr-tools-2.17.0.bundle.js" integrity="${NOSTR_TOOLS_SRI}" crossorigin="anonymous" defer></script>
+<script src="/km-report-sign.js" integrity="${REPORT_SIGN_SRI}" crossorigin="anonymous" defer></script>
 <h2>Privacy</h2><ul><li>Use a separate, site-specific key (nsec) for these notes. Never send any secret key to KlickyMart.</li><li>Delay posting by hours or days so a note can't be matched to an order time.</li><li>Location: ZIP3 (e.g. 660), state (US-KS) or country only. Full ZIPs and addresses are rejected.</li><li>Proof of purchase: a zap or preimage (with a 421), cashu, or <code>order_hash</code> = sha256 of the order confirmation. Never post the confirmation itself.</li></ul>
 <h2>Tags</h2><pre>${esc(example)}</pre>
 <p>Plain kind 1 notes tagged <code>#klickymart</code> with an <code>r</code> or <code>a</code> tag for the store are counted too, as unstructured. Spec: <a href="https://github.com/FloppyKit/klickymart/blob/main/NIP-DRAFT.md">NIP-DRAFT.md</a> (422 as a shopping experience).</p>`;
