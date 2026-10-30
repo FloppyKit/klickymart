@@ -180,6 +180,11 @@ describe("trust ladder", () => {
     expect(q.items[0]).toHaveProperty("trust_tier");
     expect(q.items[0]).toHaveProperty("trust_label");
     expect((await SELF.fetch("https://km.test/q?min_trust=bogus")).status).toBe(400);
+    const mt = await SELF.fetch("https://km.test/q?min_trust=unverified&limit=5");
+    expect(mt.status).toBe(200);
+    expect(((await mt.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    const mv = await (await SELF.fetch("https://km.test/q?min_trust=verified&limit=500")).json() as { items: { trust_tier: string }[] };
+    expect(mv.items.every((x) => x.trust_tier === "verified")).toBe(true);
   });
   it("new keys weigh 0.5: 2 real + 2 new = seen; 1 real + 4 new is not (needs 2 real keys)", async () => {
     const a = uniq("w");

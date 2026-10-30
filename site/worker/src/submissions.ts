@@ -228,7 +228,7 @@ export async function submitStore(input: SubmitInput, ctx: SubmitCtx): Promise<S
 
   let status: "queued" | "duplicate" | "rejected" = "queued"; let reason: string | null = null;
   const bl = GATE_BLOCKLIST[n.domain] ?? GATE_BLOCKLIST[n.input_host];
-  if (bl) { status = "rejected"; reason = `gate blocklist: ${bl}`; }
+  if (bl) { status = "rejected"; reason = `gate blocklist: ${bl.split(/ \(|;/)[0]}`; }
   else if (ctx.indexed.has(n.domain) || ctx.indexed.has(`www.${n.domain}`) || ctx.indexed.has(n.input_host)) { status = "duplicate"; reason = "already indexed"; }
   let existing: { first_submission_id: string; state: string } | null = null;
   if (db && status === "queued") { try { existing = await db.prepare("SELECT first_submission_id, state FROM crawl_queue WHERE domain = ?").bind(n.domain).first(); } catch { /* */ } if (existing) { status = "duplicate"; reason = "already queued for the gated crawl"; } }

@@ -685,7 +685,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 
   if (path === "/q" && request.method === "GET") {
-    const validated = validateQueryParams(url.searchParams);
+    const qsp = new URLSearchParams(url.searchParams); qsp.delete("min_trust");
+    const validated = validateQueryParams(qsp);
     if (!validated.ok) return err400(validated.param, validated.message);
     const minTrust = url.searchParams.get("min_trust");
     if (minTrust && !(TIERS as readonly string[]).includes(minTrust)) return err400("min_trust", "min_trust is flagged | unverified | seen | verified");
