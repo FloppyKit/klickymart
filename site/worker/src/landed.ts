@@ -105,9 +105,12 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
     out.est_tax = tax;
     const known = ship !== null && tax !== null;
     out.est_total = known ? Math.round((price + ship! + tax!) * 100) / 100 : null;
-    out.est_total_label = known ? (label === "observed" ? "observed shipping + estimated tax" : "policy-derived shipping + estimated tax") : "unknown";
+    const untaxed = out.tax_policy && (out.tax_policy as { status?: string }).status === "not-taxed";
+    out.est_total_label = known ? (untaxed ? `${label === "observed" ? "observed" : "policy-derived"} shipping, not taxed at sale` : label === "observed" ? "observed shipping + estimated tax" : "policy-derived shipping + estimated tax") : "unknown";
     if (!known) out.est_total_note = `no total: ${[ship === null ? "shipping" : null, tax === null ? "tax" : null].filter(Boolean).join(" and ")} unknown; parts are given separately`;
-    else out.est_total_note = "price + shipping + estimated tax (state + average local rate; exact tax depends on the street address)";
+    else out.est_total_note = untaxed
+      ? `item_price (what you pay${opts.giftCard ? ", fee included when the store shows one" : ""}) + shipping${ship === 0 && opts.digital ? " ($0, digital delivery)" : ""}; no sales tax (gift card sale is not taxed; see tax_policy)`
+      : "item_price + shipping + estimated tax (state + average local rate; exact tax depends on the street address)";
   }
   return out;
 }

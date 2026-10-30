@@ -48,7 +48,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
     } else if (qy.domain && !g && !m) { conf = 0.1; how = "domain"; }
     if (!conf) continue;
     if (qy.in_stock && o.st !== "in") continue;
-    if (qy.max_price !== undefined && o.p > qy.max_price) continue;
+    if (qy.max_price !== undefined && (o.dn?.price_usd ?? o.p) > qy.max_price) continue; // what the buyer pays (gift cards: price_with_fee when known)
     scored.push({ o, conf, how });
   }
   const zip = qy.zip ?? null;
@@ -61,16 +61,33 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
     const landed = zip && o.c === "USD" ? landedFor(raw, zip, pay, o.sh ?? null, landedOptsFor(o.n, raw)) : undefined;
     return {
       domain: o.d, name: o.n, brand: o.b ?? null, gtin: o.g ?? null, mpn: o.m ?? null, sku: o.s ?? null,
-      price: o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
+      price: o.dn?.price_usd ?? o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
-      ...(o.dn ? { denomination: o.dn, ...(o.dn.price_usd != null ? { face_value: o.p, price_with_fee: o.dn.price_usd, fee: o.dn.fee ?? null, fee_src: o.dn.fee_src ?? null, fee_checked_at: o.dn.fee_checked_at ?? null } : {}) } : {}),
+      ...(o.dn ? { denomination: o.dn, ...giftCardPrice(o) } : {}),
       shipping: rowShipping(landed, o.sh),
       store: row ? { ...storeCard(snap, o.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(o.d)}` } : null,
       ...(landed ? { landed } : {}),
     };
   });
   return { ok: true as const, body: { query: qy, count: items.length, total: scored.length, items,
+    max_price_applies_to: "the price the buyer pays (gift cards: price_with_fee when the fee is known, else face value)",
     note: "Offers are KlickyBot's own observations from the store's public product data (JSON-LD or Shopify JSON) at checked_at; prices change, so confirm on the store page. Unknown fields are null, which means not observed." } };
+}
+
+/** Gift cards: one clear set of price fields. `price` is what the buyer pays: price_with_fee when the store shows a fee,
+ * else face value with the fee marked unknown (never assumed 0). */
+const GIFT_CARD_BRAND: Record<string, string> = { "amazon_com-usa": "amazon.com", "apple-usa": "apple.com", "doordash-usa": "doordash.com", "target-usa": "target.com", "uber-usa": "uber.com" };
+export function giftCardPrice(o: Offer) {
+  const dn = o.dn!; const known = dn.price_usd != null;
+  const brand = o.m ? GIFT_CARD_BRAND[o.m] : undefined;
+  return {
+    ...(brand ? { btc_route_for: { domain: brand, route: "indirect", note: `a way to pay ${brand} with bitcoin: buy this gift card with BTC/Lightning, then pay ${brand} with the card (${brand}'s own checkout does not take bitcoin). Also listed in ${brand}'s btc_indirect on /check.` } } : {}),
+    face_value: o.p, price_with_fee: known ? dn.price_usd! : null, fee: known ? (dn.fee ?? Math.round((dn.price_usd! - o.p) * 100) / 100) : null,
+    fee_status: known ? "shown on the store's product page" : "unknown: the product page shows no fee for this card (not assumed to be $0)",
+    price_basis: known ? "price = price_with_fee (face value + the store's fee)" : "price = face value; the fee is unknown",
+    btc_fee: null, btc_fee_note: "a separate fee for paying with bitcoin or Lightning is not published on the product page: unknown, not zero. Network or routing fees are set by your wallet.",
+    fee_src: dn.fee_src ?? null, fee_checked_at: dn.fee_checked_at ?? null,
+  };
 }
 
 type LiveVariant = { url?: string; title?: string; price?: { amount?: number; currency?: string }; availability?: { available?: boolean } };
