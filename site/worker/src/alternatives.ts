@@ -58,7 +58,7 @@ export function resolveCategory(input: string): string | null {
   return null;
 }
 
-export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; limit?: number }
+export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; limit?: number; include_indirect?: boolean }
 
 export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   let cats: string[] = [];
@@ -89,6 +89,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
   const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number; indirect: boolean }[] = [];
   const wantsBtc = !!want && want.some((x) => ["btc", "ln", "lnurl", "bolt12"].includes(x));
+  const indirectExcluded: string[] = [];
   const turnedAway: { d: string; name: string | null; status: string; reason: string | null; record: string }[] = [];
   for (const row of snap.rows) {
     if (row.d === from) continue;
@@ -107,6 +108,8 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     // Stores that take bitcoin only through a processor (btc_indirect) stay in bitcoin results, labelled and ranked after native ones.
     const indirect = wantsBtc && !pays.some((x) => want!.includes(x)) && Array.isArray(raw.btc_indirect) && (raw.btc_indirect as unknown[]).length > 0;
     if (want && !pays.some((x) => want.includes(x)) && !indirect) continue;
+    // pay=btc means the store's own checkout takes bitcoin. Indirect-only stores appear only when asked for (include_indirect=1).
+    if (indirect && !p.include_indirect) { indirectExcluded.push(row.d); continue; }
     if (p.guest && row.guest === 0) continue; // account required: excluded; unknown kept but ranked lower
     rows.push({ row, raw, pays, subRank, indirect });
   }
@@ -132,13 +135,15 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       sub: subsFor(raw), sub_match: sub ? (subRank === 2 ? "main line" : subRank === 1 ? "carries it" : "unknown") : null, major_retailer: MAJOR_RETAILERS.has(row.d),
       agent_ordering: raw.agent_policy ? (raw.agent_policy as { v: string }).v : null,
       ...pickAlt(storeFacts(row)), ease: row.ease,
-      pay: pays, ...(wantsBtc ? { btc_route: indirect ? "indirect" : "native", ...(indirect ? { btc_indirect: raw.btc_indirect, btc_note: "bitcoin only through a third-party processor, not paid to the store's own wallet" } : {}) } : {}), evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
+      pay: pays, ...(wantsBtc ? { btc_route: indirect ? "indirect" : "native", ...(indirect ? { btc_indirect: raw.btc_indirect, btc_note: (raw.btc_indirect as { kind?: string }[]).every((x) => x.kind === "gift-card") ? "bitcoin only by buying the store's gift card at a reseller (e.g. Bitrefill) and paying with the card" : "bitcoin only through a third-party processor, not paid to the store's own wallet" } : {}) } : {}), evidence: ev, record: `${origin}/records/${encodeURIComponent(row.d)}`,
     };
   });
   return {
     ok: true as const,
     body: {
-      from, categories: cats, sub, filters: { pay: p.pay ?? null, guest: !!p.guest }, count: items.length, total: rows.length,
+      from, categories: cats, sub, filters: { pay: p.pay ?? null, guest: !!p.guest, ...(wantsBtc ? { include_indirect: !!p.include_indirect } : {}) }, count: items.length, total: rows.length,
+      ...(wantsBtc ? { btc_semantics: "pay filters match native acceptance (the store's own checkout takes bitcoin/Lightning). Stores where bitcoin works only through a third-party processor or a gift card are excluded unless include_indirect=1, then labelled btc_route=indirect and ranked last.",
+        indirect_excluded: p.include_indirect ? [] : indirectExcluded, ...(indirectExcluded.length && !p.include_indirect ? { indirect_hint: `${indirectExcluded.length} store(s) take bitcoin only indirectly (${indirectExcluded.join(", ")}); add include_indirect=1 to list them` } : {}) } : {}),
       ranking: "checkout reached (co) desc, terms-restricted stores after equals, major retailer first among equals, product family is the store's main line, agent access (ag) desc, guest confirmed (if guest=1), BTC grade desc, ease desc",
       note: "Store-level, not product-level: a match means the store sells that product family (signed `sub` in v0.4 records), not that a specific item is in stock. guest=1 excludes stores known to require an account; unknown guest status is kept and marked null. B2B wholesale stores are excluded.",
       items,
