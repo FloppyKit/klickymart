@@ -345,6 +345,10 @@
     O: [".11.", "1..1", "1..1", "1..1", ".11."],
     P: ["11.", "1.1", "11.", "1..", "1.."],
     E: ["111", "1..", "11.", "1..", "111"],
+    H: ["1.1", "1.1", "111", "1.1", "1.1"],
+    S: [".11", "1..", ".1.", "..1", "11."],
+    2: ["11.", "..1", ".1.", "1..", "111"],
+    4: ["1.1", "1.1", "111", "..1", "..1"],
     N: ["1..1", "11.1", "1.11", "1..1", "1..1"],
   };
   function textWidth(s) {
@@ -368,7 +372,7 @@
   }
 
   // Logical store sprite: side wall (6) + front (66) + gap (3) + canopy (36); ground at row SH-1.
-  var SW = 111, SH = 50, SIDE = 6, FRONT = 66, CAN_X = SIDE + FRONT + 3, CAN_W = 36;
+  var SW = 90, SH = 50, SIDE = 3, FRONT = 66;
   var storeCache = { key: "", canvas: null };
 
   function buildStoreSprite(lit, litPanes, openOn, light) {
@@ -381,26 +385,20 @@
     var wallHi = light ? "#4a4078" : "#3a3168";
     var wallLo = light ? "#2a2348" : "#1b1636";
 
-    // Side wall in perspective (receding to the left/back)
-    for (var i = 0; i < SIDE; i++) {
-      var yTop = top + 2 + Math.round(((SIDE - i) / SIDE) * 3);
-      R(i, yTop, 1, G - yTop, wallLo);
-      R(i, yTop, 1, 1, "#8f86b8");
-    }
-    R(1, top + 22, 3, 4, "#0d0b1c"); // side window
-    R(1, top + 22, 3, 1, "rgba(255,233,168," + (0.15 + lit * 0.5) + ")");
-    R(1, G - 2, SIDE, 2, "#151229");
-
     // Parapet / flat roof edge with highlight and shadow rows
-    R(fx - 1, top, FRONT + 2, 1, "#f4f0ff");
-    R(fx - 1, top + 1, FRONT + 2, 1, "#c9c2e0");
-    R(fx - 1, top + 2, FRONT + 2, 1, "#8a82aa");
+    R(fx - 2, top - 1, FRONT + 4, 1, "#120e22");
+    R(fx - 3, top, 1, 3, "#120e22"); R(fx + FRONT + 2, top, 1, 3, "#120e22");
+    R(fx - 2, top, FRONT + 4, 1, "#f4f0ff");
+    R(fx - 2, top + 1, FRONT + 4, 1, "#c9c2e0");
+    R(fx - 2, top + 2, FRONT + 4, 1, "#8a82aa");
+    R(fx - 2, top + 3, FRONT + 4, 1, "#120e22");
+    R(fx, top + 4, FRONT, 1, "rgba(0,0,0,0.45)"); // overhang drop shadow
     // Rooftop details: AC box + vent, give a silhouette
     R(fx + 6, top - 3, 8, 3, "#6d6690"); R(fx + 6, top - 3, 8, 1, "#a39cc4"); R(fx + 8, top - 2, 1, 1, "#3b3560"); R(fx + 10, top - 2, 1, 1, "#3b3560");
     R(fx + FRONT - 10, top - 2, 3, 2, "#6d6690"); R(fx + FRONT - 11, top - 3, 5, 1, "#a39cc4");
 
     // Sign band
-    var sy = top + 3, sh = 11;
+    var sy = top + 4, sh = 11;
     R(fx, sy, FRONT, sh, "#120f2a");
     R(fx, sy, FRONT, 1, "#2c2558");
     R(fx + 1, sy + 1, FRONT - 2, 1, "rgba(110,243,255," + (0.25 + lit * 0.55) + ")");
@@ -506,31 +504,15 @@
       pixText(c, "OPEN", ox, oy, "#4a2234");
     }
 
-    // ---- Gas canopy + pumps ----
-    var cx0 = CAN_X, cTop = top + 14, cH = 5;
-    R(cx0 + 4, cTop + cH, 2, G - cTop - cH, "#2a2346"); R(cx0 + 4, cTop + cH, 1, G - cTop - cH, "#4a4270");
-    R(cx0 + CAN_W - 6, cTop + cH, 2, G - cTop - cH, "#2a2346"); R(cx0 + CAN_W - 6, cTop + cH, 1, G - cTop - cH, "#4a4270");
-    R(cx0, cTop, CAN_W, cH, "#e9e4f2");
-    R(cx0, cTop, CAN_W, 1, "#ffffff");
-    R(cx0, cTop + 2, CAN_W, 2, "#ff4f9a");
-    R(cx0, cTop + 3, CAN_W, 1, "#c0306f");
-    R(cx0 + 1, cTop + cH, CAN_W - 2, 1, "rgba(255,246,214," + (0.3 + lit * 0.7) + ")"); // underside lights
-    [9, 21].forEach(function (off) {
-      var px = cx0 + off, py = G - 11;
-      R(px - 1, G - 1, 8, 1, "#3b3560"); // island
-      R(px, py, 6, 10, "#2e2650");
-      R(px, py, 6, 1, "#c9c2e0");
-      R(px + 5, py + 1, 1, 9, "#1c1736");
-      R(px + 1, py + 2, 4, 3, reach > 0.3 ? "rgba(110,243,255," + (0.4 + lit * 0.6) + ")" : "#12101f");
-      R(px + 1, py + 6, 4, 1, "#ff4f9a");
-      R(px + 6, py + 3, 1, 5, "#0c0a16"); R(px + 7, py + 7, 1, 2, "#0c0a16"); // hose
-    });
-    // price board on a post at the far right (no brand, just a glyph)
-    R(cx0 + CAN_W - 2, G - 22, 1, 22, "#3b3560");
-    R(cx0 + CAN_W - 5, G - 27, 7, 6, "#120f2a");
-    R(cx0 + CAN_W - 5, G - 27, 7, 1, "#c9c2e0");
-    R(cx0 + CAN_W - 4, G - 25, 2, 1, "rgba(61,242,154," + (0.4 + lit * 0.6) + ")");
-    R(cx0 + CAN_W - 4, G - 23, 4, 1, "rgba(247,161,40," + (0.4 + lit * 0.6) + ")");
+    // ---- "24 HRS" pole sign to the right ----
+    var px0 = fx + FRONT + 7;
+    R(px0 + 6, G - 26, 2, 26, "#120e22"); R(px0 + 6, G - 26, 1, 26, "#4a4270");
+    R(px0 - 1, G - 39, 16, 15, "#120e22");
+    R(px0, G - 38, 14, 13, "#1d1840");
+    R(px0, G - 38, 14, 1, "#c9c2e0");
+    var hc = "rgba(255,79,154," + (0.45 + lit * 0.55) + ")";
+    pixText(c, "24", px0 + 4, G - 36, hc);
+    pixText(c, "HRS", px0 + 2, G - 30, "rgba(255,233,168," + (0.45 + lit * 0.55) + ")");
     return cv;
   }
 
@@ -570,11 +552,11 @@
     ctx.fillRect(g.bx + (SIDE + 1) * p, g.by + 8 * p, (FRONT - 2) * p, 9 * p);
     ctx.globalAlpha = 1;
     if (openOn > 0) {
-      var og = ctx.createRadialGradient(g.bx + 18 * p, g.by + 31 * p, 1, g.bx + 18 * p, g.by + 31 * p, 16 * p);
+      var og = ctx.createRadialGradient(g.bx + (SIDE + 14.5) * p, g.by + 35 * p, 1, g.bx + (SIDE + 14.5) * p, g.by + 35 * p, 16 * p);
       og.addColorStop(0, "rgba(255,60,110," + (openOn * 0.45) + ")");
       og.addColorStop(1, "rgba(255,60,110,0)");
       ctx.fillStyle = og;
-      ctx.fillRect(g.bx, g.by + 15 * p, 36 * p, 32 * p);
+      ctx.fillRect(g.bx, g.by + 19 * p, 36 * p, 32 * p);
     }
     // forecourt light spill: trapezoid from the storefront fanning toward the viewer
     if (reach > 0.12) {
@@ -592,106 +574,107 @@
       ctx.lineTo(fl - depthPx * 0.9, gy + depthPx);
       ctx.closePath();
       ctx.fill();
-      var cl = g.bx + CAN_X * p, cr = cl + CAN_W * p;
-      var cs = ctx.createLinearGradient(0, gy, 0, gy + depthPx * 0.6);
-      cs.addColorStop(0, "rgba(255,246,214," + (reach * 0.3) + ")");
-      cs.addColorStop(1, "rgba(255,246,214,0)");
-      ctx.fillStyle = cs;
-      ctx.beginPath();
-      ctx.moveTo(cl + 3 * p, gy);
-      ctx.lineTo(cr - 3 * p, gy);
-      ctx.lineTo(cr + depthPx * 0.5, gy + depthPx * 0.6);
-      ctx.lineTo(cl - depthPx * 0.2, gy + depthPx * 0.6);
-      ctx.closePath();
-      ctx.fill();
     }
     ctx.restore();
     canvas2d.dataset.storeOpen = openOn > 0 ? "1" : "0";
     canvas2d.dataset.storeLitWindows = String(litPanes);
   }
 
-  // ---- Bot shoppers: 13x18 logical sprites, front (leaving with a bag) and back (heading in with a basket) ----
-  // o antenna tip, a stem, H outline, h head, s head highlight, v visor, e eye, b body, d body shade, k chest light,
-  // r arm, l leg, f foot, g bag, G bag shade, w handle, c basket
-  var BOT_FRONT_TOP = [
-    "......o......",
-    "......a......",
-    "..HHHHHHHHH..",
-    "..HsshhhhhH..",
-    "..HvvvvvvvH..",
-    "..HveevveeH..",
-    "..HvvvvvvvH..",
-    "..HhhhhhhhH..",
-    "..HHHHHHHHH..",
-    ".....HdH.....",
-    "..rbbbbbbbr..",
-    "..rbbbkbbbrw.",
-    "..rbbbbbbbgGg",
-    "...ddddddd.gG",
+  // ---- Bot shoppers: 18x25 sprites, 1px outline, rim-lit by the sun behind them ----
+  // O outline, r rim light, L/M/D shell tones, S screen, E eye, g glare, T antenna tip, k chest light,
+  // B/b bag, c/C basket. Walkers going in show the back panel; walkers coming out show the face + bag.
+  var BOT_HEAD_TOP = [
+    "..................",
+    "........OO........",
+    ".......OTTO.......",
+    ".......OTTO.......",
+    "........OO........",
+    "........Oa........",
+    "..OOOOOOOOOOOOOO..",
+    ".OrrrrrrrrrrrrrrO.",
+    ".OrLLLLLLLLLLLLrO.",
   ];
-  var BOT_BACK_TOP = [
-    "......o......",
-    "......a......",
-    "..HHHHHHHHH..",
-    "..HsshhhhhH..",
-    "..HhhhhhhhH..",
-    "..HhdhdhdhH..",
-    "..HhhhhhhhH..",
-    "..HhhhhhhhH..",
-    "..HHHHHHHHH..",
-    ".....HdH.....",
-    "c.rbbbbbbbr..",
-    "cccbdddddbr..",
-    "cccbdbdbdbr..",
-    "ccc.ddddddd..",
+  var BOT_FACE = [
+    ".OrMSSSSSSSSSSMrO.",
+    ".OrMSgSSSSSSSSMrO.",
+    ".OrMSSEESSEESSMrO.",
+    ".OrMSSEESSEESSMrO.",
+    ".OrMSSSSSSSSSSMrO.",
   ];
-  var BOT_LEGS = [
-    ["...l....l....", "...l....l....", "..ff....ff..."], // stand / contact
-    ["....l..l.....", "....l..l.....", "...ff.ff....."], // passing (bob)
-    ["..l......l...", "..l.....l....", ".ff.....ff..."], // stride
-    ["....l..l.....", "....l..l.....", "...ff.ff....."],
+  var BOT_PANEL = [
+    ".OrMLMMMMMMMMLMrO.",
+    ".OrMMMDMDMDMMMMrO.",
+    ".OrMMMDMDMDMMMMrO.",
+    ".OrMMMDMDMDMMMMrO.",
+    ".OrMLMMMMMMMMLMrO.",
   ];
+  var BOT_HEAD_BOT = [
+    ".OrDDDDDDDDDDDDrO.",
+    "..OOOOOOOOOOOOOO..",
+    "....OOOOOOOOOO....",
+  ];
+  var BOT_BODY_F = [
+    "...OrLLkkMMMDrO...",
+    "...OrLLLMMMMDrO...",
+    "....ODDDDDDDDO....",
+  ];
+  var BOT_BODY_B = [
+    "...OrLLLMMMMDrO...",
+    "...OrLDDDDDDDrO...",
+    "....ODDDDDDDDO....",
+  ];
+  var LEG_FULL = ["OMDO", "OMDO", "OOOO"], LEG_UP = ["OMDO", "OOOO", "...."];
+  // frame -> [left leg, right leg, bob]
+  var WALK = [[LEG_FULL, LEG_UP, 0], [LEG_FULL, LEG_FULL, 1], [LEG_UP, LEG_FULL, 0], [LEG_FULL, LEG_FULL, 1]];
+  var BAG = ["..OO.", ".O..O", "OBBbO", "OBBbO", "OBbbO", "OOOOO"];
+  var BASKET = [".O.O.", "OOOOO", "OcCcO", "OCcCO", "OOOOO"];
+  var BOT_W = 18, BOT_H = 23;
   var botCache = {};
   function botSprite(facing, frame, orange) {
     var key = facing + frame + (orange ? "o" : "g");
     if (botCache[key]) return botCache[key];
-    var pal = orange
-      ? { o: "#ffd27a", a: "#8c86a8", H: "#3a1d06", h: "#ffb347", s: "#ffe2b0", v: "#2a1404", e: "#fff3c4", b: "#f7931a", d: "#b8620a", k: "#fff3c4", r: "#c96f0c", l: "#4a2a10", f: "#2a1404", g: "#f4ead8", G: "#c8b898", w: "#8c86a8", c: "#c9c2e0" }
-      : { o: "#6ef3ff", a: "#8c86a8", H: "#262245", h: "#c3c7e3", s: "#eef0ff", v: "#14122a", e: "#6ef3ff", b: "#9aa0c8", d: "#6a6f96", k: "#6ef3ff", r: "#7d82aa", l: "#3c3858", f: "#22203a", g: "#f4ead8", G: "#c8b898", w: "#8c86a8", c: "#c9c2e0" };
-    var bob = frame % 2 === 1 ? 1 : 0;
-    var top = facing === "f" ? BOT_FRONT_TOP : BOT_BACK_TOP;
-    var map = top.concat(BOT_LEGS[frame]);
-    var cv = offscreen(13, 18);
+    var acc = orange ? "#ffa733" : "#7ff6ff";
+    var pal = {
+      O: "#120e22", r: "#ffd6a0", a: "#5a5680", T: acc, S: "#0c0b1c", g: "#34406e", E: acc, k: acc,
+      L: orange ? "#77739a" : "#a9a8cf", M: orange ? "#55527a" : "#7a78a3", D: orange ? "#36335a" : "#504d78",
+      B: orange ? "#f7931a" : "#e8dcc0", b: orange ? "#b8620a" : "#b8a888",
+      c: orange ? "#f7931a" : "#c9c2e0", C: orange ? "#b8620a" : "#8a84aa",
+    };
+    var w = WALK[frame];
+    var bob = w[2];
+    var upper = BOT_HEAD_TOP.concat(facing === "f" ? BOT_FACE : BOT_PANEL, BOT_HEAD_BOT, facing === "f" ? BOT_BODY_F : BOT_BODY_B);
+    var cv = offscreen(BOT_W, BOT_H);
     var c = cv.getContext("2d");
-    for (var r = 0; r < map.length; r++) {
-      var dy = r < top.length ? bob : 0;
-      for (var k = 0; k < 13; k++) {
-        var ch = map[r].charAt(k);
-        if (ch === "." || !ch) continue;
+    function stamp(rows, x0, y0) {
+      for (var r = 0; r < rows.length; r++) for (var k = 0; k < rows[r].length; k++) {
+        var ch = rows[r].charAt(k);
+        if (ch === ".") continue;
         c.fillStyle = pal[ch];
-        c.fillRect(k, r + dy, 1, 1);
+        c.fillRect(x0 + k, y0 + r, 1, 1);
       }
     }
-    if (bob) { c.fillStyle = pal.l; c.fillRect(4, 14, 1, 1); c.fillRect(7, 14, 1, 1); }
+    var legY = upper.length - bob; // legs start right under the body
+    stamp(upper, 0, -bob + 1 - 1);
+    // when bobbing up, the legs stretch one row so the feet stay planted
+    if (bob) { stamp(["OMDO"], 5, legY); stamp(["OMDO"], 9, legY); }
+    stamp(w[0], 5, legY + bob);
+    stamp(w[1], 9, legY + bob);
+    if (facing === "f") stamp(BAG, 13, 16 - bob); else stamp(BASKET, 0, 17 - bob);
     botCache[key] = cv;
     return cv;
   }
 
   function drawShopper(x, y, px, frame, orange, alpha, facing) {
     var spr = botSprite(facing, frame, orange);
-    var ox = Math.round(x - 6.5 * px);
-    var oy = Math.round(y - 17 * px);
+    var ox = Math.round(x - (BOT_W / 2) * px);
+    var oy = Math.round(y - BOT_H * px);
     ctx.save();
-    ctx.globalAlpha = alpha * 0.45;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(ox + 2 * px, Math.round(y), 9 * px, Math.max(1, Math.round(px * 0.7)));
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.fillStyle = "#05040c";
+    ctx.fillRect(ox + 4 * px, oy + BOT_H * px, 10 * px, px);
     ctx.globalAlpha = alpha;
-    if (orange) {
-      ctx.shadowColor = "#f7931a";
-      ctx.shadowBlur = 4 + px * 3;
-    }
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(spr, ox, oy, 13 * px, 18 * px);
+    ctx.drawImage(spr, ox, oy, BOT_W * px, BOT_H * px);
     ctx.restore();
   }
 
@@ -703,25 +686,25 @@
     var floorH = h - horizon;
     var roadW = 0.2 + reach * 0.05;
     var still = pauseMotion || reduced;
+    // Spread evenly in screen depth (not in z) so far bots don't bunch up at the store.
+    var dMin = 0.03, dMax = 0.33, range = dMax - dMin;
+    var perLane = Math.ceil(counts.n / 2);
     var list = [];
     for (var i = 0; i < counts.n; i++) {
-      // left lane heads in (back view), right lane comes out with a bag (front view)
       var side = i % 2 === 0 ? -1 : 1;
       var slot = Math.floor(i / 2);
-      var span = 0.39;
-      var base = 0.53 - slot * 0.095 - (side > 0 ? 0.047 : 0);
-      var travel = still ? 0 : (t || 0) * 0.0000045 * (side < 0 ? 1 : -1);
-      var d = 0.16 + ((((base - 0.16 - travel * span) % span) + span) % span);
-      list.push({ i: i, d: d, side: side });
+      var base = (slot + (side > 0 ? 0.5 : 0) + 0.25) / perLane;
+      var travel = still ? 0 : (t || 0) * 0.00002 * (side < 0 ? 1 : -1);
+      var f = (((base - travel) % 1) + 1) % 1;
+      list.push({ i: i, depth: dMin + f * range, f: f, side: side, slot: slot });
     }
-    list.sort(function (a, b) { return a.d - b.d; }); // far first
+    list.sort(function (a, b) { return a.depth - b.depth; });
     list.forEach(function (s) {
-      var depth = s.d * s.d;
-      var y = horizon + floorH * depth;
-      var x = w * 0.5 + s.side * (roadW * w * 0.95 * depth + 10 + 16 * depth);
-      var px = Math.max(1, Math.round(depth * (floorH / 30)));
-      var alpha = Math.max(0, Math.min(1, (s.d - 0.16) / 0.04, (0.55 - s.d) / 0.02 + 0.2));
-      var frame = still ? (s.i % 2 ? 2 : 0) : Math.floor((t || 0) / 180 + s.i) % 4;
+      var y = horizon + floorH * s.depth;
+      var x = w * 0.5 + s.side * (roadW * w * 0.95 * s.depth + 14 + 30 * s.depth + (s.slot % 2) * (10 + 60 * s.depth));
+      var px = Math.max(1, Math.round(s.depth * (floorH / 34)));
+      var alpha = Math.max(0, Math.min(1, s.f / 0.06, (1 - s.f) / 0.06));
+      var frame = still ? (s.i % 2 ? 2 : 0) : Math.floor((t || 0) / 150 + s.i) % 4;
       drawShopper(x, y, px, frame, s.i < counts.orange, alpha, s.side < 0 ? "b" : "f");
     });
   }
