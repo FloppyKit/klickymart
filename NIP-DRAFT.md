@@ -211,20 +211,24 @@ No new kind. A kind 422 note can describe how an agent's shopping attempt at a s
 |---|---|
 | `["a","31420:<pk>:<domain>"]` / `["r","<domain>"]` | the store (one required) |
 | `["product","<url>"]` or `["gtin","<gtin>"]` | product (optional) |
-| `["depth","browse|cart|checkout|payment|paid|delivered"]` | furthest step reached (a 422 needs `depth` or `rating`) |
+| `["basis","visit|directory|secondhand"]` | visit = the agent went to the store; directory = written from KlickyMart data; secondhand = relayed from someone else. Missing = visit (with a warning). Only `visit` notes count toward aggregates and corroboration |
+| `["depth","browse|product|cart|checkout|shipping|payment|paid|delivered"]` | furthest stage reached, same stages as checkout maps (aliases: home/category→browse, add_to_cart→cart, shipform→shipping, paypage→payment). `attempt` is the legacy name, accepted as an alias with a warning; templates also fill `attempt` (browse|cart|checkout|paid) for older readers. A 422 needs `depth` or `rating` |
 | `["step","<n>","<text>"]` / `["steps","<n>"]` | steps taken / step count |
 | `["duration_s","<seconds>"]` | time to checkout |
 | `["blocker","<kind>"]` | first blocker |
 | `["wall","captcha"|"login"]` | walls met |
-| `["guest","yes|no"]`, `["account_required","yes|no"]` | guest checkout / account needed |
-| `["pay_used","<method>"]`, `["pay_offered","<m>",...]` | payment used and offered (card, spay, link, btc, lightning, ...) |
+| `["guest","true|false|unknown"]`, `["account_required","true|false|unknown"]` | guest checkout / account needed (yes/no accepted; anything else is rejected) |
+| `["pay_used","<code>"]`, `["pay_offered","<code>",...]` | payment used and offered, as /vocab.json pay codes (card, spay, link, btc, ln, ...); aliases such as lightning→ln are normalized with a warning |
 | `["btc_route","native|indirect|lightning"]` | BTC paid to the store's own wallet/node, via a processor (Confirmo, BitPay, Coinbase Commerce, OpenNode...), or over Lightning |
-| `["shown_before_payment","tax"|"shipping","yes|no"]` | was it shown before the payment step |
+| `["shown_before_payment","tax"|"shipping","true|false|unknown"]`, `["shown_before_payment","none"]` | was it shown before the payment step (tri-state; none = neither) |
 | `["amount","price|shipping|tax|total","<decimal>","<ISO4217>"]` | money seen |
 | `["region","<ZIP3>|US-XX|<country>"]` | coarse location only; full ZIPs are rejected |
 | `["agent","<name/version>"]` | agent token (optional) |
 | `["delivered","yes|no","<days>"]` | delivery outcome (optional) |
-| `["rating","<n>","<max>"]` | rating; `content` is the narrative |
+| `["rating","<1-5>","5"]` | rating; `content` is the narrative |
+| `["product","<url>"]` | kept as given |
+
+Unknown tags or template fields are not silently dropped: they come back in `warnings` (template response and POST /reviews response).
 | `["zap",<id>]`, `["preimage",<hex>]`, `["cashu",<token-hash>]`, `["order_hash",<sha256 of confirmation>]` | proof; marks a verified purchase once checked |
 
 Kind 1 notes with `["t","klickymart"]` and an `r`/`a` store tag are counted as unstructured experiences.
