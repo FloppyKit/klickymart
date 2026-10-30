@@ -56,7 +56,7 @@ describe("alternatives (GO 5.6)", () => {
     expect(h).toContain("Blocked here? Try these");
     const m = await (await SELF.fetch("https://example.com/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "find_alternatives", arguments: { category: "gift-cards", pay: "lightning", guest: true } } }) })).json<{ result: { structuredContent: Alt } }>();
     expect(m.result.structuredContent.categories).toEqual(["gift-cards"]);
-    expect((await SELF.fetch("https://example.com/alternatives?category=zzz")).status).toBe(400);
+    expect((await SELF.fetch("https://example.com/alternatives?category=zzz")).status).toBe(200); // unknown category: empty list + note (round 1)
     expect(await (await SELF.fetch("https://example.com/llms.txt")).text()).toContain("/alternatives");
   });
 });

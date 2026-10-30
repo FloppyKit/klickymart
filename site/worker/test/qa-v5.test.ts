@@ -83,7 +83,7 @@ describe("D1 offers", () => {
   const offers = parseOffers(OFFERS as string);
   it("has offers from deterministic sources only, each with checked_at and src", () => {
     expect(offers.length).toBeGreaterThan(100);
-    for (const o of offers) { expect(["jsonld", "shopify-json", "og-meta", "microdata"]).toContain(o.me); expect(o.t).toMatch(/Z$/); expect(o.src).toMatch(/^https?:/); expect(o.p).toBeGreaterThan(0); }
+    for (const o of offers) { expect(["jsonld", "jsonld-aggregateoffer", "shopify-json", "og-meta", "microdata"]).toContain(o.me); expect(o.t).toMatch(/Z$/); expect(o.src).toMatch(/^https?:/); expect(o.p).toBeGreaterThan(0); }
   });
   it("finds by name words and adds landed cost for a ZIP", async () => {
     const o = offers.find((x) => x.c === "USD" && x.n.split(" ").length >= 2)!;
