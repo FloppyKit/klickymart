@@ -67,6 +67,7 @@ export function queryParamsToMcpArgs(args: Record<string, unknown>): URLSearchPa
   for (const [k, v] of Object.entries(args)) {
     if (v === undefined || v === null) continue;
     if (Array.isArray(v)) sp.set(k, v.join(","));
+    else if (typeof v === "boolean") sp.set(k, v ? "1" : "0"); // /q booleans are 0|1
     else sp.set(k, String(v));
   }
   return sp;
@@ -81,14 +82,25 @@ export function mcpToolsList(): unknown {
         inputSchema: {
           type: "object",
           properties: {
-            q: { type: "string" },
-            status: { type: "array", items: { type: "string" } },
-            category: { type: "string", enum: ["shopping"], description: "Vertical filter (v1: shopping)" },
-            cat: { type: "array", items: { type: "string" }, description: "Subcategory codes (elec, groc, …)" },
+            q: { type: "string", description: "substring of domain or store name" },
+            status: { type: "array", items: { type: "string", enum: ["crawled", "agents-not-welcome", "blocked-tos", "error"] } },
+            reachable: { type: "boolean", description: "status crawled and agent access >= 1" },
+            category: { type: "string", enum: ["shopping"], description: "Vertical (v1 has one: shopping). For product categories use cat, sub, or find_alternatives." },
+            cat: { type: "array", items: { type: "string" }, description: "Fine store-type codes: elec, gift, groc, food, appr, jewel, beau, home, craft, office, auto, book, trav, tix, sw, sport, pet, toy, gen, mkt, btcnative" },
+            sub: { type: "string", enum: ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale"], description: "Product family the store sells (v0.4 records)" },
+            btc: { type: "integer", description: "exact BTC grade 0-4" },
             btc_min: { type: "integer" },
-            pay: { type: "array", items: { type: "string" } },
+            btc_any: { type: "boolean" },
+            pay: { type: "array", items: { type: "string" }, description: "any of these method codes (card, pp, apay, gpay, ln, btc, cashu, ...)" },
+            pay_all: { type: "array", items: { type: "string" } },
             pay_group: { type: "string", enum: ["bitcoin", "lightning", "ecash"] },
-            scope: { type: "string" },
+            scope: { type: "string", enum: ["online", "instore", "unscoped", "any"] },
+            ag_min: { type: "integer" }, co_min: { type: "integer" }, ease_min: { type: "integer" },
+            guest: { type: "integer", enum: [0, 1] },
+            tos: { type: "string", enum: ["ok", "bans-automation", "unknown"] },
+            ship_pre: { type: "integer", enum: [0, 1], description: "1 = shows shipping and tax before the payment step (observed by the probe)" },
+            ships_us: { type: "integer", enum: [0, 1] },
+            free_ship_max: { type: "number", description: "free-shipping threshold at or below this many USD (publicly stated)" },
             limit: { type: "integer", maximum: 100 },
           },
         },
@@ -113,11 +125,12 @@ export function mcpToolsList(): unknown {
       },
       {
         name: "find_alternatives",
-        description: "Where else can my agent buy this? Give a blocking domain and/or a category (electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other, or a product word like headphones). Returns in-map stores an agent can reach, ranked by checkout reached, agent access, BTC grade, checkout ease, each with an evidence URL. Index only; never crawls.",
+        description: "Where else can my agent buy this? Give a blocking domain and/or a category (electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other, or a product word like headphones). Product words resolve to a finer sub (headphones -> audio). Returns in-map stores an agent can reach that sell that product family, ranked by checkout reached, major retailer, main product line, agent access, BTC grade, checkout ease, each with an evidence URL, plus turned_away stores with reasons. Index only; never crawls.",
         inputSchema: {
           type: "object",
           properties: {
-            domain: { type: "string" }, category: { type: "string" },
+            domain: { type: "string" }, category: { type: "string", description: "coarse category or product word (headphones, laptop, gift card...)" },
+            sub: { type: "string", description: "product family: audio, computers, phones, tv-video, cameras, gaming, wearables, smart-home, appliances, networking, accessories, gift-cards" },
             pay: { type: "string", enum: ["lightning", "btc", "cashu"] }, guest: { type: "boolean", description: "exclude stores known to require an account" },
             limit: { type: "integer", maximum: 50 },
           },

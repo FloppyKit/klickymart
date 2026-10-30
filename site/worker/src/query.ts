@@ -11,6 +11,14 @@ import {
 } from "./codes";
 import { V1_CATEGORIES, categoryMatchesRow } from "./category";
 
+export const SUB_CODES = ["audio", "computers", "phones", "tv-video", "cameras", "gaming", "wearables", "smart-home", "appliances", "networking", "accessories", "gift-cards", "wholesale"];
+const rawCache = new WeakMap<object, Record<string, unknown>>();
+function rawOf(row: IndexRow): Record<string, unknown> {
+  let r = rawCache.get(row);
+  if (!r) { r = JSON.parse(row.raw_json) as Record<string, unknown>; rawCache.set(row, r); }
+  return r;
+}
+
 export interface QueryParams {
   q?: string;
   status?: string[];
@@ -32,6 +40,11 @@ export interface QueryParams {
   kyc?: string;
   cat?: string[];
   category?: string;
+  /** GO 5.7: finer subcategory (signed `sub`), landed-cost signals */
+  sub?: string;
+  ship_pre?: number;
+  ships_us?: number;
+  free_ship_max?: number;
   sort?: string[];
   limit?: number;
   cursor?: string;
@@ -49,7 +62,7 @@ const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
-  "sort", "limit", "cursor", "fields", "format",
+  "sub", "ship_pre", "ships_us", "free_ship_max", "sort", "limit", "cursor", "fields", "format",
 ]);
 
 export function validateQueryParams(searchParams: URLSearchParams): { ok: true; params: QueryParams } | { ok: false; param: string; message: string } {
@@ -219,6 +232,25 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     params.category = category;
   }
 
+  const sub = searchParams.get("sub");
+  if (sub) {
+    if (!SUB_CODES.includes(sub)) return { ok: false, param: "sub", message: `sub must be one of: ${SUB_CODES.join(", ")}` };
+    params.sub = sub;
+  }
+  for (const key of ["ship_pre", "ships_us"] as const) {
+    const v = searchParams.get(key);
+    if (v !== null) {
+      if (v !== "0" && v !== "1") return { ok: false, param: key, message: `${key} must be 0 or 1` };
+      params[key] = Number(v);
+    }
+  }
+  const fsm = searchParams.get("free_ship_max");
+  if (fsm !== null) {
+    const n = Number(fsm);
+    if (!Number.isFinite(n) || n < 0) return { ok: false, param: "free_ship_max", message: "free_ship_max must be a number of USD" };
+    params.free_ship_max = n;
+  }
+
   const sort = searchParams.get("sort");
   params.sort = sort ? sort.split(",").map((s) => s.trim()) : DEFAULT_SORT;
 
@@ -319,6 +351,15 @@ function matches(row: IndexRow, p: QueryParams): boolean {
 
   if (p.ag_min !== undefined) {
     if (row.ag === null || row.ag < p.ag_min) return false;
+  }
+
+  if (p.sub || p.ship_pre !== undefined || p.ships_us !== undefined || p.free_ship_max !== undefined) {
+    const raw = rawOf(row);
+    if (p.sub && !(Array.isArray(raw.sub) && (raw.sub as string[]).includes(p.sub))) return false;
+    const ship = (raw.ship ?? {}) as { pre_pay?: boolean | null; ships_us?: boolean | null; free_min_usd?: number | null };
+    if (p.ship_pre !== undefined && ship.pre_pay !== (p.ship_pre === 1)) return false;
+    if (p.ships_us !== undefined && ship.ships_us !== (p.ships_us === 1)) return false;
+    if (p.free_ship_max !== undefined && !(typeof ship.free_min_usd === "number" && ship.free_min_usd <= p.free_ship_max)) return false;
   }
 
   if (p.co_min !== undefined) {

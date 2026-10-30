@@ -33,7 +33,7 @@ describe("alternatives (GO 5.6)", () => {
     const key = (i: Alt["items"][number]) => [i.checkout ?? -1, i.agent_access ?? -1];
     for (let k = 1; k < j.items.length; k++) {
       const [a, b] = [key(j.items[k - 1]!), key(j.items[k]!)];
-      expect(a[0]! > b[0]! || (a[0] === b[0] && a[1]! >= b[1]!)).toBe(true);
+      expect(a[0]! >= b[0]!).toBe(true); // GO 5.7: checkout reached first; then major retailer / main line (qa-v3.test.ts)
     }
   });
   it("gift card, Lightning, no account (real 250 records)", async () => {

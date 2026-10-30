@@ -54,9 +54,16 @@ We respect every rule, and we publish every restriction. Each entry is `{"c":cod
 | `btc_conf` | low/med/high | confidence in the btc grade |
 | `tos` | code | `ok`, `bans-automation`, `TO-CONFIRM` |
 | `evu` | urls | evidence URLs for payment claims |
-| `co` | 0–3 / null | checkout ease: 3 guest ≤3 steps, 2 guest >3 steps, 1 account required, 0 not reachable; null if not observed (pilot: never observed directly, because the crawler stops at robots-disallowed cart/checkout) |
+| `co` | 0–3 / null | checkout depth: 3 guest reaches the payment screen in ≤3 pages, 2 guest but >3 pages or gated by address/phone before payment, 1 account required, 0 bot wall before the cart; null if not observed (pilot: never observed directly, because the crawler stops at robots-disallowed cart/checkout) |
 | `steps` | int | page transitions cart→payment screen (null if unreached) |
 | `guest` | bool | guest checkout offered |
+| `guest_src` | code | v0.4: `checkout-probe` (observed: guest form or payment screen reached without sign-in; or sign-in wall) or `help-page` (the store's own help text, quoted in `guest_ev` {url,q}) |
+| `co_n` | text | v0.4: why `co` is 0 or unset (bot wall at product page, robots disallows /cart, ...) |
+| `ship` | object | v0.4 landed cost: `pre_pay` (bool/null: shipping and tax amounts shown before the payment step, observed by the probe; `pre_pay_ev`), `ships_us` (bool/null, `ships_us_ev` {url,q}), `free_min_usd` (number/null: publicly stated free-shipping threshold, `free_min_ev` {url,q}) |
+| `category` | codes | v0.4 (signed): coarse category: electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other |
+| `sub` | codes | v0.4: product families, main line first: audio, computers, phones, tv-video, cameras, gaming, wearables, smart-home, appliances, networking, accessories, gift-cards, wholesale |
+| `why` | object | v0.4, every non-crawled record: `code`, `msg`, and where known `http`, `url`, `robots_group` + `robots_line`, `tos_q` + `tos_url`, `cause`, `checked`, `retry` (unix; errors +7 d, refusals +30 d, ToS bans +90 d) |
+| `agent_policy` | object | v0.4: pages reachable but terms/known practice restrict agent orders: `v` (`restricts-agents`), `summary`, `ev` [{url, kind: tos/practice, q}], `ua_rule`, `checked`. Public sources only |
 | `pay` | codes | every method seen (below) |
 | `btc` | 0–4 / null | bitcoin grade (below); null when bitcoin is accepted but processor/custody is unverified, or the site was unreadable |
 | `proc` | codes | identified payment processors, e.g. `stripe`, `adyen`, `braintree`, `bitpay`, `coinbase`, `btcpay`, `opennode`, `strike`, `square` |

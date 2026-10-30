@@ -1,5 +1,6 @@
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
+import { checkExtras, checkoutOf } from "./explain";
 
 export type Verdict = "reachable" | "agents-not-welcome" | "blocked-tos" | "error" | "not-in-index";
 
@@ -32,7 +33,8 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       domain: row.d,
       verdict,
       status: row.status,
-      checkout_depth: { co: row.co, steps: typeof raw.steps === "number" ? raw.steps : null, guest: row.guest === null ? null : row.guest === 1, agent_access: row.ag },
+      ...checkExtras(row, raw),
+      checkout_depth: checkoutOf(row, raw),
       pay: c.pay,
       btc_grade: row.btc,
       btc_any: row.btc_any === null ? null : row.btc_any === 1,

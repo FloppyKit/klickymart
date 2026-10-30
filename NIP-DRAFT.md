@@ -75,6 +75,9 @@ so a filter like `{"kinds":[31420],"#l":["pay:lightning"]}` works on any relay. 
 | `l anw:` | `["l","anw:robots-403","nip-xx"]` | why the site was not crawled. With status `agents-not-welcome` (affirmative refusal only): `robots-disallow`, `robots-403`, `robots-429`, `robots-block-page`, `http-403`, `http-429`, `http-503`, `block-page`. With status `error` (no signal either way): `robots-unreachable`, `home-unreachable` |
 | `l cause:` | `["l","cause:timeout","nip-xx"]` | with status `error`: `dns`, `timeout`, `tls`, `connect`, `5xx`, `4xx`, `redirect-loop`, `decode`, `unknown` |
 | `l co:` | `["l","co:2","nip-xx"]` | checkout ease 0–3 (rubric) |
+| `l sub:` | `["l","sub:audio","nip-xx"]` | product family (v0.4), repeatable |
+| `l agentpolicy:` | `["l","agentpolicy:restricts-agents","nip-xx"]` | pages reachable but terms/known practice restrict agent orders; quotes in content `agent_policy` |
+| `l shippre:` / `l shipsus:` | `["l","shippre:yes","nip-xx"]` | landed cost: shipping+tax shown before payment / ships to US (content `ship`) |
 | `l guest:` | `["l","guest:yes","nip-xx"]` | guest checkout `yes` / `no` |
 | `l kyc:` | `["l","kyc:none-stated","nip-xx"]` | buyer identity: `none-stated`, `conditional`, `required` |
 | `vantage` | `["vantage","single-datacenter"]` | where the crawl ran from (`single-datacenter`, `residential`, `multi-region`, `human`). Blocks may reflect IP reputation; readers SHOULD weigh `ag`/`ar` by vantage |

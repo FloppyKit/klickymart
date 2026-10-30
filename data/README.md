@@ -1,5 +1,7 @@
 # KlickyMart data: first full crawl
 
+**v0.4-draft (2026-10-30, CASCADE GO 5.7):** records re-signed after an outside shopper's QA. Adds `category` + `sub` (product families), `why` on every non-reachable record (HTTP code / robots.txt line / ToS quote, checked + retry dates), `agent_policy` (amazon.com: pages reachable, terms restrict agents), `guest`/`co` from a second guest-checkout probe pass or the store's own help page (`guest_src`, `guest_ev`), landed-cost `ship` fields, Lightning fixes (bitrefill.com, shop.trezor.io), bestbuy.com re-crawled (was a 30 s headless timeout). Diff: `nostr-market/crawler/out/v3-diff-2026-10-30.md`. Signed, not yet published to relays.
+
 Crawl of 250 commerce sites on 2026-10-29 (16:27–18:49 UTC), with a re-crawl of errored sites and a guest-checkout pass on bitcoin candidates the same day.
 
 | file | contents |

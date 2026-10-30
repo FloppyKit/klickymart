@@ -1,3 +1,4 @@
+import { checkExtras, checkoutOf } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { rowsToSnapshot, snapshotFromJson } from "./index-mem";
 import { normalize } from "./normalize";
@@ -243,7 +244,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const altParams = (sp: URLSearchParams | Record<string, unknown>) => {
     const g = (k: string) => (sp instanceof URLSearchParams ? sp.get(k) : (sp[k] as string | undefined)) ?? undefined;
     const guest = g("guest");
-    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true, limit: g("limit") ? Number(g("limit")) : undefined };
+    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true, limit: g("limit") ? Number(g("limit")) : undefined };
   };
 
   if (path === "/alternatives" && request.method === "GET") {
@@ -261,7 +262,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const res = res0;
     if (res.body.verdict !== "not-in-index") {
       const rv = await getReviews(env.DB, String(res.body.domain), 0);
-      if (res.body.verdict !== "reachable") {
+      if (res.body.verdict !== "reachable" || res.body.agent_ordering) {
         const alt = findAlternatives(snap, origin, { domain: String(res.body.domain), limit: 5 });
         if (alt.ok) res.body.alternatives = { categories: alt.body.categories, items: alt.body.items, more: `${origin}/alternatives?domain=${res.body.domain}` };
       }
@@ -349,6 +350,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         ...licenseMetaBlock(),
         record: raw,
         derived: rowToCompact(row, origin),
+        explain: { ...checkExtras(row, raw), checkout_depth: checkoutOf(row, raw) },
         nostr: { kind: NOSTR_KIND_CRAWL_RECORD, d: domain, event_id: null, a: aTagFor(domain) },
         reviews: await getReviews(env.DB, domain),
         community: await getCommunity(env.DB, domain, crawlerHex),
@@ -478,7 +480,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       getRecord: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase());
         if (!row) return null;
-        return { body: { record: parseRaw(row.raw_json), derived: rowToCompact(row, origin) } };
+        return { body: { record: parseRaw(row.raw_json), derived: rowToCompact(row, origin), explain: { ...checkExtras(row, parseRaw(row.raw_json)), checkout_depth: checkoutOf(row, parseRaw(row.raw_json)) } } };
       },
     });
     const resp = await handler(parsed.method, parsed.params, parsed.id);
