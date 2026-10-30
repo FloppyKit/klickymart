@@ -17,6 +17,7 @@ import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
 import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
+import { SELFTEST_DOMAIN } from "./experience";
 import { hostOf } from "./store-card";
 import { zipToState } from "./landed";
 import { annotate, applyProductFilters, dedupe, CONDITIONS, CONDITION_FILTERS, PRODUCT_TYPES } from "./product-quality";
@@ -210,7 +211,7 @@ function err400(param: string, message: string): Response {
 }
 
 async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean): Promise<{ status: number; body: Record<string, unknown> }> {
-  const known = new Set(snap.rows.map((r) => r.d));
+  const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
   const p = parseReviewEvent(body, (d) => known.has(d));
   const x = parseExperience(body, (d) => known.has(d));
   if (!p.ok && !x.ok) return { status: 400, body: { ok: false, error: { code: x.code === "not_an_experience" || x.code === "bad_kind" ? p.code : x.code, message: x.code === "not_an_experience" || x.code === "bad_kind" ? p.message : x.message } } };
@@ -420,7 +421,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const aggs = await loadAggregates(env.DB);
     const ch = buildChart(snap, aggs, { limit: Number(url.searchParams.get("limit") ?? 50) || 50, category: url.searchParams.get("category") ?? undefined });
     if (path === "/chart") return new Response(renderChart(origin, shell, ch), { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, items: ch.items }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
+    const st = aggs.get(SELFTEST_DOMAIN);
+    return Response.json({ ...licenseMetaBlock(), count: ch.items.length, method: ch.method, community_stores: aggs.size, items: ch.items, ...(st ? { selftest: { d: SELFTEST_DOMAIN, note: "KlickyMart ingest self-test (fake .invalid domain); not ranked", community: st } } : {}) }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
   if (path === "/report/template" && request.method === "GET") {
     const args: Record<string, unknown> = Object.fromEntries(url.searchParams.entries());

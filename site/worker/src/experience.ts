@@ -29,6 +29,9 @@ export const AMOUNT_KINDS = ["price", "price_seen", "price_paid", "fee", "shippi
 /** shown_before_payment values: true | false | unknown | not-observed (you didn't get far enough, or wrote from directory data). */
 export const SBP_VALUES = ["true", "false", "unknown", "not-observed"] as const;
 export const NOTE_HASHTAG = "klickymart";
+/** Reserved fake domain for KlickyMart's own relay-to-chart ingest self-tests (RFC 2606 .invalid: never a real store).
+ * Notes about it are accepted and aggregated, but listed apart from the ranked chart. */
+export const SELFTEST_DOMAIN = "klickymart-selftest.invalid";
 /** Experience tag names, documented in llms.txt / NIP-DRAFT. All optional except the store reference. */
 export const EXP_TAGS = ["a", "r", "product", "gtin", "depth", "step", "steps", "blocker", "wall", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
   "shown_before_payment", "amount", "region", "duration_s", "agent", "delivered", "rating", "attempt", "basis", "t", "L", "l", "e", "p", "pay", "fulfillment", ...PROOF_TAGS] as const;
