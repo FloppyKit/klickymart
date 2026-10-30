@@ -19,7 +19,8 @@ import { checkDomain } from "./check";
 import { findAlternatives } from "./alternatives";
 import { hostOf } from "./store-card";
 import { zipToState } from "./landed";
-import { annotate, applyProductFilters, dedupe, CONDITIONS, PRODUCT_TYPES } from "./product-quality";
+import { annotate, applyProductFilters, dedupe, CONDITIONS, CONDITION_FILTERS, PRODUCT_TYPES } from "./product-quality";
+import { flagPriceOutliers, flagRow } from "./row-flags";
 import { liveItems, findOffers, parseOffers, type OfferQuery } from "./offers";
 import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
@@ -216,7 +217,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: false, warnings: x.value.warnings } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
@@ -229,7 +230,8 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   try {
     const rl = await rateLimitCheck(env.DB, p.value);
     if (rl) return { status: 429, body: { ok: false, error: rl } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false } };
+    const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb } };
     let proof_status: string | null = null;
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };
@@ -238,7 +240,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     }
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }
-    return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews` } };
+    return { status: st === "stored" ? 201 : 200, body: { ok: true, id: p.value.id, d: p.value.d, stored: st === "stored", duplicate: st === "duplicate", review_url: `/merchant/${p.value.d}#reviews`, ...xb } };
   } catch {
     return { status: 503, body: { ok: false, error: { code: "storage_error", message: "reviews storage not ready" } } };
   }
@@ -284,7 +286,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const altParams = (sp: URLSearchParams | Record<string, unknown>) => {
     const g = (k: string) => (sp instanceof URLSearchParams ? sp.get(k) : (sp[k] as string | undefined)) ?? undefined;
     const guest = g("guest");
-    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true, limit: g("limit") ? Number(g("limit")) : undefined };
+    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true,
+      include_indirect: ["1", "true"].includes(String(g("include_indirect") ?? g("btc_indirect") ?? "")) || (sp as Record<string, unknown>).include_indirect === true, limit: g("limit") ? Number(g("limit")) : undefined };
   };
 
   const addLanded = (body: { items: Record<string, unknown>[] }, zip: string, taxpreOnly = false) => {
@@ -339,7 +342,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const want = Math.min(q.limit ?? 10, 50), MAX_PAGES = 4;
       let cursor: string | undefined; let pages = 0, scanned = 0, totalCount: number | null = null;
       const products: unknown[] = []; let lv: { ok: boolean; results?: { products?: unknown[] } } & Record<string, unknown> = { ok: false };
-      const cond = q.condition ? (q.condition.split(",").some((c) => c !== "new") ? q.condition.split(",").includes("new") ? undefined : ["secondhand"] : ["new"]) : undefined;
+      const cond = q.condition && !q.condition.split(",").includes("unknown") ? (q.condition.split(",").some((c) => c !== "new") ? q.condition.split(",").includes("new") ? undefined : ["secondhand"] : ["new"]) : undefined;
       do {
         lv = await liveCatalogSearch(q.q, q.zip ?? null, origin, fetch, q.domain, { maxMinor: q.max_price ? Math.round(q.max_price * 100) : undefined, condition: cond, cursor, pageSize: 25 }) as typeof lv;
         if (!lv.ok) break;
@@ -351,10 +354,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       } while (cursor && pages < MAX_PAGES);
       if (pages > 0) {
         const li = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q);
-        const pf = applyProductFilters(dedupe(li.items.map((x) => annotate(x, q.q))).rows, { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
+        const ann = li.items.map((x) => annotate(x, q.q));
+        const rel = ann.filter((x) => !x.below_floor); const relDropped = ann.length - rel.length;
+        const pf = applyProductFilters(dedupe(rel).rows, { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
         lv = { ...lv, ok: true, items: pf.rows.slice(0, want), filters_applied_after_fetch: [...li.filters_applied_after_fetch, ...(q.condition ? [`condition=${q.condition}`] : []), ...(q.type ? [`type=${q.type}`] : [])],
-          dropped_by_filters: li.dropped_by_filters + pf.dropped, pages_scanned: pages, products_scanned: scanned, catalog_total: totalCount,
-          filter_note: `Scanned ${scanned} live products over ${pages} page(s) (max ${MAX_PAGES}); KlickyMart applied ${[...li.filters_applied_after_fetch, ...(q.condition ? ["condition"] : []), ...(q.type ? ["type"] : [])].join(", ") || "no filters"} after fetching (dropped ${li.dropped_by_filters + pf.dropped}).${pf.rows.length === 0 ? " 0 matches in the scanned pages; this is not proof none exist, try a narrower query." : ""}` };
+          dropped_by_filters: li.dropped_by_filters + pf.dropped, dropped_below_relevance_floor: relDropped, condition_unknown_dropped: pf.condition_unknown_dropped, pages_scanned: pages, products_scanned: scanned, catalog_total: totalCount,
+          filter_note: `Scanned ${scanned} live products over ${pages} page(s) (max ${MAX_PAGES}); KlickyMart applied ${[...li.filters_applied_after_fetch, ...(q.condition ? ["condition"] : []), ...(q.type ? ["type"] : [])].join(", ") || "no filters"} after fetching (dropped ${li.dropped_by_filters + pf.dropped}); ${relDropped} below the relevance floor (no query word in the title).${pf.rows.length === 0 ? " 0 matches in the scanned pages; this is not proof none exist, try a narrower query." : ""}` };
         delete lv.results; delete lv.pagination; // normalized items only; raw catalog payload is not re-served or stored
         await markPending(lv.items as Record<string, any>[]);
       }
@@ -368,7 +373,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   };
   const offerQuery = (g: (k: string) => string | null | undefined): OfferQuery | string => {
     const zip = g("zip"); if (zip && !validZip(zip)) return ZIP_ERROR;
-    const cnd = g("condition"); if (cnd && !cnd.split(",").every((c) => (CONDITIONS as readonly string[]).includes(c))) return `condition must be one or more of ${CONDITIONS.join(", ")}`;
+    const cnd = g("condition"); if (cnd && !cnd.split(",").every((c) => (CONDITION_FILTERS as readonly string[]).includes(c))) return `condition must be one or more of ${CONDITION_FILTERS.join(", ")} (unknown = condition not stated or inferable)`;
     const ty = g("type"); if (ty && !ty.split(",").every((c) => (PRODUCT_TYPES as readonly string[]).includes(c))) return `type must be one or more of ${PRODUCT_TYPES.join(", ")}`;
     const mp = g("max_price");
     return { gtin: g("gtin") || undefined, mpn: g("mpn") || undefined, q: g("q") || undefined, domain: g("domain") || undefined, zip: zip || null,
@@ -394,13 +399,22 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const before = rows.length;
     const pf = applyProductFilters(rows.map((i) => (i.source === "klickymart-observed" ? annotate(i, q.q) : i)), { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
     const dd = dedupe(pf.rows); rows = dd.rows;
-    const key = (i: Record<string, any>) => [(i.brand_match === "lookalike" ? 2 : 0) + (i.landed?.est_total == null ? 1 : 0), i.landed?.est_total ?? i.price ?? 1e9];
+    const outliers = flagPriceOutliers(rows);
+    const tier = new Map(rows.map((i) => [i, flagRow(i)]));
+    const key = (i: Record<string, any>) => [tier.get(i)! * 10 + (i.brand_match === "lookalike" ? 2 : 0) + (i.landed?.est_total == null ? 1 : 0), i.landed?.est_total ?? i.price ?? 1e9];
     rows.sort((x, y) => { const a = key(x), c = key(y); return a[0] - c[0] || a[1] - c[1]; });
+    const blocked = rows.filter((i) => i.agent_usable === false).length;
+    const lvb = b.live_shopify_catalog as Record<string, any> | undefined;
+    const condUnknown = pf.condition_unknown_dropped + Number(lvb?.condition_unknown_dropped ?? 0);
     return { ok: true as const, body: { query: { ...q, live }, zip, state: zipToState(zip), count: rows.length, items: rows,
-      ranking: "rows with a known landed total first (cheapest first), then the rest by item price; brand look-alikes (e.g. 'B0SE') last; est_total is null unless price, shipping and tax are all known",
+      ranking: "stores an agent can use first (agent_usable true), then stores not checked yet, then price outliers, then stores an agent must not use (blocked-tos, agents-not-welcome, error) last; within each, rows with a known landed total first (cheapest first), then by item price; brand look-alikes (e.g. 'B0SE') after their group. est_total is null unless price, shipping and tax are all known",
+      agent_usable_note: "Every row has agent_usable (true / false / null = store not checked yet), store_status and flags[]. Rows with agent_usable=false are listed so you know they exist, not as options.",
+      not_usable_rows: blocked, price_outliers: outliers,
       deduped: dd.removed, dropped_by_product_filters: pf.dropped, scanned_rows: before,
+      ...(q.condition ? { condition_unknown_dropped: condUnknown, ...(condUnknown && !q.condition.split(",").includes("unknown") ? { condition_hint: `${condUnknown} row(s) with condition not stated were left out; add ",unknown" (e.g. condition=${q.condition},unknown) to include them` } : {}) } : {}),
+      ...(lvb && lvb.pages_scanned !== undefined ? { pages_scanned: lvb.pages_scanned, products_scanned: lvb.products_scanned, dropped_below_relevance_floor: lvb.dropped_below_relevance_floor ?? 0 } : {}),
       ...(rows.length === 0 && q.domain ? { coverage_note: coverageNote(q.domain, live) } : {}),
-      ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
+      ...(b.live_shopify_catalog ? { live: { ok: b.live_shopify_catalog.ok, error: b.live_shopify_catalog.error, filter_note: b.live_shopify_catalog.filter_note, pages_scanned: lvb?.pages_scanned ?? null, products_scanned: lvb?.products_scanned ?? null, source: "Results from Shopify Catalog (live, not cached or stored by KlickyMart)" } } : {}) } };
   };
   if ((path === "/chart.json" || path === "/chart") && request.method === "GET") {
     const aggs = await loadAggregates(env.DB);
