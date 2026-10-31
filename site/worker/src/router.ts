@@ -635,6 +635,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const url = g("url");
     const q0 = offerQuery(g);
     if (typeof q0 === "string") return { ok: false as const, param: "zip", message: q0 };
+    const mlRaw = g("max_landed");
+    const maxLanded = mlRaw ? Number(mlRaw) : undefined;
+    if (maxLanded !== undefined && !(Number.isFinite(maxLanded) && maxLanded > 0)) return { ok: false as const, param: "max_landed", message: "max_landed must be a positive number (USD delivered total: price + shipping + estimated tax)" };
     const q: OfferQuery = { ...q0, zip, ...(url && !q0.q && !q0.gtin && !q0.mpn ? { domain: hostOf(url) } : {}), limit: Math.min(q0.limit ?? 20, 50) };
     const live = g("live") === "1" || g("live") === "true";
     const r = await offersFor(q, live && !!q.q);
@@ -645,6 +648,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const before = rows.length;
     const pf = applyProductFilters(rows.map((i) => (i.source === "klickymart-observed" ? annotate(i, q.q) : i)), { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
     const dd = dedupe(pf.rows); rows = dd.rows;
+    // max_landed = budget on the delivered total (price + shipping + est. tax). Rows whose total is unknown are left out and counted.
+    const ml = maxLanded;
+    let mlOver = 0, mlUnknown = 0;
+    if (ml !== undefined) rows = rows.filter((i) => { const t = i.landed?.est_total; if (typeof t !== "number") { mlUnknown++; return false; } if (t > ml) { mlOver++; return false; } return true; });
     const outliers = flagPriceOutliers(rows);
     const tier = new Map(rows.map((i) => [i, flagRow(i, { usZip: !!(q.zip && validZip(String(q.zip))) })]));
     const key = (i: Record<string, any>) => [tier.get(i)! * 10 + (i.brand_match === "lookalike" ? 2 : 0) + (i.landed?.est_total == null ? 1 : 0), i.landed?.est_total ?? i.price ?? 1e9];
@@ -652,7 +659,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const blocked = rows.filter((i) => i.agent_usable === false).length;
     const lvb = b.live_shopify_catalog as Record<string, any> | undefined;
     const condUnknown = pf.condition_unknown_dropped + Number(lvb?.condition_unknown_dropped ?? 0);
-    return { ok: true as const, body: { query: { ...q, live }, zip, state: zipToState(zip), count: rows.length, items: rows,
+    return { ok: true as const, body: { query: { ...q, live, ...(maxLanded !== undefined ? { max_landed: maxLanded } : {}) }, zip,
+      max_price_applies_to: "item price only (before shipping and tax); use max_landed for a delivered-total budget",
+      ...(maxLanded !== undefined ? { max_landed_applies_to: "est_total = price + shipping + estimated sales tax at this ZIP; rows with an unknown est_total are left out", dropped_by_max_landed: { over_budget: mlOver, total_unknown: mlUnknown } } : {}), state: zipToState(zip), count: rows.length, items: rows,
       ranking: "stores an agent can use first (agent_usable true: our probe confirmed add-to-cart or reached the payment step), then stores not checked or not confirmed yet, then stores that may not ship to the US (with a US ZIP), then price outliers, then stores an agent must not use (blocked-tos, agents-not-welcome, error) last; within each, rows with a known landed total first (cheapest first), then by item price; brand look-alikes (e.g. 'B0SE') after their group. est_total is null unless price, shipping and tax are all known",
       agent_usable_note: "Every row has agent_usable (true / false / null = store not checked yet), store_status and flags[]. Rows with agent_usable=false are listed so you know they exist, not as options.",
       not_usable_rows: blocked, price_outliers: outliers,
