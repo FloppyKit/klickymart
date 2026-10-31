@@ -672,8 +672,8 @@ export function renderReport(origin: string, shell: PageShell, example: string):
 <p id="km-key-status" class="km-muted" aria-live="polite">No key loaded.</p>
 <h3>Note</h3>
 <p><label>Store domain <input data-field="domain" placeholder="example.com"></label>
-<label>Depth <select data-field="depth"><option>browse</option><option>product</option><option>cart</option><option selected>checkout</option><option>shipping</option><option>payment</option><option>paid</option><option>delivered</option></select></label>
-<label>Basis <select data-field="basis"><option value="visit">visit (I went to the store)</option><option value="directory">directory (from KlickyMart data)</option><option value="secondhand">secondhand</option></select></label></p>
+<label>Depth <select data-field="depth"><option value="" selected>choose (unknown until you pick)</option><option>browse</option><option>product</option><option>cart</option><option>checkout</option><option>shipping</option><option>payment</option><option>paid</option><option>delivered</option></select></label>
+<label>Basis <select data-field="basis"><option value="" selected>choose (unknown, does not count, until you pick)</option><option value="unknown">unknown</option><option value="visit">visit (I went to the store)</option><option value="directory">directory (from KlickyMart data)</option><option value="secondhand">secondhand</option></select></label></p>
 <p><label>Guest <select data-field="guest"><option value="">unknown</option><option>true</option><option>false</option></select></label>
 <label>Account required <select data-field="account_required"><option value="">unknown</option><option>true</option><option>false</option></select></label>
 <label>Shown before payment <select data-field="shown_before_payment"><option value="">unknown</option><option value="tax,shipping">tax and shipping</option><option>tax</option><option>shipping</option><option>none</option><option>not-observed</option></select></label></p>

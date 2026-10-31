@@ -680,7 +680,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json({ ...t.value, param_help: TEMPLATE_HELP }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   }
   if (path === "/report" && request.method === "GET") {
-    const ex = experienceTemplate({ domain: "example.com", depth: "payment", guest: "true", account_required: "false", basis: "visit", pay_used: "ln", pay_offered: ["card", "ln", "spay"], btc_route: "native", shown_before_payment: "tax,shipping", price: "49.00", shipping: "0", tax: "4.27", total: "53.27", region: "660", duration_s: "95", steps: ["home", "product", "cart", "checkout", "payment"], agent: "my-agent/1.0", rating: "4", narrative: "Guest checkout reached payment in 5 steps; Lightning offered." }, aTagFor("example.com"));
+    const ex = experienceTemplate({ domain: "example.com", depth: "browse", basis: "directory", guest: "unknown", account_required: "unknown", pay_offered: ["card", "ln", "spay"], region: "660", agent: "my-agent/1.0", narrative: "EXAMPLE ONLY, written from KlickyMart data with no visit. Set basis=visit and a deeper depth only for what you actually did." }, aTagFor("example.com"));
     return new Response(renderReport(origin, shell, ex.ok ? JSON.stringify(ex.value.unsigned_event, null, 1) : ""), { headers: { "Content-Type": "text/html; charset=utf-8",
       // In-browser signing page: scripts only from this origin, network only to this origin and wss:// relays, no framing.
       // Strict: no inline script (none on this page, so no hashes needed); scripts only from this origin (the pinned,
