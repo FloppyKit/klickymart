@@ -1068,6 +1068,20 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       name: "KlickyMart (KlickyBot)", contact: "bot@klickymart.com", info: `${origin}/bot`, use: "read-only product lookup; results are not cached or stored" },
       { headers: { "Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*" } });
   }
+  if (path === "/ucp/quote-profile.json") {
+    // Separate UCP agent profile used ONLY by KlickyBot's price-quote probe: it opens a checkout to read shipping/tax totals,
+    // then cancels it. It never completes a checkout and declares no payment handlers.
+    const v = "2026-08-25";
+    const base = `https://ucp.dev/${v}`;
+    return Response.json({ ucp: { version: v, services: {}, capabilities: {
+        "dev.ucp.shopping.catalog.search": [{ version: v, spec: `${base}/specification/shopping/catalog/`, schema: `${base}/schemas/shopping/catalog_search.json` }],
+        "dev.ucp.shopping.checkout": [{ version: v, spec: `${base}/specification/shopping/checkout/`, schema: `${base}/schemas/shopping/checkout.json` }],
+        "dev.ucp.shopping.fulfillment": [{ version: v, spec: `${base}/specification/shopping/extensions/fulfillment/`, schema: `${base}/schemas/shopping/fulfillment.json`, extends: ["dev.ucp.shopping.checkout"] }] },
+        payment_handlers: {} },
+      name: "KlickyMart (KlickyBot) price quotes", contact: "bot@klickymart.com", info: `${origin}/bot`,
+      use: "price quotes only: opens one checkout to read shipping and tax totals, then cancels it; never completes a checkout or submits payment" },
+      { headers: { "Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*" } });
+  }
   if (path === "/robots.txt") {
     return new Response(`# Agents: start at ${origin}/llms.txt (endpoints, MCP, record schema). About: ${origin}/about\nUser-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`, { headers: { "Content-Type": "text/plain" } });
   }

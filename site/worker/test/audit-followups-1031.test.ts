@@ -133,3 +133,15 @@ describe("POST /reviews only accepts validly signed events (script UAs are allow
     expect((await post(good)).status).toBe(200);
   });
 });
+
+describe("UCP quote profile", () => {
+  it("declares checkout but no payment handlers, and says it never completes", async () => {
+    const { handleRequest } = await import("../src/router");
+    const { env } = await import("cloudflare:test");
+    const r = await handleRequest(new Request("https://klickymart.com/ucp/quote-profile.json"), env as never);
+    const j = (await r.json()) as { ucp: { capabilities: Record<string, unknown>; payment_handlers: Record<string, unknown> }; use: string };
+    expect(j.ucp.capabilities["dev.ucp.shopping.checkout"]).toBeTruthy();
+    expect(Object.keys(j.ucp.payment_handlers)).toHaveLength(0);
+    expect(j.use).toMatch(/never completes/);
+  });
+});

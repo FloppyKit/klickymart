@@ -121,6 +121,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/sitemap.xml": { get: { summary: "Sitemap", responses: { "200": { description: "HTML or text" } } } },
       "/.well-known/ucp": { get: { summary: "UCP agent profile", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/ucp/agent-profile.json": { get: { summary: "UCP agent profile (alias)", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/ucp/quote-profile.json": { get: { summary: "UCP agent profile for KlickyBot price quotes (opens then cancels a checkout; never completes or pays)", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/.well-known/klickymart.json": { get: { summary: "Discovery document", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/.well-known/mcp/server-card.json": { get: { summary: "MCP server card (name, remote URL, tools)", responses: { "200": { description: "JSON" } } } },
       "/.well-known/security.txt": { get: { summary: "Security contact (RFC 9116)", responses: { "200": { description: "text" } } } },
