@@ -5,8 +5,6 @@
  * text/identifier "zap@klickymart.com") would make every plain payment fail the payer's hash check. For NIP-57 zaps the
  * description_hash commits to the zap request instead, and allowsNostr/nostrPubkey pass through so 9735 receipts are
  * signed by the upstream zapper key and verify. */
-import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { guardedFetch, verifyZapRequest, aCoordPubkey } from "./tip-rails";
 import { verifyBolt11 } from "./bolt11";
 import { ipHash } from "./submissions";
@@ -61,6 +59,15 @@ async function upstreamMeta(url: string, o: { fetcher?: F; doh?: F }, db: D1Data
   return meta;
 }
 
+/** Checks on an upstream invoice before we hand it to a payer. description_hash is informational only (see above). */
+export function checkForwardInvoice(pr: string, amountMsat: number, nowS = Math.floor(Date.now() / 1000)): { ok: true; description_hash: string | null } | { ok: false; reason: string } {
+  if (!/^lnbc(?!rt)[0-9]*[munp]?1/i.test(pr)) return { ok: false, reason: "upstream invoice is not a mainnet invoice" };
+  const b = verifyBolt11(pr);
+  if (!b) return { ok: false, reason: "upstream invoice failed to decode or its signature is invalid" };
+  if (b.amount_msat !== amountMsat) return { ok: false, reason: "upstream invoice amount mismatch" };
+  if (b.timestamp + b.expiry_s <= nowS + 30) return { ok: false, reason: "upstream invoice expired" };
+  return { ok: true, description_hash: b.description_hash };
+}
 /** GET /.well-known/lnurlp/<name> and GET /.well-known/lnurlp/<name>/callback. Returns null for other paths. */
 export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1Database; LNURL_FORWARD_ZAP?: string; SUBMIT_SALT?: string; SITE_ZAP_PUBKEY_HEX?: string }, origin: string, ip: string | null, salt: string, o: { fetcher?: F; doh?: F } = {}): Promise<Response | null> {
   const m = /^\/\.well-known\/lnurlp\/([^/]+)(\/callback)?$/.exec(path); if (!m) return null;
@@ -112,8 +119,11 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   if (!r.ok) return fail("upstream wallet unavailable");
   let inv: { pr?: unknown; reason?: unknown }; try { inv = JSON.parse(r.text); } catch { return fail("upstream returned no JSON"); }
   if (typeof inv.pr !== "string") return fail("upstream returned no invoice") // R9-008: never echo the upstream's reason text;
-  const b = verifyBolt11(inv.pr);
-  if (!b || b.amount_msat !== amount) return fail("upstream invoice amount mismatch");
-  if (b.description_hash !== bytesToHex(sha256(utf8ToBytes(nostr ?? meta.metadata)))) return fail("upstream invoice description_hash mismatch");
+  // Invoice checks. The upstream (Primal) signs invoices whose description_hash commits to neither its published
+  // metadata nor the forwarded 9734 (checked live 2026-10-31: always f5e3ee15...), and wallets accept that for Primal's
+  // own lud16. So the hash is NOT required (plain or zap). Required: node signature decodes, amount equals the request,
+  // not expired, mainnet. See docs/DEPLOY-lnurlp-zap.md "Invoice checks".
+  const ck = checkForwardInvoice(inv.pr, amount);
+  if (!ck.ok) return fail(ck.reason);
   return Response.json({ status: "OK", pr: inv.pr, routes: [] }, { headers: CORS });
 }

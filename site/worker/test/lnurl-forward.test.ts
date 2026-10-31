@@ -5,7 +5,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { nostrEventId } from "../src/nostr-verify";
 import { encodeBolt11ForTest } from "../src/bolt11";
-import { handleLnurlForward, resetForwardCache, upstreamUrl } from "../src/lnurl-forward";
+import { handleLnurlForward, resetForwardCache, upstreamUrl, checkForwardInvoice } from "../src/lnurl-forward";
 import { checkZapReceipt } from "../src/pay-binding";
 import { layout } from "../src/render/layout";
 
@@ -81,7 +81,8 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     expect((await call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify({ ...zr, content: "x" }))}`, u))!.status).toBe(400);
     expect((await call(`/.well-known/lnurlp/zap/callback?amount=21000&comment=${"a".repeat(201)}`, u))!.status).toBe(400);
     resetForwardCache(); expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream({ badAmount: true })))!.status).toBe(502);
-    resetForwardCache(); expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream({ badHash: true })))!.status).toBe(502);
+    // Primal-style invoice whose description_hash commits to neither metadata nor the 9734: accepted (see checkForwardInvoice)
+    resetForwardCache(); expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream({ badHash: true })))!.status).toBe(200);
     resetForwardCache(); expect((await call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zr))}`, upstream({ nostr: false })))!.status).toBe(400);
   });
   it("hardened fetch: private DNS answers and redirects are refused", async () => {
@@ -192,5 +193,33 @@ describe("R9-003 / R9-008 / R9-009 zap@ hardening", () => {
     const r = await call("/.well-known/lnurlp/zap/callback?amount=5000", chatty);
     expect(r!.status).toBe(502);
     expect(JSON.stringify(await r!.json())).not.toMatch(/pwn|10\.0\.0\.5/);
+  });
+});
+
+describe("zap@ invoice checks (plain-payment fix)", () => {
+  const ph = () => bytesToHex(sha256(enc(String(Math.random()))));
+  // Primal's real behaviour (checked live 2026-10-31): description_hash is a constant unrelated to metadata or the 9734.
+  const PRIMAL_DH = "f5e3ee151af383d51e9bc2718781355c52fa13ab3a91a9620de0cbd599b5191a";
+  it("accepts a 1-sat mainnet invoice with the right amount even when description_hash commits to neither metadata nor 9734", () => {
+    const pr = encodeBolt11ForTest(NODE, "lnbc10n", ph(), { descriptionHashHex: PRIMAL_DH });
+    const r = checkForwardInvoice(pr, 1000); expect(r.ok).toBe(true);
+    if (r.ok) expect(r.description_hash).toBe(PRIMAL_DH);
+  });
+  it("refuses wrong amount, expired, non-mainnet and undecodable invoices", () => {
+    expect(checkForwardInvoice(encodeBolt11ForTest(NODE, "lnbc20n", ph()), 1000)).toMatchObject({ ok: false, reason: expect.stringMatching(/amount/) });
+    expect(checkForwardInvoice(encodeBolt11ForTest(NODE, "lnbc10n", ph(), { timestamp: Math.floor(Date.now() / 1000) - 7200 }), 1000)).toMatchObject({ ok: false, reason: expect.stringMatching(/expired/) });
+    expect(checkForwardInvoice(encodeBolt11ForTest(NODE, "lntb10n", ph()), 1000)).toMatchObject({ ok: false, reason: expect.stringMatching(/mainnet/) });
+    expect(checkForwardInvoice(encodeBolt11ForTest(NODE, "lnbcrt10n", ph()), 1000)).toMatchObject({ ok: false, reason: expect.stringMatching(/mainnet/) });
+    expect(checkForwardInvoice("lnbc10n1garbage", 1000).ok).toBe(false);
+  });
+  it("dry end-to-end: a 1000 msat plain callback and a zap callback return the upstream bolt11 (nothing paid)", async () => {
+    const f = (async (u: string) => { const url = new URL(u);
+      if (url.pathname === "/.well-known/lnurlp/DrMattBrown") return Response.json({ status: "OK", tag: "payRequest", callback: "https://primal.net/lnurlp/DrMattBrown/callback", metadata: META, minSendable: 1000, maxSendable: 11e9, allowsNostr: true, nostrPubkey: ZP });
+      return Response.json({ pr: encodeBolt11ForTest(NODE, `lnbc${Number(url.searchParams.get("amount")) / 100}n`, ph(), { descriptionHashHex: PRIMAL_DH }), routes: [] });
+    }) as never;
+    const plain = await call("/.well-known/lnurlp/zap/callback?amount=1000", { f, calls: [] });
+    expect(plain!.status).toBe(200); expect(((await plain!.json()) as { pr: string }).pr).toMatch(/^lnbc10n1/);
+    const zap = await call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zapReq(21000)))}`, { f, calls: [] });
+    expect(zap!.status).toBe(200);
   });
 });

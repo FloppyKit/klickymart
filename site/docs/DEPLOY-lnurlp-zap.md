@@ -19,3 +19,28 @@ How zaps behave: the metadata string is Primal's verbatim (`sats for majorbadger
 description_hash matches what the payer saw; zaps commit to the 9734 instead. `allowsNostr`/`nostrPubkey` are Primal's,
 so 9735 receipts are signed by Primal's zapper key (f81611…8cd3 at check time, 2026-10-30) and verify. KlickyMart never
 holds funds: invoices are Primal's.
+
+## Invoice checks (2026-10-31 plain-payment fix)
+
+Primal signs invoices whose `description_hash` commits to neither the metadata it publishes nor the forwarded 9734.
+We checked live on 2026-10-31: a plain 1000 msat invoice and a zap invoice both carried `f5e3ee15…`, while
+sha256(metadata) is `3e06c683…` and sha256(9734) differs on every request. Wallets accept this for Primal's own
+`majorbadger18@primal.net`. Before this fix, zap@ refused every upstream invoice, so plain tips failed.
+
+zap@ now requires, for plain payments and zaps alike:
+- the bolt11 decodes and its node signature verifies;
+- its amount equals the requested msat;
+- it is not expired (at least 30 s left);
+- it is mainnet (`lnbc`, not `lntb`/`lnbcrt`/`lnsb`).
+
+`description_hash` is no longer required.
+
+Unchanged: the upstream host pin (the callback must be on the upstream host), the https-only guarded fetch with
+DNS checks before and after, no redirects, size caps, rate limits with refunds, and all 9734 validation (p must be
+KlickyMart's key, e/a/relays/amount checks).
+
+Trade-off: we can no longer prove that the upstream bound the invoice to what the payer saw (metadata) or to the
+zap request. A compromised or misbehaving upstream could return a correctly priced invoice for a different purpose,
+and a NIP-57 receipt can't be cross-checked against the invoice hash. The host pin, the amount and the fact that
+KlickyMart holds no funds limit the damage to "the payer paid the configured upstream the amount they chose".
+If Primal starts committing to the 9734, re-enable the hash check for zaps.
