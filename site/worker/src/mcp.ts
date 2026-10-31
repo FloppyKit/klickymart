@@ -284,7 +284,7 @@ export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
           type: "object", required: ["domain", "agent_pubkey", "proof"],
           properties: {
             domain: { type: "string" }, agent_pubkey: { type: "string", description: "your 64-hex public key" }, need_id: { type: "string", description: "optional id of your kind 420" },
-            proof: { type: "object", description: "{type:'preimage',preimage,bolt11} | {type:'zap',receipt:<signed 9735>} | {type:'hash',sha256}" },
+            proof: { type: "object", description: "{type:'preimage',preimage,bolt11} | {type:'zap',receipt:<signed 9735>}" },
           },
         },
       },

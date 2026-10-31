@@ -35,7 +35,7 @@ export interface FacilitateInput { domain?: unknown; agent_pubkey?: unknown; nee
  * "unverified-claim": KlickyMart never signs "verified" for a proof it cannot bind to the store. The preimage invoice must
  * still carry a valid node signature and match the preimage; a zap must still pass the NIP-57 structure checks. */
 export function checkFacilitationProof(proof: unknown): { ok: true; verification: Verification; tags: string[][]; amount_msat: number | null } | { ok: false; code: string; message: string } {
-  if (!proof || typeof proof !== "object") return { ok: false, code: "bad_proof", message: "proof must be {type:'preimage',preimage,bolt11} | {type:'zap',receipt} | {type:'hash',sha256}" };
+  if (!proof || typeof proof !== "object") return { ok: false, code: "bad_proof", message: "proof must be {type:'preimage',preimage,bolt11} | {type:'zap',receipt}" };
   const p = proof as Record<string, unknown>;
   if (p.type === "preimage") {
     const pre = String(p.preimage ?? "").toLowerCase(); const inv = String(p.bolt11 ?? "");
@@ -52,12 +52,9 @@ export function checkFacilitationProof(proof: unknown): { ok: true; verification
     if (!zc.ok) return { ok: false, code: "bad_proof", message: `zap receipt failed NIP-57 checks (${zc.reason})` };
     return { ok: true, verification: "unverified-claim", tags: [["proof", "zap", r.id], ["bolt11", tagv(r.tags, "bolt11")!]], amount_msat: zc.inv.amount_msat };
   }
-  if (p.type === "hash") {
-    const h = String(p.sha256 ?? "").toLowerCase();
-    if (!HEX64.test(h)) return { ok: false, code: "bad_proof", message: "sha256 must be 64 hex chars (hash of your redacted receipt; never send the receipt itself)" };
-    return { ok: true, verification: "unverified-claim", tags: [["proof", "order_hash", h]], amount_msat: null };
-  }
-  return { ok: false, code: "bad_proof", message: "unknown proof.type (preimage | zap | hash)" };
+  // A bare sha256 is attacker-chosen: KlickyMart would sign a 421 for a "proof" that proves nothing. Refused.
+  if (p.type === "hash") return { ok: false, code: "bad_proof", message: "bare hash proofs are no longer accepted: KlickyMart will not sign for a value it cannot check (use preimage + bolt11, or a zap receipt)" };
+  return { ok: false, code: "bad_proof", message: "unknown proof.type (preimage | zap)" };
 }
 const tagv = (tags: string[][], k: string) => tags.find((t) => t[0] === k)?.[1];
 

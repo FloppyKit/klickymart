@@ -1,3 +1,4 @@
+import { facProof } from "./helpers/fac-proof";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
@@ -121,6 +122,6 @@ describe("facilitated 421s become history once the store claims", () => {
     expect(c.facilitated_history?.reviewers).toBe(1);
     // and new facilitation is refused after the claim
     expect((await facilitate({ DB: env.DB, KV: { get: async () => null, put: async () => {} } as unknown as KVNamespace, FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" },
-      { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, (d) => d === DOM, "ip")).status).toBe(409);
+      { domain: DOM, agent_pubkey: pk(key()), proof: facProof() }, (d) => d === DOM, "ip")).status).toBe(409);
   });
 });

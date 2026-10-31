@@ -52,3 +52,21 @@ describe("K-DEL / KM-009: kind 5 respects the per-key cap and bounds tombstones"
     expect((await env.DB.prepare("SELECT COUNT(DISTINCT deletion_id) n FROM tombstones WHERE pubkey = ?").bind(pk).first<{ n: number }>())!.n).toBe(INGEST_LIMITS.perPubkeyPerDay);
   });
 });
+
+import { SELF } from "cloudflare:test";
+import { checkFacilitationProof, FACILITATOR_PUBKEY } from "../src/facilitate";
+describe("facilitation: bare hashes refused; revokeFacilitated has runtime + admin callers", () => {
+  it("/facilitate proof check refuses an attacker-chosen bare hash", () => {
+    expect(checkFacilitationProof({ type: "hash", sha256: "ef".repeat(32) })).toMatchObject({ ok: false, code: "bad_proof" });
+  });
+  it("revokeFacilitated (the call ingest now makes for re-seen facilitator 421s) records the revocation; ingest wiring is by code review since tests cannot sign with the production facilitator key", async () => {
+    const id = rid(); const fac = { id, pubkey: FACILITATOR_PUBKEY, created_at: 1, kind: 421, tags: [["r", "x.com"]], content: "", sig: "00".repeat(64) };
+    await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(id, 421, FACILITATOR_PUBKEY, 1, "x.com", JSON.stringify(fac), 1, "t").run();
+    const { revokeFacilitated } = await import("../src/facilitate");
+    expect((await revokeFacilitated(env.DB, { ids: [id] })).revoked).toBe(1);
+    expect((await env.DB.prepare("SELECT reason FROM revoked_events WHERE id = ?").bind(id).first<{ reason: string }>())?.reason).toBe("facilitated-before-pause");
+  });
+  it("admin path: 404 without INGEST_TOKEN", async () => {
+    expect((await SELF.fetch("https://example.com/_admin/revoke-facilitated", { method: "POST", body: "{}" })).status).toBe(404);
+  });
+});

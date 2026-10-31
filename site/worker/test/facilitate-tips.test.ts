@@ -1,3 +1,4 @@
+import { facProof } from "./helpers/fac-proof";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
@@ -63,7 +64,7 @@ describe("POST /facilitate (facilitated 421)", () => {
   it("wrong preimage is refused; hash-only proof is labelled unverified-claim", async () => {
     const inv = encodeBolt11ForTest(NODE, "lnbc10u", "ab".repeat(32));
     expect(checkFacilitationProof({ type: "preimage", preimage: "11".repeat(32), bolt11: inv })).toMatchObject({ ok: false, code: "proof_mismatch" });
-    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" }, { domain: DOM, agent_pubkey: pk(key()), proof: { type: "hash", sha256: "ef".repeat(32) } }, known, "ip");
+    const r = await facilitate({ DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" }, { domain: DOM, agent_pubkey: pk(key()), proof: facProof() }, known, "ip");
     expect(r.status).toBe(200);
     expect((r.body.event as Ev).tags).toContainEqual(["verification", "unverified-claim"]);
     expect(String(r.body.label)).toMatch(/UNVERIFIED CLAIM/);
@@ -76,7 +77,7 @@ describe("POST /facilitate (facilitated 421)", () => {
   });
   it("refuses secret keys, unknown domains, claimed stores; rate-limits per agent+domain", async () => {
     const e = { DB: env.DB, KV: kv(), FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" };
-    const agent = pk(key()); const proof = { type: "hash", sha256: "ef".repeat(32) };
+    const agent = pk(key()); const proof = facProof();
     expect((await facilitate(e, { domain: DOM, agent_pubkey: agent, proof, nsec: "x" } as never, known, "ip")).body.error).toMatchObject({ code: "secret_sent" });
     expect((await facilitate(e, { domain: "nope.example", agent_pubkey: agent, proof }, known, "ip")).status).toBe(400);
     expect((await facilitate(e, { domain: DOM, agent_pubkey: agent, proof }, known, "ip")).status).toBe(200);
@@ -87,7 +88,7 @@ describe("POST /facilitate (facilitated 421)", () => {
   it("GET /facilitate publishes only the npub; POST without the secret configured is 503 (never signs)", async () => {
     const g = await (await SELF.fetch("https://example.com/facilitate")).json() as Record<string, unknown>;
     expect(g.facilitator_npub).toBe(FACILITATOR_NPUB);
-    const p = await SELF.fetch("https://example.com/facilitate", { method: "POST", body: JSON.stringify({ domain: "nope.example", agent_pubkey: "00".repeat(32), proof: { type: "hash", sha256: "ef".repeat(32) } }) });
+    const p = await SELF.fetch("https://example.com/facilitate", { method: "POST", body: JSON.stringify({ domain: "nope.example", agent_pubkey: "00".repeat(32), proof: facProof() }) });
     expect([400, 503]).toContain(p.status);
   });
 });

@@ -1,3 +1,4 @@
+import { facProof } from "./helpers/fac-proof";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
@@ -34,7 +35,7 @@ describe("R5 rate-limit fixes", () => {
   });
   it("R5-002: one ip over its facilitate cap does not consume the global cap", async () => {
     const SK = rnd(); const e = { DB: env.DB, KV: {} as KVNamespace, FACILITATOR_SK_HEX: SK, SUBMIT_SALT: "test-salt" };
-    for (let i = 0; i < 40; i++) await facilitate(e, { domain: "ip.example", agent_pubkey: bytesToHex(secp.schnorr.getPublicKey(secp.utils.randomSecretKey())), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "203.0.113.77");
+    for (let i = 0; i < 40; i++) await facilitate(e, { domain: "ip.example", agent_pubkey: bytesToHex(secp.schnorr.getPublicKey(secp.utils.randomSecretKey())), proof: facProof() }, () => true, "203.0.113.77");
     const day = new Date().toISOString().slice(0, 10);
     const ip = await env.DB.prepare("SELECT n FROM rate_limits WHERE k LIKE 'fac:ip:%'").first<{ n: number }>();
     const gl = await env.DB.prepare("SELECT n FROM rate_limits WHERE k = ?").bind(`fac:g:${day}`).first<{ n: number }>();
@@ -48,7 +49,7 @@ describe("R5 rate-limit fixes", () => {
     expect(ipHash("203.0.113.5", "s", 0)).not.toBe(ipHash("203.0.113.6", "s", 0));
   });
   it("R5-005: facilitate fails closed without the SUBMIT_SALT secret", async () => {
-    const r = await facilitate({ DB: env.DB, KV: {} as KVNamespace, FACILITATOR_SK_HEX: rnd() }, { domain: "x.example", agent_pubkey: bytesToHex(secp.schnorr.getPublicKey(secp.utils.randomSecretKey())), proof: { type: "hash", sha256: "ef".repeat(32) } }, () => true, "203.0.113.1");
+    const r = await facilitate({ DB: env.DB, KV: {} as KVNamespace, FACILITATOR_SK_HEX: rnd() }, { domain: "x.example", agent_pubkey: bytesToHex(secp.schnorr.getPublicKey(secp.utils.randomSecretKey())), proof: facProof() }, () => true, "203.0.113.1");
     expect(r.status).toBe(503);
   });
   it("R5-006: a limiter failure is a 503, not a silent skip", async () => {

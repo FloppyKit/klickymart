@@ -1,3 +1,4 @@
+import { facProof } from "./helpers/fac-proof";
 import { describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
 import { renderMerchant } from "../src/render/pages";
@@ -8,7 +9,7 @@ const EVIL = "Evil</script><img src=x onerror=alert(document.domain)>\u2028x";
 
 describe("KM-002: facilitation paused", () => {
   it("POST /facilitate returns 503 facilitation_paused and never signs", async () => {
-    const r = await SELF.fetch("https://example.com/facilitate", { method: "POST", body: JSON.stringify({ domain: "store.google.com", agent_pubkey: "00".repeat(32), proof: { type: "hash", sha256: "ef".repeat(32) } }) });
+    const r = await SELF.fetch("https://example.com/facilitate", { method: "POST", body: JSON.stringify({ domain: "store.google.com", agent_pubkey: "00".repeat(32), proof: facProof() }) });
     expect(r.status).toBe(503);
     const b = await r.json() as { ok: boolean; error: { code: string }; event?: unknown };
     expect(b.ok).toBe(false); expect(b.error.code).toBe("facilitation_paused"); expect(b.event).toBeUndefined();

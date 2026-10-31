@@ -1,4 +1,4 @@
-import { markFacilitatedHistory, FACILITATOR_PUBKEY } from "./facilitate";
+import { markFacilitatedHistory, revokeFacilitated, FACILITATOR_PUBKEY } from "./facilitate";
 import { refreshFlagCache } from "./flags";
 import { nip05Pass } from "./nip05";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
@@ -31,6 +31,8 @@ export interface IngestCtx {
   domains: Set<string>;
   ourPubkey: string | null;
   now?: number;
+  /** True only while /facilitate is enabled; otherwise every facilitator-signed 421 that arrives is revoked on ingest. */
+  facilitationEnabled?: boolean;
   /** Outbound fetch for NIP-57 LNURL lookups (tests inject a fake). */
   fetcher?: Fetcher;
 }
@@ -298,6 +300,9 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     res.accepted++;
   }
   for (let k = 0; k < stmts.length; k += 200) await db.batch(stmts.slice(k, k + 200));
+  // Runtime caller for revokeFacilitated(): facilitator 421s re-seen from relays while facilitation is paused are revoked.
+  if (!ctx.facilitationEnabled) { const fac = valid.filter((x) => x.ev.kind === NOSTR_KIND_FULFILLMENT && x.ev.pubkey === FACILITATOR_PUBKEY).map((x) => x.ev.id);
+    if (fac.length) { try { await revokeFacilitated(db, { ids: fac, reason: "facilitated-before-pause" }); } catch { /* migration pending */ } } }
   for (const ev of exps) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), now, { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     if (!x.ok) continue;

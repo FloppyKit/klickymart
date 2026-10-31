@@ -10,7 +10,7 @@ const TEMPLATE_HELP = {
   amounts: "price, price_seen, price_paid, fee, shipping, tax, total: a non-negative number, or unknown / not-observed when the store did not show it (not zero)",
 };
 import { flagSummary, readFlagCache, refreshFlagCache, buildFlagStatic, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
-import { facilitate, facilitationEnabled, FACILITATION_PAUSED_BODY, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
+import { facilitate, facilitationEnabled, revokeFacilitated, FACILITATION_PAUSED_BODY, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
 import { curators, loadTips, perReviewer, summarize, TIP_BONUS_RULES } from "./tips";
 import { mcpToolsList } from "./mcp";
 import { addKnownBrands } from "./product-quality";
@@ -421,7 +421,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
   if (path === "/facilitate" && request.method === "GET") {
     return Response.json({ facilitator_npub: FACILITATOR_NPUB, facilitator_pubkey: FACILITATOR_PUBKEY, limits: FACILITATE_LIMITS, note: FACILITATE_NOTE,
-      usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}|{type:'hash',sha256}}. Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
+      usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}} (bare hashes are refused). Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
   }
   if (path === "/app" && request.method === "GET") {
     return new Response(renderApp(origin, shell, { mints: cashuMints(env), nwcRelays: nwcRelays(env) }), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
@@ -1115,6 +1115,20 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       }
     }
     return new Response(renderClaim(origin, v.ok ? v.domain : domain, resultHtml, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+  }
+
+  // Admin: revoke facilitated 421s (default: every 421 our facilitator key signed) and demote notes that cite them.
+  // Same bearer token as /_ingest; 404 when it is unset. Body {ids?: [64-hex], dry_run?: true}.
+  if (path === "/_admin/revoke-facilitated" && request.method === "POST") {
+    if (!env.INGEST_TOKEN || !env.DB) return new Response("disabled", { status: 404 });
+    if (request.headers.get("Authorization") !== `Bearer ${env.INGEST_TOKEN}`) return new Response("unauthorized", { status: 401 });
+    const b = (await request.json().catch(() => ({}))) as { ids?: unknown; dry_run?: unknown };
+    if (b.ids !== undefined && (!Array.isArray(b.ids) || b.ids.length > 1000 || !b.ids.every((x) => typeof x === "string" && /^[0-9a-f]{64}$/.test(x)))) return Response.json({ ok: false, error: { code: "bad_ids", message: "ids must be up to 1000 64-hex event ids" } }, { status: 400 });
+    // only ever revoke events our facilitator key signed, even when ids are given
+    const cand = ((await env.DB.prepare("SELECT id FROM nostr_events WHERE kind = 421 AND pubkey = ?").bind(FACILITATOR_PUBKEY).all<{ id: string }>()).results ?? []).map((r) => r.id);
+    const ids = b.ids ? cand.filter((id) => (b.ids as string[]).includes(id)) : cand;
+    if (b.dry_run === true) return Response.json({ ok: true, dry_run: true, would_revoke: ids });
+    return Response.json({ ok: true, ids, ...(await revokeFacilitated(env.DB, { ids, reason: "admin" })) });
   }
 
   if (path === "/_ingest" && request.method === "POST") {
