@@ -7,7 +7,7 @@
  * signed by the upstream zapper key and verify. */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import { guardedFetch, verifyZapRequest } from "./tip-rails";
+import { guardedFetch, verifyZapRequest, aCoordPubkey } from "./tip-rails";
 import { verifyBolt11 } from "./bolt11";
 import { ipHash } from "./submissions";
 import { takeAll, type Limit } from "./ratelimit";
@@ -72,6 +72,16 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
       const z = verifyZapRequest(ev); if (!z.ok) return err(z.message); // kind 9734, signature, exactly one p tag, amount tag
       if (z.recipient.toLowerCase() !== own) return err("zap request p tag must be KlickyMart's own pubkey; this address does not forward zaps for other recipients", 403);
       if (z.amount !== amount) return err("zap request amount differs from amount");
+      // R12-001: e/a may only point at KlickyMart's own content; otherwise clients would credit a third party's note
+      // with a zap whose sats land in our wallet. a: the coordinate's pubkey must be ours. e: we must hold the event
+      // and it must be signed by our key (unknown ids are refused, fail closed).
+      const aTag = z.ev.tags.find((t) => t[0] === "a")?.[1];
+      if (aTag !== undefined && aCoordPubkey(aTag) !== own) return err("zap request a tag must reference KlickyMart's own content", 403);
+      if (z.target) {
+        let author: string | null = null;
+        try { author = (await env.DB?.prepare("SELECT pubkey FROM nostr_events WHERE id = ?").bind(z.target).first<{ pubkey: string }>())?.pubkey ?? null; } catch { author = null; }
+        if (author !== own) return err("zap request e tag must reference a KlickyMart note we hold", 403);
+      }
     }
   }
   const lim = await limited(env.DB, m[2] ? "c" : "m", ip, salt); if (lim) return lim;

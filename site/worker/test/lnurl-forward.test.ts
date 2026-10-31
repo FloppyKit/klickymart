@@ -129,3 +129,34 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     expect(h).toContain('href="lightning:zap@klickymart.com"'); expect(h).toContain("No ads, no paid rankings; tips help cover hosting.");
   });
 });
+
+describe("R12-001 / R12-003: zap@ e/a and relays tags", () => {
+  const cb = (zr: object, amount = 21000) => `/.well-known/lnurlp/zap/callback?amount=${amount}&nostr=${encodeURIComponent(JSON.stringify(zr))}`;
+  const withTags = (extra: string[][], relays: string[] = ["wss://relay.damus.io"]) => (() => {
+    const sk = secp.utils.randomSecretKey();
+    const t = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: "", tags: [["p", OWN], ...extra, ["amount", "21000"], ["relays", ...relays]] };
+    const pubkey = bytesToHex(secp.schnorr.getPublicKey(sk)); const id = nostrEventId({ ...t, pubkey });
+    return { ...t, pubkey, id, sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) };
+  })();
+  it("refuses e tags for notes that are not KlickyMart's and a tags with foreign or malformed coordinates", async () => {
+    await env.DB.prepare("DELETE FROM nostr_events").run();
+    const ours = "c".repeat(64), theirs = "d".repeat(64);
+    await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?)")
+      .bind(ours, 1, OWN, 1, null, "{}", 1, "", theirs, 1, FOREIGN, 1, null, "{}", 1, "").run();
+    const u = upstream();
+    expect((await call(cb(withTags([["e", theirs]])), u))!.status).toBe(403);
+    expect((await call(cb(withTags([["e", "e".repeat(64)]])), u))!.status).toBe(403); // unknown id: fail closed
+    expect((await call(cb(withTags([["a", `30023:${FOREIGN}:post`]])), u))!.status).toBe(403);
+    expect((await call(cb(withTags([["a", "not-a-coordinate"]])), u))!.status).toBe(400);
+    expect(u.calls.length).toBe(0);
+    expect((await call(cb(withTags([["e", ours]])), u))!.status).toBe(200);
+    expect((await call(cb(withTags([["a", `30023:${OWN}:post`]])), u))!.status).toBe(200);
+  });
+  it("relays tag: wss URLs only, count and length capped", async () => {
+    const u = upstream();
+    for (const relays of [["ws://relay.damus.io"], ["https://relay.damus.io"], ["wss://127.0.0.1"], ["wss://localhost"], [], Array.from({ length: 11 }, (_, i) => `wss://r${i}.example`), [`wss://${"a".repeat(260)}.example`]])
+      expect((await call(cb(withTags([], relays)), u))!.status, JSON.stringify(relays).slice(0, 60)).toBe(400);
+    expect(u.calls.length).toBe(0);
+    expect((await call(cb(withTags([], ["wss://relay.damus.io", "wss://nos.lol"])), u))!.status).toBe(200);
+  });
+});

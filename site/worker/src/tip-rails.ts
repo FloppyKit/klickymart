@@ -73,6 +73,16 @@ export async function guardedFetch(url: string, o: { fetcher?: F; doh?: F } = {}
 }
 
 // ---------- zap request ----------
+export const ZAP_RELAYS = { max: 10, maxLen: 256 };
+export function validRelayUrl(u: unknown): boolean {
+  if (typeof u !== "string" || u.length > ZAP_RELAYS.maxLen || !/^wss:\/\/[^\s"<>\\]+$/i.test(u)) return false;
+  try { const h = new URL(u).hostname.toLowerCase(); return new URL(u).protocol === "wss:" && !!h && h.includes(".") && !/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h) && !/^172\.(1[6-9]|2\d|3[01])\./.test(h) && !h.startsWith("["); } catch { return false; }
+}
+export function validACoord(v: string): boolean {
+  const m = /^(\d{1,5}):([0-9a-f]{64}):(.{0,256})$/s.exec(v); if (!m) return false;
+  const k = Number(m[1]); return k >= 30000 && k < 40000;
+}
+export function aCoordPubkey(v: string): string | null { return validACoord(v) ? v.split(":")[1]! : null; }
 export function verifyZapRequest(input: unknown, nowS = Math.floor(Date.now() / 1000)): { ok: true; ev: Ev; recipient: string; amount: number; target: string | null } | { ok: false; message: string } {
   if (!input || typeof input !== "object") return { ok: false, message: "zap_request must be a signed kind 9734 event" };
   const raw = JSON.stringify(input);
@@ -83,7 +93,12 @@ export function verifyZapRequest(input: unknown, nowS = Math.floor(Date.now() / 
   if (Math.abs(ev.created_at - nowS) > 600) return { ok: false, message: "zap request created_at must be within 10 minutes" };
   const p = ev.tags.filter((t) => t[0] === "p"); if (p.length !== 1 || !HEX64.test(p[0][1] ?? "")) return { ok: false, message: "exactly one p tag" };
   const e = ev.tags.filter((t) => t[0] === "e"); if (e.length > 1 || (e[0] && !HEX64.test(e[0][1] ?? ""))) return { ok: false, message: "at most one e tag" };
-  const relays = ev.tags.find((t) => t[0] === "relays"); if (!relays || relays.length < 2) return { ok: false, message: "relays tag required" };
+  // R12-003: one relays tag, 1..ZAP_RELAYS.max entries, each a wss:// URL to a public host, length-capped.
+  const rt = ev.tags.filter((t) => t[0] === "relays"); if (rt.length !== 1 || rt[0].length < 2) return { ok: false, message: "exactly one relays tag required" };
+  const rl = rt[0].slice(1);
+  if (rl.length > ZAP_RELAYS.max || !rl.every(validRelayUrl)) return { ok: false, message: `relays tag: 1-${ZAP_RELAYS.max} wss:// relay URLs, each at most ${ZAP_RELAYS.maxLen} chars` };
+  // R12-001: an a tag must be a proper parameterized-replaceable coordinate <kind>:<pubkey hex>:<d>.
+  const a = ev.tags.filter((t) => t[0] === "a"); if (a.length > 1 || (a[0] && !validACoord(a[0][1] ?? ""))) return { ok: false, message: "at most one a tag, formatted <kind 30000-39999>:<64 hex pubkey>:<d>" };
   const amount = Number(ev.tags.find((t) => t[0] === "amount")?.[1]);
   if (!Number.isInteger(amount) || amount < INVOICE_LIMITS.minMsat || amount > INVOICE_LIMITS.maxMsat) return { ok: false, message: "amount tag (msat) required" };
   return { ok: true, ev, recipient: p[0][1], amount, target: e[0]?.[1] ?? null };
