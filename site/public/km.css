@@ -64,7 +64,7 @@ body.km-scene-only{overflow:hidden}
 .km-page-home .km-footer{background:color-mix(in srgb,var(--km-bg) 94%,transparent);backdrop-filter:blur(8px)}
 .km-preview-badge{font-family:var(--km-font-mono);font-size:var(--km-fs-xs);letter-spacing:.04em;text-transform:uppercase;background:var(--km-surface-2);color:var(--km-anw);border:1px solid var(--km-border-strong);border-radius:var(--km-radius-pill);padding:var(--km-s-1) var(--km-s-3);margin-left:auto;margin-right:var(--km-s-3)}
 .km-header{flex-wrap:wrap}
-.km-footer-signoff{font-size:var(--km-fs-md);color:var(--km-text);margin:0 0 var(--km-s-3);letter-spacing:.02em}
+.km-footer-signoff{text-align:center;font-size:var(--km-fs-md);color:var(--km-text);margin:0 0 var(--km-s-3);letter-spacing:.02em}
 .km-skip{position:absolute;left:-9999px;top:0;background:var(--km-surface);color:var(--km-text);border:1px solid var(--km-border);padding:var(--km-s-2) var(--km-s-3);z-index:100}
 .km-skip:focus{left:var(--km-s-4);top:var(--km-s-4);background:var(--km-accent);color:var(--km-accent-ink)}
 a{color:var(--km-link);text-decoration-thickness:1px}
