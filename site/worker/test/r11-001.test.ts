@@ -38,3 +38,16 @@ describe("R11-001 checkout-blocked is consistent across surfaces", () => {
     if (firstBlocked >= 0) expect(items.slice(firstBlocked).every((i) => i.verdict === "checkout-blocked")).toBe(true);
   });
 });
+
+describe("K12-101 /offers: blocked stores rank after usable ones regardless of match confidence", () => {
+  it("a gtin match at a checkout-blocked store ranks below a name match at a usable store", async () => {
+    const { findOffers } = await import("../src/offers");
+    const snap = await realSnap();
+    const mk = (d: string, extra: Record<string, unknown>) => ({ d, n: "Acme Widget Pro 3000", p: 10, c: "USD", st: "in", u: `https://${d}/p`, me: "jsonld", src: "klickybot", t: 1, ...extra });
+    const offers = [mk("walmart.com", { g: "0123456789012" }), mk("target.com", {})] as never;
+    const r = findOffers(offers, snap, O, { gtin: "0123456789012", q: "acme widget pro 3000" });
+    if (!r.ok) throw new Error(r.message);
+    expect(r.body.items.map((i) => i.domain)).toEqual(["target.com", "walmart.com"]);
+    expect(r.body.items[1]!.match.conf).toBeGreaterThan(r.body.items[0]!.match.conf);
+  });
+});

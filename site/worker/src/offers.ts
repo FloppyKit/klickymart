@@ -53,10 +53,10 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
     scored.push({ o, conf, how });
   }
   const zip = qy.zip ?? null;
-  // R11-001: offers from checkout-blocked stores rank after every usable store at the same match confidence.
+  // R11-001 / K12-101: offers from checkout-blocked stores rank after every usable store, whatever the match confidence.
   const blockedMemo = new Map<string, number>();
   const isBlocked = (d: string) => { let v = blockedMemo.get(d); if (v === undefined) { const r = rows.get(d); v = r && deriveVerdict(r, parseRaw(r.raw_json)).verdict === "checkout-blocked" ? 1 : 0; blockedMemo.set(d, v); } return v; };
-  const rank = (x: { o: Offer; conf: number }) => [-(x.conf), isBlocked(x.o.d), x.o.st === "in" ? 0 : x.o.st ? 2 : 1, -(rows.get(x.o.d)?.co ?? -1), x.o.p];
+  const rank = (x: { o: Offer; conf: number }) => [isBlocked(x.o.d), -(x.conf), x.o.st === "in" ? 0 : x.o.st ? 2 : 1, -(rows.get(x.o.d)?.co ?? -1), x.o.p];
   scored.sort((a, b) => { const ra = rank(a), rb = rank(b); for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!; return 0; });
   const items = scored.slice(0, limit).map(({ o, conf, how }) => {
     const row = rows.get(o.d);
