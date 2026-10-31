@@ -410,5 +410,678 @@
   "endpoint": null,
   "result": "not-probed",
   "why": "no endpoint in data"
+ },
+ {
+  "d": "lightningenable.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "thenode.it.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "47620.xyz",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "convrgent.ai",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "cracked.ai",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "semagram.io",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "seshat.markets",
+  "cat": "x402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "hyperdope.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "maximumsats.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "ordinalsbot.com",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "no endpoint in data"
+ },
+ {
+  "d": "sulu.sh",
+  "cat": "l402",
+  "endpoint": null,
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "x402card.org",
+  "cat": "x402",
+  "endpoint": "https://api.x402card.org/api/esim/purchase",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "phoneagent.xyz",
+  "cat": "x402",
+  "endpoint": "https://vps.phoneagent.xyz/catalog",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "x402-hosting.com",
+  "cat": "x402",
+  "endpoint": "https://api.x402-hosting.com/v1/projects/:id/renew",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "reloadpi.com",
+  "cat": "x402",
+  "endpoint": "https://api.reloadpi.com/api/catalog/topups/regions",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "1000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793402178
+ },
+ {
+  "d": "ausca.com",
+  "cat": "x402",
+  "endpoint": "https://ausca.com/v1/lease-browser",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "gondola-ai.com",
+  "cat": "x402",
+  "endpoint": "https://api.gondola-ai.com/v1/chat/completions",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "cheaptokens.ai",
+  "cat": "x402",
+  "endpoint": "https://cheaptokens.ai/api/buy",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "1000000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793402180
+ },
+ {
+  "d": "surplusintelligence.ai",
+  "cat": "x402",
+  "endpoint": "https://api.surplusintelligence.ai/v1/chat/completions",
+  "result": "no-402",
+  "ts": 1793402231,
+  "get_http": 404,
+  "http": 400,
+  "method": "POST"
+ },
+ {
+  "d": "gedx402.com",
+  "cat": "x402",
+  "endpoint": "https://chat.gedx402.com/v1/chat/completions",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "mapleai.shop",
+  "cat": "x402",
+  "endpoint": "https://base.mapleai.shop/v1/chat/completions",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "algono.co",
+  "cat": "x402",
+  "endpoint": "https://inference.algono.co/v1/responses",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "phion.systems",
+  "cat": "x402",
+  "endpoint": "https://phion.systems/v1/paid/commercial/inference",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "losbeto.xyz",
+  "cat": "x402",
+  "endpoint": "https://api.losbeto.xyz/llm",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "telnyx.com",
+  "cat": "x402",
+  "endpoint": "https://x402.telnyx.com/v1/chat/completions/_t/gemma-2b",
+  "result": "verified-402",
+  "ts": 1793402233,
+  "get_http": 404,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "2000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "aispace.bot",
+  "cat": "x402",
+  "endpoint": "https://x402.aispace.bot/api/v1/image/generate",
+  "result": "verified-402",
+  "ts": 1793402234,
+  "get_http": 405,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "10000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 2
+  },
+  "method": "POST"
+ },
+ {
+  "d": "imagcon.app",
+  "cat": "x402",
+  "endpoint": "https://imagcon.app/routes/x402/generate-image",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "suedeai.ai",
+  "cat": "x402",
+  "endpoint": "https://app.suedeai.ai/agent/image",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "150000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793402186
+ },
+ {
+  "d": "kino402.com",
+  "cat": "x402",
+  "endpoint": "https://kino402.com/v1/audio/tts",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "x402engine.app",
+  "cat": "x402",
+  "endpoint": "https://x402engine.app/api/tts/elevenlabs",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "dicta-notes.com",
+  "cat": "x402",
+  "endpoint": "https://dicta-notes.com/routes/x402/transcribe",
+  "result": "verified-402",
+  "ts": 1793402235,
+  "get_http": 405,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "100000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "nexari.cloud",
+  "cat": "x402",
+  "endpoint": "https://x402.nexari.cloud/transcribe/10min",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "x402ai.dev",
+  "cat": "x402",
+  "endpoint": "https://api.x402ai.dev/api/embed",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "scopeapi.dev",
+  "cat": "x402",
+  "endpoint": "https://scopeapi.dev/embeddings",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "apify.com",
+  "cat": "x402",
+  "endpoint": "https://agi.apify.com/protocols/x402/prepaid-tokens",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "browserbase.com",
+  "cat": "x402",
+  "endpoint": "https://x402.browserbase.com/search",
+  "result": "verified-402",
+  "ts": 1793402237,
+  "get_http": 404,
+  "http": 402,
+  "challenge": "402 JSON body",
+  "proto": "x402",
+  "x402Version": 1,
+  "price_seen": {
+   "amount": "10000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "base",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 2
+  },
+  "method": "POST"
+ },
+ {
+  "d": "tavily.com",
+  "cat": "x402",
+  "endpoint": "https://x402.tavily.com/search",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "you.com",
+  "cat": "x402",
+  "endpoint": "https://api.you.com/v1/search",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "5000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 2
+  },
+  "result": "verified-402",
+  "ts": 1793402191
+ },
+ {
+  "d": "coingecko.com",
+  "cat": "x402",
+  "endpoint": "https://pro-api.coingecko.com/api/v3/x402/onchain/search/pools",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "coinmarketcap.com",
+  "cat": "x402",
+  "endpoint": "https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "glassnode.com",
+  "cat": "x402",
+  "endpoint": "https://x402.glassnode.com/v1/metadata/metrics",
+  "result": "not-probed",
+  "why": "status=agents-not-welcome"
+ },
+ {
+  "d": "massive.com",
+  "cat": "x402",
+  "endpoint": "https://agent.massive.com/v2/reference/news",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "interzoid.com",
+  "cat": "x402",
+  "endpoint": "https://api.interzoid.com/getfullnamematch",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "affiliate.com",
+  "cat": "x402",
+  "endpoint": "https://zeroclick.affiliate.com/v1/products",
+  "result": "verified-402",
+  "ts": 1793402239,
+  "get_http": 404,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "20000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "stabletickets.dev",
+  "cat": "x402",
+  "endpoint": "https://stabletickets.dev/api/events/search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "serp402.com",
+  "cat": "x402",
+  "endpoint": "https://serp402.com/api/v1/search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "aproxpay.com",
+  "cat": "x402",
+  "endpoint": "https://proxy.aproxpay.com/v1/proxy",
+  "result": "verified-402",
+  "ts": 1793402241,
+  "get_http": 404,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "3000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "rtrvr.ai",
+  "cat": "x402",
+  "endpoint": "https://agents.rtrvr.ai/scrape",
+  "result": "verified-402",
+  "ts": 1793402243,
+  "get_http": 404,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "50000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "munition.io",
+  "cat": "x402",
+  "endpoint": "https://api.munition.io/v1/firecrawl/scrape",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "cyberwarex.com",
+  "cat": "x402",
+  "endpoint": "https://web.cyberwarex.com/fetch",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "sumvid.app",
+  "cat": "x402",
+  "endpoint": "https://api.sumvid.app/v1/transcript",
+  "result": "verified-402",
+  "ts": 1793402244,
+  "get_http": 405,
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "5000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "method": "POST"
+ },
+ {
+  "d": "eckari.com",
+  "cat": "x402",
+  "endpoint": "https://api.eckari.com/v1/parcels/detect-carrier",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "recallradar.dev",
+  "cat": "x402",
+  "endpoint": "https://api.recallradar.dev/v1/recalls",
+  "result": "not-probed",
+  "why": "status=blocked-tos"
+ },
+ {
+  "d": "netintel.dev",
+  "cat": "x402",
+  "endpoint": "https://netintel.dev/email-auth",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "coincap.io",
+  "cat": "x402",
+  "endpoint": "https://rest.coincap.io/v3/agentFriendly/full_assets_by_slug",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "2000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793402199
+ },
+ {
+  "d": "vaults.fyi",
+  "cat": "x402",
+  "endpoint": "https://api.vaults.fyi/v2/vaults",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "stocktrends.com",
+  "cat": "x402",
+  "endpoint": "https://api.stocktrends.com/v1/prices/latest",
+  "result": "not-probed",
+  "why": "status=agents-not-welcome"
+ },
+ {
+  "d": "newstex.com",
+  "cat": "x402",
+  "endpoint": "https://mcp.newstex.com/x402/trending",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "10000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 1
+  },
+  "result": "verified-402",
+  "ts": 1793402201
+ },
+ {
+  "d": "twit.sh",
+  "cat": "x402",
+  "endpoint": "https://x402.twit.sh/tweets/search",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "readx.sh",
+  "cat": "x402",
+  "endpoint": "https://readx.sh/api/search/tweets",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "chainquery.com",
+  "cat": "x402",
+  "endpoint": "https://intel.chainquery.com/v1/fee-pressure",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "nativebtc.org",
+  "cat": "x402",
+  "endpoint": "https://api.nativebtc.org/v1/mempool/stream-ticket",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "mechamanda.com",
+  "cat": "x402",
+  "endpoint": "https://mechamanda.com/api/concerts",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "dataforagents.net",
+  "cat": "x402",
+  "endpoint": "https://dataforagents.net/v1/steam/search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "stablejobs.dev",
+  "cat": "x402",
+  "endpoint": "https://stablejobs.dev/api/coresignal/job-search",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "getanyapi.com",
+  "cat": "x402",
+  "endpoint": "https://api.getanyapi.com/v1/run/youtube.video_transcript",
+  "result": "no-402",
+  "ts": 1793402245,
+  "get_http": 401,
+  "http": 400,
+  "method": "POST"
+ },
+ {
+  "d": "yield.xyz",
+  "cat": "x402",
+  "endpoint": "https://mcp.yield.xyz/x402/yields_get_all",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
+ },
+ {
+  "d": "marketintelligenceapi.com",
+  "cat": "x402",
+  "endpoint": "https://api.marketintelligenceapi.com/api/v1/eu/fx",
+  "result": "not-probed",
+  "why": "status=error"
+ },
+ {
+  "d": "openverbs.com",
+  "cat": "x402",
+  "endpoint": "https://search.openverbs.com/v1/wikipedia",
+  "result": "not-probed",
+  "why": "gate: no ok terms verdict (tos=None)"
  }
 ]

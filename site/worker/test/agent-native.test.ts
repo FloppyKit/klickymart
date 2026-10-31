@@ -16,33 +16,33 @@ beforeAll(async () => {
   const main = await ingestFromNdjsonText(REAL as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t" });
   mainSig = main.rows.get("bitrefill.com")?.raw_json ?? null;
   const an = await ingestFromNdjsonText(AN as string, { allowSynthetic: false, verifyEvents: true, sourceLabel: "t-an" });
-  expect(an.rows.size).toBe(116);
+  expect(an.rows.size).toBe(185);
   clearAgentNative();
   const r = mergeAgentNative(main.rows, an.rows);
-  expect(r).toEqual({ added: 107, overlaid: 9 });
+  expect(r).toEqual({ added: 176, overlaid: 9 });
   snap = rowsToSnapshot([...main.rows.values()], main.report.version, main.report.source);
 });
 const q = (s: string) => { const v = validateQueryParams(new URLSearchParams(s)); if (!v.ok) throw new Error(v.message); return querySnapshot(snap, v.params); };
 
 describe("agent-native stores (2026-10-30)", () => {
-  it("adds 107 new signed rows and overlays 9 existing domains without replacing their signed main record", () => {
-    expect(snap.rows.length).toBe(363 + 107);
-    expect(anCount()).toBe(116);
+  it("adds 176 new signed rows and overlays 9 existing domains without replacing their signed main record", () => {
+    expect(snap.rows.length).toBe(363 + 176);
+    expect(anCount()).toBe(185);
     const b = snap.rows.find((r) => r.d === "bitrefill.com")!;
     expect(b.raw_json).toBe(mainSig);
     expect(JSON.parse(b.raw_json).agent_native).toBeUndefined();
     expect(anOf("bitrefill.com")?.label).toBe("verified-402");
   });
-  it("/q agent_native=1 returns all 116, including findings with their status", () => {
+  it("/q agent_native=1 returns all 185, including findings with their status", () => {
     const r = q("agent_native=1&limit=500");
-    expect(r.total).toBe(116);
+    expect(r.total).toBe(185);
     const st = new Set(r.items.map((i) => i.status));
     for (const s of ["crawled", "blocked-tos", "agents-not-welcome", "error"]) expect(st.has(s as never)).toBe(true);
     expect(q("agent_native=0&limit=500").total).toBe(363 - 9);
   });
   it("rail_status=verified-402 lists only stores whose 402 we saw, with price_seen; claimed ones stay claimed", () => {
     const v = q("rail_status=verified-402&limit=500");
-    expect(v.total).toBe(7);
+    expect(v.total).toBe(21);
     for (const row of v.items) {
       const a = anJson(row.d)! as { label: string; probe_402: { result: string; http: number; price_seen: { amount: string; asset: string } } };
       expect(a.label).toBe("verified-402");

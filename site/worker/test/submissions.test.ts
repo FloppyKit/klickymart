@@ -23,7 +23,7 @@ let seq = 0;
 async function visit(d: string, pubkey: string, o: { created_at?: number; proof_status?: string; flagged?: number; firstSeen?: number } = {}) {
   const id = (++seq).toString(16).padStart(8, "0") + "f".repeat(56);
   const t = o.created_at ?? nowS() - DAY;
-  await env.DB.prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis,proof_status) VALUES (?,?,?,?,?,1,'','{}','post','2026-10-30','visit',?)").bind(id, 422, d, pubkey, t, o.proof_status ?? null).run();
+  await env.DB.prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis,proof_status) VALUES (?,?,?,?,?,1,'','{}','post',?,'visit',?)").bind(id, 422, d, pubkey, t, new Date().toISOString().slice(0, 10), o.proof_status ?? null).run();
   if (o.firstSeen !== undefined) await env.DB.prepare("INSERT OR IGNORE INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,0,?,?,NULL,'{}',?,'')").bind(id.slice(0, 8) + "0".repeat(56), pubkey, o.firstSeen, o.firstSeen).run();
   if (o.flagged !== undefined) await env.DB.prepare("INSERT INTO note_flags (id,d,pubkey,level,weight,reasons_json,computed_at) VALUES (?,?,?,?,?,?,?)").bind(id, d, pubkey, o.flagged === 0 ? "strong" : "weak", o.flagged, JSON.stringify([{ signal: "near-duplicate", strength: "weak", detail: "x" }]), nowS()).run();
   return id;
@@ -225,7 +225,8 @@ describe("trust ladder", () => {
     for (let i = 0; i < 3; i++) await visit(d, pk(), { firstSeen: old(), created_at: nowS() - 70 * DAY });
     expect((await tier(d)).trust_tier).toBe("unverified");
     const s = uniq("sy"); const sk = secp.utils.randomSecretKey(); const ev = sign1423([["r", s]], "x", sk);
-    await submitStore({}, ctx({ via: "nostr", signed: { id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, domain: s, category: null, note: "", evidence_url: null }, ip: null }));
+    const sres = await submitStore({}, ctx({ via: "nostr", signed: { id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, domain: s, category: null, note: "", evidence_url: null }, ip: null }));
+    expect(sres.status, JSON.stringify(sres.body)).toBeLessThan(300);
     await visit(s, ev.pubkey, { firstSeen: old() });
     await visit(s, pk(), { firstSeen: old() }); await visit(s, pk(), { firstSeen: old() });
     await visit(s, pk(), { firstSeen: nowS() - 60, created_at: nowS() - 60 }); // sybil: created right after the submission

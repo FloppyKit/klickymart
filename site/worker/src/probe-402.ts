@@ -424,5 +424,626 @@ export const PROBE_402: Probe402[] = [
     "endpoint": null,
     "challenge": null,
     "ts": null
+  },
+  {
+    "d": "lightningenable.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "thenode.it.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "47620.xyz",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "convrgent.ai",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "cracked.ai",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "semagram.io",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "seshat.markets",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "hyperdope.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "maximumsats.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "ordinalsbot.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "sulu.sh",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": null,
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "x402card.org",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.x402card.org/api/esim/purchase",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "phoneagent.xyz",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://vps.phoneagent.xyz/catalog",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "x402-hosting.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.x402-hosting.com/v1/projects/:id/renew",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "reloadpi.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://api.reloadpi.com/api/catalog/topups/regions",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402178
+  },
+  {
+    "d": "ausca.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://ausca.com/v1/lease-browser",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "gondola-ai.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.gondola-ai.com/v1/chat/completions",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "cheaptokens.ai",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://cheaptokens.ai/api/buy",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402180
+  },
+  {
+    "d": "surplusintelligence.ai",
+    "result": "no-402",
+    "http": 400,
+    "proto": null,
+    "endpoint": "https://api.surplusintelligence.ai/v1/chat/completions",
+    "challenge": null,
+    "ts": 1793402231
+  },
+  {
+    "d": "gedx402.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://chat.gedx402.com/v1/chat/completions",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "mapleai.shop",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://base.mapleai.shop/v1/chat/completions",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "algono.co",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://inference.algono.co/v1/responses",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "phion.systems",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://phion.systems/v1/paid/commercial/inference",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "losbeto.xyz",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.losbeto.xyz/llm",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "telnyx.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://x402.telnyx.com/v1/chat/completions/_t/gemma-2b",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402233
+  },
+  {
+    "d": "aispace.bot",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://x402.aispace.bot/api/v1/image/generate",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402234
+  },
+  {
+    "d": "imagcon.app",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://imagcon.app/routes/x402/generate-image",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "suedeai.ai",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://app.suedeai.ai/agent/image",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402186
+  },
+  {
+    "d": "kino402.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://kino402.com/v1/audio/tts",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "x402engine.app",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://x402engine.app/api/tts/elevenlabs",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "dicta-notes.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://dicta-notes.com/routes/x402/transcribe",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402235
+  },
+  {
+    "d": "nexari.cloud",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://x402.nexari.cloud/transcribe/10min",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "x402ai.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.x402ai.dev/api/embed",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "scopeapi.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://scopeapi.dev/embeddings",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "apify.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://agi.apify.com/protocols/x402/prepaid-tokens",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "browserbase.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://x402.browserbase.com/search",
+    "challenge": "402 JSON body",
+    "ts": 1793402237
+  },
+  {
+    "d": "tavily.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://x402.tavily.com/search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "you.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://api.you.com/v1/search",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402191
+  },
+  {
+    "d": "coingecko.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://pro-api.coingecko.com/api/v3/x402/onchain/search/pools",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "coinmarketcap.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "glassnode.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://x402.glassnode.com/v1/metadata/metrics",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "massive.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://agent.massive.com/v2/reference/news",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "interzoid.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.interzoid.com/getfullnamematch",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "affiliate.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://zeroclick.affiliate.com/v1/products",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402239
+  },
+  {
+    "d": "stabletickets.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://stabletickets.dev/api/events/search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "serp402.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://serp402.com/api/v1/search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "aproxpay.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://proxy.aproxpay.com/v1/proxy",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402241
+  },
+  {
+    "d": "rtrvr.ai",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://agents.rtrvr.ai/scrape",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402243
+  },
+  {
+    "d": "munition.io",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.munition.io/v1/firecrawl/scrape",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "cyberwarex.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://web.cyberwarex.com/fetch",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "sumvid.app",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://api.sumvid.app/v1/transcript",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402244
+  },
+  {
+    "d": "eckari.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.eckari.com/v1/parcels/detect-carrier",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "recallradar.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.recallradar.dev/v1/recalls",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "netintel.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://netintel.dev/email-auth",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "coincap.io",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://rest.coincap.io/v3/agentFriendly/full_assets_by_slug",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402199
+  },
+  {
+    "d": "vaults.fyi",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.vaults.fyi/v2/vaults",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "stocktrends.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.stocktrends.com/v1/prices/latest",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "newstex.com",
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://mcp.newstex.com/x402/trending",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793402201
+  },
+  {
+    "d": "twit.sh",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://x402.twit.sh/tweets/search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "readx.sh",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://readx.sh/api/search/tweets",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "chainquery.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://intel.chainquery.com/v1/fee-pressure",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "nativebtc.org",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.nativebtc.org/v1/mempool/stream-ticket",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "mechamanda.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://mechamanda.com/api/concerts",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "dataforagents.net",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://dataforagents.net/v1/steam/search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "stablejobs.dev",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://stablejobs.dev/api/coresignal/job-search",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "getanyapi.com",
+    "result": "no-402",
+    "http": 400,
+    "proto": null,
+    "endpoint": "https://api.getanyapi.com/v1/run/youtube.video_transcript",
+    "challenge": null,
+    "ts": 1793402245
+  },
+  {
+    "d": "yield.xyz",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://mcp.yield.xyz/x402/yields_get_all",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "marketintelligenceapi.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://api.marketintelligenceapi.com/api/v1/eu/fx",
+    "challenge": null,
+    "ts": null
+  },
+  {
+    "d": "openverbs.com",
+    "result": "not-probed",
+    "http": null,
+    "proto": null,
+    "endpoint": "https://search.openverbs.com/v1/wikipedia",
+    "challenge": null,
+    "ts": null
   }
 ];
