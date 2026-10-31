@@ -1,3 +1,4 @@
+import { setCustodialZapperKeys } from "./tips";
 import { isSpecialUseHost } from "./special-names";
 import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
 import { WALLET_GUIDE } from "./wallet";
@@ -85,6 +86,8 @@ const DRY_RUN_NOTE = (counts: boolean) => ({ would_count_toward_chart: counts, d
 export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
 export const saltRequiredButMissing = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string; SUBMIT_SALT?: string }) => isProduction(env) && !env.SUBMIT_SALT;
 export interface Env {
+  /** GP-2: extra custodial zapper / LNURL nostrPubkey keys (comma-separated 64-hex); their zap receipts get no tip weight. */
+  CUSTODIAL_ZAPPER_KEYS?: string;
   DB: D1Database;
   KV: KVNamespace;
   ASSETS: Fetcher;
@@ -372,6 +375,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  setCustodialZapperKeys(env.CUSTODIAL_ZAPPER_KEYS);
   const url = new URL(request.url);
   const origin = env.SITE_ORIGIN || `${url.protocol}//${url.host}`;
   const path = url.pathname.replace(/\/$/, "") || "/";

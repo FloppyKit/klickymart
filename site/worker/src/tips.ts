@@ -22,14 +22,32 @@ export interface TipSummary { tips: number; sats: number; distinct_tippers: numb
  * description_hash check, and the amount matches the request. Without a known author zap key nothing validates. */
 /** R12-002: the receipt must pay the note's author: the receipt's single p, the embedded 9734's single p and the note
  * author must match, and the 9734's e must be the tipped note. The receipt must be signed by the author's own LNURL
- * nostrPubkey; a zap key that serves several recipients (custodial / shared) never validates, because anyone could
+ * nostrPubkey, and that key must be proven to serve only one receiver (GP-2: unknown or custodial keys never validate), because anyone could
  * zap their own wallet behind the same key and credit someone else's note. */
+/** GP-2 (R12-002 residual): fail closed on shared custodial zapper keys. Custodians (Primal, Wallet of Satoshi, Alby
+ * custodial, Minibits, ...) sign every user's receipts with one zapper key, so an attacker on the same custodian can
+ * self-zap with p=victim. A receipt only earns weight when its zapper key is PROVEN to serve exactly one receiver
+ * (see loadTips); deny-listed keys and keys we cannot prove are single-receiver get weight 0.
+ * TODO: add the real custodial zapper / LNURL nostrPubkey hex keys here once verified from the custodians' live
+ * LNURL endpoints (none are recorded in this repo yet). Until then add them at deploy time via the
+ * CUSTODIAL_ZAPPER_KEYS env var (comma-separated 64-hex). */
+export const CUSTODIAL_ZAPPER_KEYS: readonly string[] = [];
+/** Lightning-address domains run by custodians that sign all users' zaps with one shared key. */
+export const CUSTODIAL_LUD16_DOMAINS: readonly string[] = ["primal.net", "walletofsatoshi.com", "getalby.com", "minibits.cash"];
+let envDeny = new Set<string>();
+/** Set from env.CUSTODIAL_ZAPPER_KEYS (comma-separated 64-hex); invalid entries are ignored. */
+export function setCustodialZapperKeys(raw: string | undefined | null): void {
+  envDeny = new Set((raw ?? "").split(",").map((x) => x.trim().toLowerCase()).filter((x) => /^[0-9a-f]{64}$/.test(x)));
+}
+export const custodialZapperKey = (zk: string) => { const k = zk.toLowerCase(); return CUSTODIAL_ZAPPER_KEYS.includes(k) || envDeny.has(k); };
+export const custodialLud16 = (lud16: string | null | undefined) => { const d = (lud16 ?? "").toLowerCase().split("@")[1] ?? ""; return CUSTODIAL_LUD16_DOMAINS.some((c) => d === c || d.endsWith("." + c)); };
+
 const onlyTag = (tags: unknown, k: string): string | null => {
   if (!Array.isArray(tags)) return null;
   const v = tags.filter((t) => Array.isArray(t) && t[0] === k).map((t) => (t as unknown[])[1]);
   return v.length === 1 && typeof v[0] === "string" ? v[0] : null;
 };
-export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, zapKeyOf: (author: string) => string | null | undefined = () => null, sharedKey: (zk: string) => boolean = () => false): Tip | null {
+export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, zapKeyOf: (author: string) => string | null | undefined = () => null, singleReceiver: (zk: string) => boolean = () => false): Tip | null {
   const target = r.tags.find((t) => t[0] === "e")?.[1];
   if (!target) return null;
   const b = r.tags.find((t) => t[0] === "bolt11")?.[1];
@@ -40,7 +58,7 @@ export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, za
   const author = authorOf(target);
   const zk = author ? zapKeyOf(author) : null;
   const bound = !!author && onlyTag(r.tags, "p") === author && !!req && onlyTag(req.tags, "p") === author && onlyTag(req.tags, "e") === target;
-  const validated = bound && !!zk && !sharedKey(zk) && checkZapReceipt(r, zk).ok;
+  const validated = bound && !!zk && !custodialZapperKey(zk) && singleReceiver(zk) && checkZapReceipt(r, zk).ok;
   return { receipt: r.id, target, tipper, sats: dec?.amount_msat != null ? Math.floor(dec.amount_msat / 1000) : null, validated, self: !!tipper && !!author && tipper === author, created_at: r.created_at };
 }
 
@@ -75,16 +93,26 @@ export async function loadTips(db: D1Database | undefined, d?: string): Promise<
       for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
     const zapKeys = new Map<string, string | null>();
     for (const a of new Set(author.values())) zapKeys.set(a, await cachedZapKey(db, await lud16Of(db, a)));
-    // R12-002: a zap key declared by more than one recipient is shared (custodial) and earns no weight.
-    const keyUsers = new Map<string, number>();
+    // R12-002 / GP-2: fail closed. A zap key counts only when it is PROVEN to serve one receiver: exactly one author in
+    // scope declares it, every lnurl_cache row for it names the same single lud16, that lud16 is not on a custodial
+    // domain, and the key is not deny-listed. Unknown (no cache rows, cache missing) means weight 0.
+    const keyUsers = new Map<string, number>(); const authorLud = new Map<string, string | null>();
+    for (const a of new Set(author.values())) authorLud.set(a, await lud16Of(db, a));
     for (const k of zapKeys.values()) if (k) keyUsers.set(k, (keyUsers.get(k) ?? 0) + 1);
-    try { // any key that answers for several LNURL addresses we have cached is custodial
-      for (const r of (await db.prepare("SELECT nostr_pubkey AS k, COUNT(DISTINCT lud16) AS n FROM lnurl_cache WHERE nostr_pubkey IS NOT NULL GROUP BY nostr_pubkey HAVING n > 1").all<{ k: string; n: number }>()).results ?? [])
-        keyUsers.set(r.k, Math.max(keyUsers.get(r.k) ?? 0, r.n));
-    } catch { /* cache table pending */ }
-    const shared = (zk: string) => (keyUsers.get(zk) ?? 0) > 1;
+    const keyLuds = new Map<string, Set<string>>();
+    try {
+      for (const r of (await db.prepare("SELECT DISTINCT nostr_pubkey AS k, lud16 AS l FROM lnurl_cache WHERE nostr_pubkey IS NOT NULL").all<{ k: string; l: string }>()).results ?? [])
+        (keyLuds.get(r.k) ?? keyLuds.set(r.k, new Set()).get(r.k)!).add(String(r.l).toLowerCase());
+    } catch { /* cache table pending: nothing is proven */ }
+    const keyAuthorLud = new Map<string, string | null>();
+    for (const [a, k] of zapKeys) if (k) keyAuthorLud.set(k, authorLud.get(a) ?? null);
+    const single = (zk: string) => {
+      if (custodialZapperKey(zk) || keyUsers.get(zk) !== 1) return false;
+      const luds = keyLuds.get(zk); const mine = keyAuthorLud.get(zk);
+      return !!luds && luds.size === 1 && !!mine && luds.has(mine.toLowerCase()) && !custodialLud16(mine);
+    };
     for (const row of results ?? []) {
-      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a), shared);
+      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a), single);
       if (!t || !author.has(t.target)) continue;
       t.eligible = !!t.tipper && hist.has(t.tipper);
       (byNote.get(t.target) ?? byNote.set(t.target, []).get(t.target)!).push(t);

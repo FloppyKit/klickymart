@@ -9,7 +9,7 @@ import { nostrEventId, verifyNostrEvent } from "../src/nostr-verify";
 import { ingestEvents, buildFilters, type Ev, type IngestCtx } from "../src/relay-ingest";
 import { facilitate, checkFacilitationProof, FACILITATOR_NPUB } from "../src/facilitate";
 import { encodeBolt11ForTest } from "../src/bolt11";
-import { loadTips, summarize, curators, tipWeight } from "../src/tips";
+import { loadTips, summarize, curators, tipWeight, setCustodialZapperKeys, custodialZapperKey, custodialLud16 } from "../src/tips";
 import { loadAggregates, experienceTemplate } from "../src/experience";
 
 const DOM = "store.google.com";
@@ -162,6 +162,44 @@ describe("tips on 422 notes (NIP-57)", () => {
     expect(lt.byNote.get(n1.id)!.length).toBe(2);
     expect(lt.byNote.get(n1.id)!.every((t) => !t.validated)).toBe(true);
     expect(summarize(lt.byNote.get(n1.id)!).weight).toBe(1);
+  });
+  describe("GP-2: fail closed on custodial / unproven zapper keys", () => {
+    const setup = async (lud16: string) => {
+      const a = key(), zk = key(), tipper = key();
+      const n1 = sign(a, 422, [["r", DOM], ["depth", "paid"], ["basis", "visit"], ["rating", "5", "5"], ["attempt", "paid"]], "great");
+      const prof = sign(a, 0, [], JSON.stringify({ lud16 }));
+      await ingestEvents(env.DB, [n1, prof].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
+      await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)")
+        .bind(bytesToHex(key()), 1, pk(tipper), 1, null, "{}", Math.floor(Date.now() / 1000) - 60 * 86400, "wss://r.test").run();
+      await ingestEvents(env.DB, [zap(zk, tipper, n1)].map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(zk)) });
+      const w = async () => summarize((await loadTips(env.DB, DOM)).byNote.get(n1.id)!);
+      return { zk, w };
+    };
+    it("a proven single-receiver key keeps its weight", async () => {
+      setCustodialZapperKeys("");
+      const { w } = await setup("a@ln.example");
+      expect(await w()).toMatchObject({ validated_tippers: 1, bonus_tippers: 1, weight: 1.1 });
+    });
+    it("env CUSTODIAL_ZAPPER_KEYS deny-lists a key: self-zap via it gives 0", async () => {
+      const { zk, w } = await setup("a@ln.example");
+      setCustodialZapperKeys(`junk, ${pk(zk).toUpperCase()}`);
+      try {
+        expect(custodialZapperKey(pk(zk))).toBe(true);
+        expect(await w()).toMatchObject({ validated_tippers: 0, weight: 1 });
+      } finally { setCustodialZapperKeys(""); }
+      expect((await w()).weight).toBe(1.1);
+    });
+    it("an unknown key (no lnurl_cache proof) gives 0", async () => {
+      const { w } = await setup("a@ln.example");
+      await env.DB.prepare("DELETE FROM lnurl_cache").run();
+      expect(await w()).toMatchObject({ validated_tippers: 0, weight: 1 });
+    });
+    it("a key behind a custodial lud16 domain gives 0 even when only one user is visible", async () => {
+      expect(custodialLud16("victim@primal.net")).toBe(true);
+      expect(custodialLud16("a@ln.example")).toBe(false);
+      const { w } = await setup("victim@walletofsatoshi.com");
+      expect(await w()).toMatchObject({ validated_tippers: 0, weight: 1 });
+    });
   });
   it("template accepts a lud16 tag and rejects junk", () => {
     const ok = experienceTemplate({ domain: DOM, depth: "browse", lud16: "Me@Getalby.com" }, null);
