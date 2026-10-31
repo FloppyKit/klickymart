@@ -197,3 +197,28 @@ Code: MIT (https://github.com/FloppyKit/klickymart). Data: CC0-1.0 (${origin}/DA
 ${contact} . Opt out: disallow FloppyKitMapBot in robots.txt. Bot info: ${origin}/bot
 `;
 }
+
+/** llmstxt.org-style link sections (H2 + "- [name](url): note"), placed right after the summary blockquote. */
+export function llmsLinkSections(origin: string): string {
+  return `## Docs
+- [API docs](${origin}/docs/api): every endpoint, no key needed
+- [OpenAPI](${origin}/openapi.json): machine-readable API description
+- [MCP server](${origin}/mcp): streamable HTTP, 15 tools; card at ${origin}/.well-known/mcp/server-card.json
+- [Nostr tags](${origin}/docs/nostr-tags): kind 31420 store records and kind 422 shopping notes
+- [About](${origin}/about): how KlickyBot crawls (robots.txt first, terms honored, never buys)
+
+## Data
+- [Query](${origin}/q): filter stores by pay method, guest checkout, agent access, protocol
+- [Check one store](${origin}/check?domain=example.com): "can my agent shop here?"
+- [Landed cost](${origin}/landed?zip=60601&q=headphones): price + shipping + tax to a ZIP
+- [Export](${origin}/export.ndjson): all signed records (CC0)
+
+## Optional
+- [Full guide](${origin}/llms-full.txt): this file plus MCP tool schemas, the OpenAPI path list and the crawl rubric
+`;
+}
+/** Insert the link sections after the first blockquote paragraph of the guide. */
+export function withLlmsLinks(txt: string, origin: string): string {
+  const i = txt.indexOf("\n\n", txt.indexOf("\n> "));
+  return i < 0 ? txt : `${txt.slice(0, i)}\n\n${llmsLinkSections(origin)}${txt.slice(i)}`;
+}

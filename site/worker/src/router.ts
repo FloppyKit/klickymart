@@ -33,7 +33,7 @@ import { fetchNostrJson, validateClaimDomain, hexToNpub } from "./claim";
 import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
 import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilities";
 import { buildSummaryJson } from "./summary-json";
-import { buildLlmsTxt } from "./llms";
+import { buildLlmsTxt, withLlmsLinks } from "./llms";
 import { checkDomain, checkTrustFields } from "./check";
 import { findAlternatives } from "./alternatives";
 import { SELFTEST_DOMAIN } from "./experience";
@@ -1002,14 +1002,42 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json(buildOpenApi(origin), { headers: apiHeaders(snap.version, 0) });
   }
 
+  // Site-audit 10-31 P2: markdown for agents (Accept: text/markdown on / or /about, or /index.md) and security.txt.
+  if (request.method === "GET" && (path === "/index.md" || ((path === "/" || path === "/about") && /text\/markdown/i.test(request.headers.get("accept") ?? "")))) {
+    const md = await (await handleRequest(new Request(`${origin}/llms.txt`), env)).text();
+    return new Response(md, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Access-Control-Allow-Origin": "*", "Link": `<${origin}/>; rel="canonical"` } });
+  }
+  if (path === "/.well-known/security.txt") {
+    const exp = new Date(Date.now() + 180 * 86400e3).toISOString().slice(0, 10);
+    return new Response(`Contact: mailto:${env.CONTACT || "bot@klickymart.com"}\nContact: https://github.com/FloppyKit/klickymart/security/advisories/new\nExpires: ${exp}T00:00:00.000Z\nPreferred-Languages: en\nCanonical: ${origin}/.well-known/security.txt\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
   if (path === "/llms.txt") {
     const relays = (env.RELAY_URLS ?? "").replace(/[\[\]"]/g, "").split(",").map((x) => x.trim()).filter(Boolean);
-    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays, aTagFor("example.com") ?? undefined, siteTipAddress(env)), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+    return new Response(withLlmsLinks(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays, aTagFor("example.com") ?? undefined, siteTipAddress(env)), origin), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/llms-full.txt") {
+    // Site-audit 10-31: genuinely fuller than llms.txt: the guide, then every MCP tool with its input schema, then the API path list.
     const base = await (await handleRequest(new Request(`${origin}/llms.txt`), env)).text();
-    return new Response(base + "\nRubric: see CRAWL-RUBRIC.md field table.\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const tools = (mcpToolsList({ facilitate: facilitationEnabled(env) }) as { tools: { name: string; description?: string; inputSchema?: unknown }[] }).tools;
+    const oa = buildOpenApi(origin) as { paths?: Record<string, Record<string, { summary?: string; description?: string }>> };
+    const toolTxt = tools.map((t) => `### ${t.name}\n${t.description ?? ""}\n\nInput schema:\n${JSON.stringify(t.inputSchema ?? {}, null, 1)}\n`).join("\n");
+    const pathTxt = Object.entries(oa.paths ?? {}).map(([p, ops]) => Object.entries(ops).map(([m, o]) => `- ${m.toUpperCase()} ${origin}${p}: ${(o.summary ?? o.description ?? "").split("\n")[0]}`).join("\n")).join("\n");
+    return new Response(`${base}\n\n## MCP tools (${tools.length}) at ${origin}/mcp\n\n${toolTxt}\n## HTTP API paths (from ${origin}/openapi.json)\n\n${pathTxt}\n\n## Crawl rubric\nField-by-field rubric: https://github.com/FloppyKit/klickymart/blob/main/CRAWL-RUBRIC.md\n`, { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/.well-known/mcp/server-card.json") {
+    const tools = (mcpToolsList({ facilitate: facilitationEnabled(env) }) as { tools: { name: string; description?: string }[] }).tools;
+    return Response.json({
+      $schema: "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+      name: "com.klickymart/klickymart", title: "KlickyMart", version: snap.version,
+      description: "Which online stores AI shopping agents can actually buy from: guest checkout, payment methods (incl. Lightning/L402/x402), agent rules, landed cost. Read-only, no key; data CC0.",
+      websiteUrl: `${origin}/`, repository: { url: "https://github.com/FloppyKit/klickymart", source: "github" },
+      remotes: [{ type: "streamable-http", url: `${origin}/mcp` }],
+      capabilities: { tools: { listChanged: false } }, authentication: { required: false },
+      tools: tools.map((t) => ({ name: t.name, description: (t.description ?? "").split(". ")[0]!.slice(0, 200) })),
+      documentation: `${origin}/llms.txt`, contact: env.CONTACT || "bot@klickymart.com",
+    }, { headers: { ...apiHeaders(snap.version, 0), "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/.well-known/klickymart.json") {

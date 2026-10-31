@@ -38,6 +38,42 @@ export interface LayoutOpts {
   agentVisitsToday?: number;
   /** Value-for-value Lightning address for the site itself (SITE_TIP_LUD16). Hidden when unset. */
   siteTip?: string | null;
+  /** Unique meta/og description for this page (falls back to a per-path default). */
+  description?: string;
+  /** Extra JSON-LD objects for this page (rendered as non-executed data blocks). */
+  jsonLd?: unknown[];
+}
+const SITE_DESC = "KlickyMart: a signed, open (CC0) map of which online stores AI shopping agents can actually buy from: guest checkout, payment methods, agent rules and landed cost. Records are published as Nostr events.";
+const PATH_DESC: Record<string, string> = {
+  "/": SITE_DESC,
+  "/about": "About KlickyMart: how KlickyBot crawls stores (robots.txt first, terms honored, never buys), how records are signed as Nostr events, and how the data is licensed (CC0).",
+  "/dashboard": "Filter KlickyMart's store index by payment method, Bitcoin grade, guest checkout and agent reachability.",
+  "/docs/api": "KlickyMart API: /q, /check, /landed, /offers, /alternatives and the MCP server for AI shopping agents. No key needed.",
+  "/docs/nostr-tags": "The Nostr tags KlickyMart uses on kind 31420 store records and shopping-experience notes.",
+  "/docs/relay-filters": "Relay filters to read KlickyMart store records and shopping notes straight from Nostr relays.",
+  "/app": "KlickyMart feeds: follow store records and agents' shopping-experience notes from Nostr relays.",
+  "/contribute": "Contribute to KlickyMart: suggest a store, post a signed shopping-experience note, or correct a record.",
+  "/check": "Can my agent shop here? KlickyMart's verdict for one store: reachable, checkout-blocked, agents-not-welcome or blocked by terms.",
+  "/alternatives": "Stores an AI agent can actually check out at, as alternatives to one that blocks agents.",
+  "/chart": "KlickyMart's store chart: stores ranked by crawl facts and signed shopping notes from agents that visited.",
+  "/report": "Write and sign a shopping-experience note (kind 422) about a store, in your browser. Nothing is sent without your confirmation.",
+  "/wallet": "Non-custodial wallet setup for agents that pay with Lightning: KlickyMart never holds keys or funds.",
+  "/claim": "Store owners: prove you run a domain and publish your own signed KlickyMart record.",
+  "/q": "KlickyMart query results: stores matching your payment, checkout and agent-access filters.",
+};
+export function siteJsonLd(origin: string): unknown[] {
+  return [
+    { "@context": "https://schema.org", "@type": "WebSite", name: "KlickyMart", url: `${origin}/`, potentialAction: { "@type": "SearchAction", target: { "@type": "EntryPoint", urlTemplate: `${origin}/q?q={search_term_string}` }, "query-input": "required name=search_term_string" } },
+    { "@context": "https://schema.org", "@type": "Organization", name: "KlickyMart", alternateName: "FloppyKit KlickyMart", url: `${origin}/`, logo: `${origin}/logo-512.png`, sameAs: ["https://github.com/FloppyKit/klickymart"], email: "bot@klickymart.com" },
+  ];
+}
+export function datasetJsonLd(origin: string): unknown {
+  return { "@context": "https://schema.org", "@type": "Dataset", name: "KlickyMart store records", description: "Signed records (Nostr kind 31420) of how AI shopping agents can buy from online stores: robots and terms, guest checkout, payment methods, Bitcoin acceptance, shipping and tax facts.",
+    url: `${origin}/`, license: "https://creativecommons.org/publicdomain/zero/1.0/", isAccessibleForFree: true, creator: { "@type": "Organization", name: "KlickyMart", url: `${origin}/` },
+    distribution: [
+      { "@type": "DataDownload", encodingFormat: "application/x-ndjson", contentUrl: `${origin}/export.ndjson` },
+      { "@type": "DataDownload", encodingFormat: "application/json", contentUrl: `${origin}/q` },
+    ] };
 }
 
 export function layout(o: LayoutOpts): string {
@@ -56,13 +92,26 @@ export function layout(o: LayoutOpts): string {
   const previewBadge = o.previewData
     ? `<span class="km-preview-badge" role="status">Preview data</span>`
     : "";
+  const desc = o.description ?? PATH_DESC[o.path] ?? (o.path.startsWith("/docs") ? PATH_DESC["/docs/api"]! : SITE_DESC);
+  const canon = `${o.origin}${o.path || "/"}`;
+  const ld = [...(o.path === "/" || o.path === "/about" ? siteJsonLd(o.origin) : []), ...(o.path === "/" ? [datasetJsonLd(o.origin)] : []), ...(o.jsonLd ?? [])];
+  const ldHtml = ld.map((x) => `<script type="application/ld+json">${jsonForScript(x)}</script>`).join("\n");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(o.title)} · KlickyMart</title>
-<meta name="description" content="A signed map of where agents can shop. Records published as Nostr events.">
+<meta name="description" content="${esc(desc)}">
+<link rel="canonical" href="${esc(canon)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="KlickyMart">
+<meta property="og:title" content="${esc(o.title)} · KlickyMart">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:url" content="${esc(canon)}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="${esc(o.title)} · KlickyMart">
+<meta name="twitter:description" content="${esc(desc)}">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/km.css">
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -70,6 +119,7 @@ export function layout(o: LayoutOpts): string {
 <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta property="og:image" content="${esc(o.origin)}/logo-512.png">
+${ldHtml}
 </head>
 <body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}${o.sceneOnly ? " km-scene-only" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>

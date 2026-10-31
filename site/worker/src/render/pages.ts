@@ -289,6 +289,20 @@ function renderTableRow(row: IndexRow, origin: string): string {
 }
 
 export type TippedMap = Map<string, { zaps: number; zap_sats: number; zap_validated: number; nutzaps: number; nutzap_sats: number; nutzap_checked: number }>;
+const merchantTitle = (row: IndexRow) => `Can agents shop at ${row.d}?`;
+const VERDICT_WORDS: Record<string, string> = { crawled: "crawled", "blocked-tos": "terms ban automation", "agents-not-welcome": "agents not welcome", error: "could not be crawled" };
+function merchantDesc(row: IndexRow, raw: Record<string, unknown>): string {
+  const c = rowToCompact(row, "");
+  const pays = uniquePayLabels([...c.pay.online, ...c.pay.instore, ...c.pay.unscoped]).slice(0, 5);
+  const parts = [`${row.d} on KlickyMart: ${VERDICT_WORDS[row.status] ?? row.status}`];
+  if (row.status === "crawled") { parts.push(row.guest === 1 ? "guest checkout" : row.guest === 0 ? "account required" : "guest checkout unknown"); if (row.ag) parts.push(`agent access ${row.ag}`); }
+  if (pays.length) parts.push(`pays: ${pays.join(", ")}`);
+  void raw;
+  return `${parts.join("; ")}. Signed record checked ${new Date(row.ts * 1000).toISOString().slice(0, 10)}.`;
+}
+/** Honest fields only: the store's domain and URL, and that KlickyMart's page is about it. No ratings. */
+const merchantLd = (row: IndexRow, origin: string) => [{ "@context": "https://schema.org", "@type": "WebPage", name: `Can agents shop at ${row.d}?`, url: `${origin}/merchant/${row.d}`, dateModified: new Date(row.ts * 1000).toISOString(),
+  about: { "@type": "OnlineStore", name: row.d, url: `https://${row.d}/` }, isPartOf: { "@type": "WebSite", name: "KlickyMart", url: `${origin}/` } }];
 export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null, community?: Community, tipped?: TippedMap): string {
   const raw = parseRaw(row.raw_json);
   const reviewsBlock = renderCommunitySection(community) + renderReviewsSection(row.d, reviews, aTag ?? null, tipped);
@@ -307,7 +321,7 @@ ${src ? `<p><a href="${esc(src)}" rel="nofollow noopener">Source</a></p>` : ""}
 ${renderWhy(raw)}
 <p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>
 ${reviewsBlock}`;
-    return pageLayout({ title: row.name ?? row.d, origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
+    return pageLayout({ title: merchantTitle(row), description: merchantDesc(row, raw), jsonLd: merchantLd(row, origin), origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
   }
 
   const anwBlock = row.status === "agents-not-welcome" || row.status === "error"
@@ -334,9 +348,9 @@ ${renderV5(raw)}
 ${reviewsBlock}
 <div class="km-callout"><p>Run this store? You can confirm your identity and publish your own record. <a href="/claim?domain=${esc(row.d)}">Claim this domain</a></p></div>
 <p><a href="https://github.com/FloppyKit/klickymart/issues/new?title=${issueTitle}&amp;body=${issueBody}">Report correction</a></p>
-<script type="application/ld+json">${jsonForScript({ "@context": "https://schema.org", "@type": "Organization", name: row.name ?? row.d, url: `https://${row.d}/` })}</script>`;
+`;
 
-  return pageLayout({ title: row.name ?? row.d, origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
+  return pageLayout({ title: merchantTitle(row), description: merchantDesc(row, raw), jsonLd: merchantLd(row, origin), origin, version: "—", tsMin: row.ts, tsMax: row.ts, body, path: `/merchant/${row.d}` }, shell);
 }
 
 function renderPayTable(raw: Record<string, unknown>): string {
