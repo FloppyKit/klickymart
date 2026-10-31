@@ -15,7 +15,7 @@ const O = "https://example.com";
 describe("R11-001 checkout-blocked is consistent across surfaces", () => {
   it("store card and row flags say checkout-blocked for walmart.com (bot wall)", async () => {
     const snap = await realSnap();
-    const card = storeCard(snap, "walmart.com") as Record<string, any>;
+    const card = storeCard(snap, "walmart.com", O) as Record<string, any>;
     expect(card.verdict).toBe("checkout-blocked");
     const f = rowFlags({ store: card } as any);
     expect(f.agent_usable).toBe(false);
