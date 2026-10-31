@@ -212,6 +212,7 @@ export function llmsLinkSections(origin: string): string {
 - [Check one store](${origin}/check?domain=example.com): "can my agent shop here?"
 - [Landed cost](${origin}/landed?zip=60601&q=headphones): price + shipping + tax to a ZIP
 - [Export](${origin}/export.ndjson): all signed records (CC0)
+- [Dataset on GitHub](https://github.com/FloppyKit/klickymart-dataset): CC0 snapshot with schema and provenance
 
 ## Optional
 - [Full guide](${origin}/llms-full.txt): this file plus MCP tool schemas, the OpenAPI path list and the crawl rubric

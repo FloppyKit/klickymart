@@ -73,7 +73,8 @@ export function datasetJsonLd(origin: string): unknown {
     distribution: [
       { "@type": "DataDownload", encodingFormat: "application/x-ndjson", contentUrl: `${origin}/export.ndjson` },
       { "@type": "DataDownload", encodingFormat: "application/json", contentUrl: `${origin}/q` },
-    ] };
+      { "@type": "DataDownload", encodingFormat: "application/x-ndjson", contentUrl: "https://raw.githubusercontent.com/FloppyKit/klickymart-dataset/main/data/records.ndjson" },
+    ], sameAs: ["https://github.com/FloppyKit/klickymart-dataset"] };
 }
 
 export function layout(o: LayoutOpts): string {
