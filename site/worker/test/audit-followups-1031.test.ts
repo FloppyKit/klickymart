@@ -69,3 +69,15 @@ describe("#33 newer unsigned probe results", () => {
     if (rc) { expect(rc.listing_flag).toBeNull(); expect(rc.bolt11_no_browser.verified).toBe(false); expect(String(rc.bolt11_no_browser.reason)).toMatch(/x402|no Lightning/); }
   });
 });
+
+describe("#21/#29/#31 store checkout quotes", () => {
+  it("uses the store's own quote for shipping and tax instead of our estimate", async () => {
+    const { landedFor } = await import("../src/landed");
+    const raw = { ship: { ships_us: true, free_min_usd: null }, landed: { store_quotes: [{ state: "KS", subtotal: 21.99, shipping: 0, tax: 0, total: 21.99, method: "ucp-checkout", checked_at: "2026-10-31T05:43:00Z" }] } };
+    const l = landedFor(raw, "66061", 21.99) as any;
+    expect(l.est_tax).toBe(0); expect(l.shipping.usd).toBe(0); expect(l.est_total).toBe(21.99);
+    expect(l.est_total_label).toBe("store-quoted shipping and tax"); expect(l.tax_source.method).toBe("store checkout quote");
+    const e = landedFor({ ship: { ships_us: true } }, "66061", 21.99) as any;
+    expect(e.est_total).toBeNull(); expect(e.ship_quote_note).toMatch(/no quote text|per-ZIP/);
+  });
+});

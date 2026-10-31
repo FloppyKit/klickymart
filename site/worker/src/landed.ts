@@ -72,6 +72,11 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
   const lc = (raw.landed as { ship_quotes?: { zip?: string; amount: number; method?: string; src?: string; checked_at?: string }[] } | undefined) ?? {};
   const quote = (lc.ship_quotes ?? []).find((q) => q.zip === zip) ?? (lc.ship_quotes ?? [])[0] ?? null;
   const freeShip = s.free_min_usd !== null && typeof price === "number" ? price >= s.free_min_usd : null;
+  // #21/#29: the store's own checkout quote (e.g. its UCP checkout, read by KlickyBot's gated crawl; no order placed). When it
+  // has a tax figure for this ZIP's state we use it and do not apply our estimate.
+  type StoreQuote = { zip?: string; state?: string; subtotal?: number; shipping?: number | null; tax?: number | null; total?: number | null; method?: string; src?: string; checked_at?: string };
+  const sqs = ((raw.landed as { store_quotes?: StoreQuote[] } | undefined)?.store_quotes ?? []).filter((q) => q && (q.zip === zip || (q.state && q.state === st)));
+  const storeQuote = sqs.find((q) => q.zip === zip) ?? sqs[0] ?? null;
   const out: Record<string, unknown> = {
     zip, state: st,
     tax: t ? { state_rate_pct: t[0], avg_combined_rate_pct: t[1], source: "estimated", src: TAX_SRC, note: "state rate plus population-weighted average local rate (Tax Foundation, July 1 2026); the exact rate depends on the street address" } : null,
@@ -79,6 +84,8 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
     ships_us: s.ships_us,
     free_ship_min_usd: s.free_min_usd,
     ship_quote: quote,
+    ...(storeQuote ? { store_quote: { ...storeQuote, note: "the store's own checkout quote (no order placed); used ahead of our estimates" } } : {}),
+    ...(s.ships_us === true && !quote && !storeQuote ? { ships_us_evidence: (s as { ships_us_ev?: unknown }).ships_us_ev ?? null, ship_quote_note: (s as { ships_us_ev?: unknown }).ships_us_ev ? "ships to the US per the quoted store text; no per-ZIP shipping quote yet" : "ships_us comes from the store's shipping policy or crawl; no quote text or per-ZIP shipping quote is on file yet" } : {}),
   };
   if (typeof price === "number") {
     // Shipping, best evidence first: the product page's own structured data, then the store's free-shipping threshold, then a ZIP quote.
@@ -86,7 +93,8 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
     let label: "observed" | "policy-derived" | "unknown" = "unknown";
     const pol = raw.ship_policy as ShipPolicy | undefined;
     const ps = policyShip(pol, st, price);
-    if (offerShip && typeof offerShip.usd === "number") { ship = offerShip.usd; label = "observed"; shipSrc = { method: offerShip.me ?? "jsonld-shippingDetails", src: offerShip.src ?? null, note: offerShip.note ?? null }; }
+    if (storeQuote && typeof storeQuote.shipping === "number") { ship = storeQuote.shipping; label = "observed"; shipSrc = { method: storeQuote.method ?? "store-checkout-quote", src: storeQuote.src ?? null, checked_at: storeQuote.checked_at ?? null }; }
+    else if (offerShip && typeof offerShip.usd === "number") { ship = offerShip.usd; label = "observed"; shipSrc = { method: offerShip.me ?? "jsonld-shippingDetails", src: offerShip.src ?? null, note: offerShip.note ?? null }; }
     else if (quote) { ship = quote.amount; label = "observed"; shipSrc = { method: quote.method ?? "ship-quote", src: quote.src ?? null, checked_at: quote.checked_at ?? null }; }
     else if (ps) { ship = ps.usd; label = "policy-derived"; shipSrc = { method: "store shipping policy", rule: ps.rule.type, region: ps.rule.region ?? "US", ...(ps.rule.min_usd != null ? { min_usd: ps.rule.min_usd } : {}), quote: ps.rule.quote ?? null, src: pol?.src ?? null, checked_at: pol?.checked_at ?? null, note: `applies to ${st} for a $${price} cart; the store can change it at checkout` }; }
     else if (freeShip === true) { ship = 0; label = "policy-derived"; shipSrc = { method: "free-shipping-threshold", threshold_usd: s.free_min_usd }; }
@@ -102,13 +110,20 @@ export function landedFor(raw: Record<string, unknown>, zip: string, price?: num
       if (PHONE_CARD_RX.test(opts.title ?? "")) { tax = null; out.tax_policy = { status: "unknown", note: "prepaid phone/airtime cards and single-product vouchers can be taxed at sale; not determined" }; }
       else { tax = t ? 0 : null; out.tax_policy = { status: "not-taxed", ...GIFT_CARD_TAX }; }
     }
+    if (storeQuote && typeof storeQuote.tax === "number" && !opts.giftCard) {
+      // Scale the quoted tax to this price only when the quote was for the same subtotal; otherwise use the quoted rate.
+      const sub = typeof storeQuote.subtotal === "number" && storeQuote.subtotal > 0 ? storeQuote.subtotal : null;
+      tax = sub === null || Math.abs(sub - price) < 0.005 ? storeQuote.tax : Math.round(price * (storeQuote.tax / sub) * 100) / 100;
+      out.tax_source = { method: "store checkout quote", checked_at: storeQuote.checked_at ?? null, note: "the store's own figure; our state/local estimate is not applied" };
+    }
     out.est_tax = tax;
     const known = ship !== null && tax !== null;
     out.est_total = known ? Math.round((price + ship! + tax!) * 100) / 100 : null;
     const untaxed = out.tax_policy && (out.tax_policy as { status?: string }).status === "not-taxed";
-    out.est_total_label = known ? (untaxed ? `${label === "observed" ? "observed" : "policy-derived"} shipping, not taxed at sale` : label === "observed" ? "observed shipping + estimated tax" : "policy-derived shipping + estimated tax") : "unknown";
+    const sqTax = !!out.tax_source;
+    out.est_total_label = known && sqTax ? "store-quoted shipping and tax" : known ? (untaxed ? `${label === "observed" ? "observed" : "policy-derived"} shipping, not taxed at sale` : label === "observed" ? "observed shipping + estimated tax" : "policy-derived shipping + estimated tax") : "unknown";
     if (!known) out.est_total_note = `no total: ${[ship === null ? "shipping" : null, tax === null ? "tax" : null].filter(Boolean).join(" and ")} unknown; parts are given separately`;
-    else out.est_total_note = untaxed
+    else out.est_total_note = sqTax ? "item_price + the store's own quoted shipping and tax (from its checkout, no order placed)" : untaxed
       ? `item_price (what you pay${opts.giftCard ? ", fee included when the store shows one" : ""}) + shipping${ship === 0 && opts.digital ? " ($0, digital delivery)" : ""}; no sales tax (gift card sale is not taxed; see tax_policy)`
       : "item_price + shipping + estimated tax (state + average local rate; exact tax depends on the street address)";
   }

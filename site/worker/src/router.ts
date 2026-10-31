@@ -595,6 +595,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const d = String(i.domain ?? "").replace(/^www\./, ""); const v = st.get(d);
       if (i.store?.indexed === false && v) i.store = { ...i.store, check: "pending check", queued_at: v.queued_at,
         note: "Store not indexed yet. It is queued for KlickyBot's normal check: robots.txt first, then the store's terms (if they ban automation we record that and stop), then public pages only (pay methods incl. Shop Pay/Link, guest checkout, shipping policy). Facts stay null until then." };
+      if (i.store?.indexed === false && (i.est_total ?? i.landed?.est_total ?? null) === null) i.quote_hint = `No landed total yet. For the exact delivered price, ask the store's own checkout: Shopify stores publish an agent checkout at https://${d}/.well-known/ucp, whose create_checkout returns subtotal, shipping and tax for an address without placing an order. KlickyMart does not create checkouts on stores.`;
     }
   };
   /** Why a named store has no product rows (instead of a silent 0). */
