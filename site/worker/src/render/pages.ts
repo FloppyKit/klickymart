@@ -562,6 +562,7 @@ export function checkSummaryHtml(b: Record<string, unknown>): string {
   const verdict = String(b.verdict);
   const label: Record<string, string> = {
     reachable: "Yes: an agent could reach this store",
+    "checkout-blocked": "Pages load, but checkout is blocked for agents (bot wall or refusal)",
     "agents-not-welcome": "No: this store turns agents away",
     "blocked-tos": "No: its terms ban automated access",
     error: "Unknown: our crawler could not load it",

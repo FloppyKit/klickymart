@@ -3,9 +3,9 @@ import { walletFacts, findRow } from "./store-card";
 import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
-import { checkExtras, checkoutOf } from "./explain";
+import { checkExtras, checkoutOf, deriveVerdict } from "./explain";
 
-export type Verdict = "reachable" | "agents-not-welcome" | "blocked-tos" | "error" | "not-in-index";
+export type Verdict = "reachable" | "checkout-blocked" | "agents-not-welcome" | "blocked-tos" | "error" | "not-in-index";
 
 export function normalizeDomainInput(input: string): string | null {
   let s = input.trim().toLowerCase();
@@ -26,7 +26,8 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
   }
   const raw = parseRaw(row.raw_json);
   const c = rowToCompact(row, origin) as unknown as { pay: { online: string[]; instore: string[]; unscoped: string[] } };
-  const verdict: Verdict = row.status === "crawled" ? "reachable" : (row.status as Verdict);
+  const dv = deriveVerdict(row, raw);
+  const verdict: Verdict = dv.verdict;
   const evu = Array.isArray(raw.evu) ? (raw.evu as string[]) : [];
   const anw = raw.anw as { url?: string } | null | undefined;
   const evidence = evu[0] ?? anw?.url ?? (typeof raw.tos_url === "string" ? raw.tos_url : null);
@@ -37,6 +38,9 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       ...(row.d !== d && row.d !== candidates[1] ? { requested: d, matched_via: `${d} -> ${row.d} (same registrable domain)` } : {}),
       ...(payNotObserved(raw) ? { pay_note: PAY_NOT_OBSERVED } : {}),
       verdict,
+      pages_reachable: dv.pages_reachable,
+      verdict_reason: dv.verdict_reason,
+      primary_reason: dv.primary_reason,
       status: row.status,
       ...storeFacts(row),
       ...checkExtras(row, raw),

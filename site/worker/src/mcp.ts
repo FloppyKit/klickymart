@@ -193,7 +193,7 @@ export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
       },
       {
         name: "check_domain",
-        description: "Can my agent shop here? Verdict for one domain from the index (reachable, agents-not-welcome, blocked-tos, error, not-in-index), with checkout depth, pay methods, BTC grade, record time and evidence URL. Never triggers a live crawl.",
+        description: "Can my agent shop here? Verdict for one domain from the index (reachable, checkout-blocked, agents-not-welcome, blocked-tos, error, not-in-index; see verdict_reason and primary_reason), with checkout depth, pay methods, BTC grade, record time and evidence URL. Never triggers a live crawl.",
         inputSchema: {
           type: "object",
           required: ["domain"],

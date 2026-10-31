@@ -56,14 +56,49 @@ export function verdictSummary(row: IndexRow, raw: Record<string, unknown>): str
   const w = whyOf(raw);
   if (row.status === "crawled") {
     if (ap) return "Pages are reachable, but the store's terms and known practice restrict agent orders (see agent_ordering).";
+    const fb = checkoutMapOf(raw)?.first_blocker;
+    if (fb && CHECKOUT_BLOCKING_KINDS.has(fb.kind)) return `Pages load, but our guest checkout probe was stopped by a ${fb.kind}; checkout is blocked for agents.`;
     return "Reachable: robots.txt allows our crawler and public pages load.";
   }
   if (w?.msg) return w.msg + (w.retry_date ? ` We re-check after ${w.retry_date}.` : "");
   return row.status;
 }
 
+/** Probe blockers that mean an agent's guest checkout is actually stopped (pages load, checkout does not). */
+export const CHECKOUT_BLOCKING_KINDS = new Set(["bot-wall", "http-refusal"]);
+export type CheckVerdict = "reachable" | "checkout-blocked" | "agents-not-welcome" | "blocked-tos" | "error";
+/**
+ * One derivation for the /check verdict so the verdict never contradicts the blocker or the terms.
+ * - crawled + bot-wall/http-refusal first_blocker -> "checkout-blocked" (pages_reachable stays true).
+ * - crawled + agent_policy (terms restrict agent orders) -> verdict "reachable" for pages, but primary_reason = terms,
+ *   and any probe blocker is marked secondary.
+ */
+export function deriveVerdict(row: IndexRow, raw: Record<string, unknown>): { verdict: CheckVerdict; pages_reachable: boolean; verdict_reason: string; primary_reason: { source: "terms" | "checkout-probe" | "crawl" | "none"; kind: string; detail: string } } {
+  const ap = agentPolicyOf(raw);
+  const fb = checkoutMapOf(raw)?.first_blocker ?? null;
+  if (row.status !== "crawled") {
+    const w = whyOf(raw);
+    return { verdict: row.status as CheckVerdict, pages_reachable: false, verdict_reason: w?.msg ?? row.status, primary_reason: { source: row.status === "blocked-tos" ? "terms" : "crawl", kind: row.status, detail: w?.msg ?? row.status } };
+  }
+  if (ap) {
+    return { verdict: "reachable", pages_reachable: true, verdict_reason: `pages load, but the store's terms/known practice restrict agent orders (${ap.v}); that is the primary answer, not the checkout probe`, primary_reason: { source: "terms", kind: ap.v, detail: ap.summary } };
+  }
+  if (fb && CHECKOUT_BLOCKING_KINDS.has(fb.kind)) {
+    return { verdict: "checkout-blocked", pages_reachable: true, verdict_reason: `pages load, but our guest checkout probe hit a ${fb.kind}${fb.url ? ` at ${fb.url}` : ""}; an agent should not expect to check out here`, primary_reason: { source: "checkout-probe", kind: fb.kind, detail: fb.evidence ?? fb.kind } };
+  }
+  if (fb && fb.kind !== "none") {
+    return { verdict: "reachable", pages_reachable: true, verdict_reason: `pages load; the checkout probe stopped at ${fb.kind}, which is not a refusal (checkout depth may be unknown)`, primary_reason: { source: "checkout-probe", kind: fb.kind, detail: fb.evidence ?? fb.kind } };
+  }
+  return { verdict: "reachable", pages_reachable: true, verdict_reason: fb ? "pages load and the checkout probe found no blocker before the payment screen" : "pages load; no checkout probe recorded", primary_reason: { source: "none", kind: fb ? "none" : "no-probe", detail: "" } };
+}
+
 export function checkExtras(row: IndexRow, raw: Record<string, unknown>) {
   const ap = agentPolicyOf(raw);
+  const x5 = v5Extras(raw);
+  // When the terms are the real answer, mark the probe blocker secondary so it is not read as a clean checkout test.
+  const cm = ap && x5.checkout_map?.first_blocker && x5.checkout_map.first_blocker.kind !== "none"
+    ? { ...x5.checkout_map, first_blocker: { ...x5.checkout_map.first_blocker, secondary: true, secondary_note: "terms restrict agent orders (see agent_ordering / primary_reason); this probe blocker is secondary, not a clean checkout test" } }
+    : x5.checkout_map;
   return {
     summary: verdictSummary(row, raw),
     reason: whyOf(raw),
@@ -71,7 +106,8 @@ export function checkExtras(row: IndexRow, raw: Record<string, unknown>) {
     landed_cost: shipOf(raw),
     categories: Array.isArray(raw.category) ? raw.category : null,
     sub: Array.isArray(raw.sub) ? raw.sub : null,
-    ...v5Extras(raw),
+    ...x5,
+    checkout_map: cm,
   };
 }
 
