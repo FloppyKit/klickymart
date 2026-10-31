@@ -102,3 +102,21 @@ describe("#16/#38 protocols", () => {
     if (ac) expect((protocolsOf(ac.d, JSON.parse(ac.raw_json)) as any).acp.status).toBe("claimed");
   });
 });
+
+describe("#34/#35/#32 template and Link copy", () => {
+  it("warns on directory depth, not-observed at payment, and no narrative; help documents depth", async () => {
+    const { experienceTemplate } = await import("../src/experience");
+    const t = experienceTemplate({ domain: "bose.com", basis: "directory", depth: "checkout" }, null);
+    expect(t.ok && (t.value.warnings as string[]).join(" ")).toMatch(/basis=directory \(no visit\) with depth "checkout"/);
+    const u = experienceTemplate({ domain: "bose.com", basis: "visit", depth: "payment", shown_before_payment: "not-observed", narrative: "x" }, null);
+    expect(u.ok && (u.value.warnings as string[]).join(" ")).toMatch(/not-observed at depth "payment"/);
+    expect(u.ok && (u.value.warnings as string[]).join(" ")).not.toMatch(/no narrative/);
+    const r = await (await SELF.fetch("https://klickymart.com/report/template?domain=bose.com&basis=visit&depth=browse")).json<any>();
+    expect(r.param_help.depth).toMatch(/furthest step YOU reached/);
+    expect(r.param_help.narrative).toMatch(/free text/);
+  });
+  it("/q?pay=link with no results explains one-time Link cards", async () => {
+    const b = await (await SELF.fetch("https://klickymart.com/q?pay=link&reachable=1")).json<any>();
+    if (b.total === 0) expect(b.empty_note.try).toMatch(/pay=card/);
+  });
+});

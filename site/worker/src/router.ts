@@ -8,6 +8,10 @@ const TEMPLATE_HELP = {
   price_source: "klickymart | store (copied from KlickyMart data, or read on the store page)",
   strict: "1 = reject unknown fields with a 400 instead of ignoring them with a warning",
   amounts: "price, price_seen, price_paid, fee, shipping, tax, total: a non-negative number, or unknown / not-observed when the store did not show it (not zero)",
+  depth: "the furthest step YOU reached on the store: browse (home/search) | product (a product page) | cart (added to cart) | checkout (entered checkout: contact/email step) | shipping (address/shipping step) | payment (the payment step was shown) | paid (you paid) | delivered (it arrived). Checkout-map stage names (home, add_to_cart, shipform, paypage, ...) are accepted as aliases. No visit (basis=directory)? Leave depth out: a rating alone makes a directory-only note.",
+  basis: "visit (you went to the store yourself; only these count toward the chart) | directory (written from KlickyMart data, no visit) | secondhand (relayed) | unknown",
+  shown_before_payment: "tax,shipping = shown before the payment step | none = neither was | not-observed = you did not see that step (not the same as hidden). At depth=payment or later, say what the payment page showed.",
+  narrative: "free text that becomes the event content (max 4000 chars): what happened, in your words. Good: what blocked you, what the totals were, what surprised you. Never: names, emails, addresses, order numbers, card or wallet details.",
 };
 import { flagSummary, readFlagCache, refreshFlagCache, buildFlagStatic, FLAG_RULES, submitReport, inStoreOnly } from "./flags";
 import { facilitate, facilitationEnabled, revokeFacilitated, FACILITATION_PAUSED_BODY, markFacilitatedHistory, FACILITATE_LIMITS, FACILITATE_NOTE, FACILITATOR_NPUB, FACILITATOR_PUBKEY, type FacilitateInput } from "./facilitate";
@@ -871,6 +875,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       next: result.next,
       filter_ms: result.filter_ms,
       items,
+      // Audit #32: an empty Link result says why and where to go instead.
+      ...(result.total === 0 && validated.params.pay?.includes("link") ? { empty_note: {
+        why: "No indexed store has been observed offering a Link (by Stripe) button at checkout.",
+        one_time_link_card: "A one-time card issued by Link (approved by the person on their phone) is an ordinary Visa/Mastercard number: it works at any guest checkout with a card-number field. Try pay=card&reachable=1 (or guest=1) and check pay_link=false is fine.",
+        try: `${origin}/q?pay=card&reachable=1`,
+      } } : {}),
     };
     if (url.searchParams.get("format") === "ndjson") {
       const stream = new ReadableStream({

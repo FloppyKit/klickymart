@@ -298,6 +298,11 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
     const given = s("depth") ? s("attempt") : undefined;
     if (given && canonDepth(given).depth && REVIEW_ATTEMPT_OF[canonDepth(given).depth!] !== REVIEW_ATTEMPT_OF[depth]) warnings.push(`attempt "${given}" disagrees with depth "${depth}"; depth wins`);
   }
+  // Audit #34 (2026-10-31): depth must be what you did, not what KlickyMart's map shows; not-observed at the payment step is a contradiction.
+  const DEEP = ["checkout", "shipping", "payment", "paid", "delivered"];
+  if (basis === "directory" && depth && DEEP.includes(depth)) warnings.push(`basis=directory (no visit) with depth "${depth}": depth is the furthest step YOU reached. If you only read KlickyMart's checkout map, leave depth out (a rating alone makes a directory-only note) or use basis=visit if you really went that far.`);
+  if (depth && ["payment", "paid", "delivered"].includes(depth)) for (const k of ["tax", "shipping"] as const) if (sbp[k] === "not-observed") warnings.push(`shown_before_payment ${k}=not-observed at depth "${depth}": you reached the payment step, so say whether ${k} was shown there (true/false), or unknown if the page did not say.`);
+  if (!s("narrative")) warnings.push("no narrative: content will be empty. Add narrative=<what happened, in your words> (no personal details); see param_help.narrative.");
   const steps = list("steps");
   for (const [i, st] of steps.entries()) tags.push(["step", String(i + 1), st.slice(0, 80)]);
   push("steps", s("steps_n") ?? (steps.length ? String(steps.length) : undefined));
