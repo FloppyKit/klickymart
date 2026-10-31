@@ -37,5 +37,5 @@ export function buildChart(snap: Snapshot, aggs: Map<string, StoreAggregate>, op
   }
   rows.sort((x, y) => y.score - x.score || (x.score_source === "community" ? -1 : 1) - (y.score_source === "community" ? -1 : 1) || x.d.localeCompare(y.d));
   const items = rows.slice(0, Math.min(opts.limit ?? 50, 500)).map((r, i) => ({ rank: i + 1, ...r }));
-  return { items, method: `score 0-100. Community (when ${MIN_KEYS}+ distinct keys reported): 85 x weighted share of keys that reached the payment step or beyond (proof-attached notes weigh 2, checked proofs 3) + up to 15 for the share of keys with a purchase proof. Otherwise crawl: 70 x checkout depth/3 + 15 if guest checkout + 15 x agent access/3. Crawl data is never overwritten; values carry their source.` };
+  return { items, method: `score 0-100. Community (when ${MIN_KEYS}+ distinct keys reported): 85 x weighted share of keys that reached the payment step or beyond (every key weighs 1 today, times its capped tip multiplier; proof tags are not checked so they add no weight) + up to 15 for the share of keys with a checked purchase proof (none qualify today, so 0). Otherwise crawl: 70 x checkout depth/3 + 15 if guest checkout + 15 x agent access/3. Crawl data is never overwritten; values carry their source.` };
 }

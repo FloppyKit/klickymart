@@ -153,7 +153,11 @@ const DEPTH_RANK: Record<string, number> = { browse: 0, product: 0.5, cart: 1, c
 // K10-001 follow-up: verified-zap is demoted too. The receipt is signed by the store's own declared LNURL server, which the
 // owner can run and use to mint a receipt for a zap nobody paid. No proof_status currently counts as a purchase proof.
 export const NO_PURCHASE_PROOF = new Set(["facilitated-history", "facilitated-unverified", "replayed-proof", "verified-preimage", "verified-zap"]);
-export const proofWeight = (proof: string | null, status: string | null) => (status && NO_PURCHASE_PROOF.has(status) ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
+/** R12-101: an unchecked proof tag (cashu, order_hash, "proof-attached", "unverified-claim") is just text the author typed,
+ * so it weighs like a plain note (1). Only a status in CHECKED_PURCHASE_PROOF weighs 3; that set is empty today because
+ * no proof type is independently checked (see K10-001), so every note weighs 1. */
+export const CHECKED_PURCHASE_PROOF = new Set<string>();
+export const proofWeight = (_proof: string | null, status: string | null) => (status && CHECKED_PURCHASE_PROOF.has(status) && !NO_PURCHASE_PROOF.has(status) ? 3 : 1);
 type Row = Experience & { proof_status: string | null; walls_json?: string };
 
 export interface StoreAggregate {
@@ -176,7 +180,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   for (const r of sorted) if (r.structured && !latest.has(r.pubkey)) latest.set(r.pubkey, r);
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
-  const proofKeys = new Set(rows.filter((r) => r.proof && !(r.proof_status && NO_PURCHASE_PROOF.has(r.proof_status))).map((r) => r.pubkey));
+  const proofKeys = new Set(rows.filter((r) => !!r.proof_status && CHECKED_PURCHASE_PROOF.has(r.proof_status) && !NO_PURCHASE_PROOF.has(r.proof_status)).map((r) => r.pubkey));
   const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (flags?.get(r.id)?.tip_weight ?? (tips ? summarize(tips.get(r.id) ?? []).weight : 1)) * (flags?.get(r.id)?.weight ?? 1)));
   const noteFlags = rows.map((r) => flags?.get(r.id)).filter((x): x is NoteFlag => !!x);
   const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
@@ -209,7 +213,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
     tips: storeTips, flags: flagSummary(noteFlags),
     avg_rating_5: rated.length ? Math.round((rated.reduce((a, r) => a + r.rating5!, 0) / rated.length) * 10) / 10 : null,
     latest_at: sorted[0]?.created_at ?? null, notes_30d: rows.filter((r) => r.created_at >= nowS - 30 * 86400).length,
-    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Unchecked proof tags (cashu, order_hash) weigh 2; verified-preimage and verified-zap weigh 1 like a plain note (the store owner can mint both without anyone paying), and no proof type currently counts as a purchase proof; every key must pass the 7-day key-age gate whatever its proof, and the store owner's own keys never count; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Keys count only once KlickyMart has seen them for 7+ days (ingest time, not created_at) or when the note carries a checked payment proof. Crawl data is never overwritten.`,
+    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Every note weighs 1: unchecked proof tags (cashu, order_hash) are not checked, and verified-preimage and verified-zap weigh 1 like a plain note (the store owner can mint both without anyone paying), and no proof type currently counts as a purchase proof; every key must pass the 7-day key-age gate whatever its proof, and the store owner's own keys never count; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Keys count only once KlickyMart has seen them for 7+ days (ingest time, not created_at); no proof exempts a key. Crawl data is never overwritten.`,
   };
 }
 
@@ -226,7 +230,7 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
-    // KM-007: notes from keys younger than MIN_RANK_KEY_AGE_S by ingest time (and without a checked payment proof) don't count.
+    // KM-007: notes from keys younger than MIN_RANK_KEY_AGE_S by ingest time don't count; no proof exempts a key (K10-001).
     const seen = await keyFirstSeen(db); const nowS = Math.floor(now / 1000); const minAge = opts.minKeyAgeS ?? MIN_RANK_KEY_AGE_S;
     for (const [d, rows] of by) {
       // K10-001(c): the store's own declared keys (claimants, and zap_pubkey keys in the owner's 31420) never count for rank.

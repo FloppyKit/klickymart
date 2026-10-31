@@ -106,7 +106,7 @@ describe("facilitated unverified-claim weight (ShopBot r5)", () => {
     expect(st).toBe("facilitated-unverified");
     expect(proofWeight("order_hash", st)).toBe(1);
     expect(proofWeight(null, null)).toBe(1);
-    // a store/agent 421 with a plain attached proof still gets the usual proof-attached weight
-    expect(proofWeight("order_hash", "unverified-claim")).toBe(2);
+    // R12-101: a plain attached (unchecked) proof gets plain-note weight too
+    expect(proofWeight("order_hash", "unverified-claim")).toBe(1);
   });
 });

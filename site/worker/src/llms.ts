@@ -44,6 +44,7 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
    count toward verified_purchase_share or the "Verified (payment proof)" tier, and never skips the 7-day key-age gate.
    proof_status "verified-zap" is demoted the same way: the 9735 receipt is signed by the store's own declared LNURL server,
    which the owner can run and use to mint a receipt for a zap nobody paid. It weighs like a plain note too.
+   Unchecked proof tags (cashu, order_hash, "proof-attached", "unverified-claim") are not checked, so they weigh 1 like a plain note too.
    So NO proof type currently counts as a purchase proof or earns the "Verified (payment proof)" tier; trust_dimensions.payment_proof
    is always false (see payment_proof_note). No proof skips that gate, and notes from the store's own declared keys (claimants, zap_pubkey) never count for rank.
 4. Publish the signed event to any of our relays (wss://relay.damus.io, wss://nos.lol, wss://relay.primal.net). That

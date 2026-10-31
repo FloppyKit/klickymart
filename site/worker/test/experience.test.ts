@@ -46,8 +46,10 @@ describe("aggregate", () => {
     const proved = parseExperience(sign(422, exp([["order_hash", "b".repeat(64)]])), known); if (!proved.ok) throw 0;
     const a = aggregate(D, [{ ...bad.value, proof_status: null }, { ...proved.value, proof_status: null }] as never);
     expect(a.corroborated).toBe(true);
-    expect(a.success_score).toBeGreaterThan(0.5); // proof note weighs 2 vs 1
-    expect(proofWeight("order_hash", null)).toBe(2);
+    expect(a.success_score).toBe(0.5); // R12-101: an unchecked proof tag weighs 1, same as a plain note
+    expect(a.proof_keys).toBe(0);
+    expect(proofWeight("order_hash", null)).toBe(1);
+    expect(proofWeight("cashu", "proof-attached")).toBe(1);
     expect(proofWeight(null, null)).toBe(1);
   });
 });
