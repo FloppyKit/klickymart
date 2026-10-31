@@ -1,3 +1,4 @@
+import { hasProtocol, PROTOCOLS, protocolsOf, type Protocol } from "./protocols";
 import { AN_ALT_CATEGORIES, AN_CATS, anOf, railCheck } from "./agent-native";
 import { canonPay, PAY_ALIASES, PAY_GROUP_NAMES, Q_CATEGORIES } from "./vocab";
 import { queryTokens } from "./search-terms";
@@ -58,6 +59,7 @@ export interface QueryParams {
   an_cat?: string;
   rail_status?: string;
   bolt11_no_browser?: 1;
+  protocol?: string[];
   sort?: string[];
   limit?: number;
   cursor?: string;
@@ -75,7 +77,7 @@ const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
-  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "bolt11_no_browser", "sort", "limit", "cursor", "fields", "format",
+  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "bolt11_no_browser", "protocol", "sort", "limit", "cursor", "fields", "format",
 ]);
 
 export function validateQueryParams(searchParams: URLSearchParams): { ok: true; params: QueryParams } | { ok: false; param: string; message: string } {
@@ -285,6 +287,12 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     if (bnb !== "1") return { ok: false, param: "bolt11_no_browser", message: "bolt11_no_browser must be 1 (stores where our probe got a bolt11 invoice from a plain HTTP request, never paid)" };
     params.bolt11_no_browser = 1;
   }
+  const proto = searchParams.get("protocol");
+  if (proto) {
+    const ps = proto.toLowerCase().split(",").map((x) => x.trim()).filter(Boolean);
+    if (!ps.length || !ps.every((x) => (PROTOCOLS as readonly string[]).includes(x))) return { ok: false, param: "protocol", message: `protocol must be one or more of ${PROTOCOLS.join(", ")} (comma = all of them); matches declared, present or claimed (see /check protocols.*.status)` };
+    params.protocol = ps;
+  }
 
   const sort = searchParams.get("sort");
   params.sort = sort ? sort.split(",").map((s) => s.trim()) : DEFAULT_SORT;
@@ -438,6 +446,7 @@ function matches(row: IndexRow, p: QueryParams): boolean {
     if (!any) return false;
   }
 
+  if (p.protocol?.length) { let rw: Record<string, unknown> = {}; try { rw = JSON.parse(row.raw_json ?? "{}"); } catch { /* */ } const pr = protocolsOf(row.d, rw); if (!p.protocol.every((k) => hasProtocol(pr, k as Protocol))) return false; }
   if (p.bolt11_no_browser && railCheck(row.d)?.bolt11_no_browser.verified !== true) return false;
   if (p.agent_native !== undefined || p.an_cat || p.rail_status) {
     const a = anOf(row.d);

@@ -81,3 +81,24 @@ describe("#21/#29/#31 store checkout quotes", () => {
     expect(e.est_total).toBeNull(); expect(e.ship_quote_note).toMatch(/no quote text|per-ZIP/);
   });
 });
+
+describe("#16/#38 protocols", () => {
+  it("/q protocol filter and protocolsOf agree; declared UCP capabilities are shown", async () => {
+    const { protocolsOf, hasProtocol } = await import("../src/protocols");
+    const { UCP_CAPS } = await import("../src/ucp-caps");
+    const main = await ingestFromNdjsonText(REAL as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t" });
+    const an = await ingestFromNdjsonText(AN as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t-an" });
+    clearAgentNative(); mergeAgentNative(main.rows, an.rows);
+    const snap = rowsToSnapshot([...main.rows.values()], main.report.version, main.report.source);
+    const v = validateQueryParams(new URLSearchParams("protocol=ucp&limit=500")); if (!v.ok) throw new Error(v.message);
+    const items = (querySnapshot(snap, v.params) as any).items as any[];
+    expect(items.length).toBeGreaterThan(10);
+    for (const it of items.slice(0, 20)) { const row = snap.rows.find((r) => r.d === it.d)!; expect(hasProtocol(protocolsOf(row.d, JSON.parse(row.raw_json)), "ucp")).toBe(true); }
+    const dec = Object.entries(UCP_CAPS).find(([, c]) => c.ok);
+    if (dec) { const row = snap.rows.find((r) => r.d === dec[0]); if (row) { const p = protocolsOf(row.d, JSON.parse(row.raw_json)) as any; expect(p.ucp.status).toBe("declared"); expect(p.ucp.capabilities.length).toBeGreaterThan(0); } }
+    expect(validateQueryParams(new URLSearchParams("protocol=ap3")).ok).toBe(false);
+    const ac = snap.rows.find((r) => anOfRails(r.d));
+    function anOfRails(d: string) { return (anJson(d) as any)?.rails?.includes?.("acp"); }
+    if (ac) expect((protocolsOf(ac.d, JSON.parse(ac.raw_json)) as any).acp.status).toBe("claimed");
+  });
+});

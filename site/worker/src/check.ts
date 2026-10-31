@@ -1,3 +1,4 @@
+import { protocolsOf, PROTOCOLS_NOTE } from "./protocols";
 import { anJson } from "./agent-native";
 import { walletFacts, findRow } from "./store-card";
 import { storeFacts } from "./explain";
@@ -63,6 +64,7 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       record: `${origin}/records/${encodeURIComponent(row.d)}`,
       live_crawl: false,
       ...(anJson(row.d) ? { agent_native: anJson(row.d) } : {}),
+      protocols: { ...protocolsOf(row.d, raw), note: PROTOCOLS_NOTE },
     },
   };
 }
