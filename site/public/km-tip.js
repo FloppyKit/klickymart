@@ -150,34 +150,100 @@
   }
 
   // ---------- Cashu ----------
+  // R8-012: swapped proofs and change are money. They are written to this browser's IndexedDB BEFORE signing or
+  // publishing, stay there until you delete them, and can be exported or re-published from the recovery list below.
+  var VAULT_DB = "km-cashu-vault", VAULT_STORE = "nutzaps";
+  function vaultOpen() {
+    return new Promise(function (ok, no) {
+      if (!window.indexedDB) return no(new Error("this browser has no IndexedDB, so swapped ecash could not be saved safely; not swapping"));
+      var r = indexedDB.open(VAULT_DB, 1);
+      r.onupgradeneeded = function () { if (!r.result.objectStoreNames.contains(VAULT_STORE)) r.result.createObjectStore(VAULT_STORE, { keyPath: "id" }); };
+      r.onsuccess = function () { ok(r.result); }; r.onerror = function () { no(r.error || new Error("IndexedDB open failed")); };
+    });
+  }
+  function vaultTx(mode, fn) {
+    return vaultOpen().then(function (db) { return new Promise(function (ok, no) {
+      var tx = db.transaction(VAULT_STORE, mode), st = tx.objectStore(VAULT_STORE), out;
+      var q = fn(st); if (q) q.onsuccess = function () { out = q.result; };
+      tx.oncomplete = function () { db.close(); ok(out); }; tx.onerror = tx.onabort = function () { db.close(); no(tx.error || new Error("IndexedDB write failed")); };
+    }); });
+  }
+  function vaultPut(rec) { rec.updated_at = Date.now(); return vaultTx("readwrite", function (st) { return st.put(rec); }).then(function () { return rec; }); }
+  function vaultAll() { return vaultTx("readonly", function (st) { return st.getAll(); }).then(function (l) { return (l || []).sort(function (a, b) { return b.created_at - a.created_at; }); }); }
+  function vaultDel(id) { return vaultTx("readwrite", function (st) { return st.delete(id); }); }
+  function el(tag, text) { var n = document.createElement(tag); if (text != null) n.textContent = text; return n; }
+  function exportRec(rec) {
+    var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(rec, null, 2)], { type: "application/json" }));
+    a.download = "klickymart-nutzap-" + rec.id + ".json"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+  function publishRec(rec) {
+    if (!rec.event) return Promise.reject(new Error("no signed event saved yet; sign it first"));
+    return Promise.allSettled(pool().publish(rec.relays, rec.event)).then(function (rs) {
+      var okN = rs.filter(function (r) { return r.status === "fulfilled"; }).length;
+      rec.state = okN ? "published" : "publish-failed"; rec.published_to = okN; return vaultPut(rec).then(function () { renderVault(); return okN; });
+    });
+  }
+  function signRec(rec) {
+    return signer().sign(buildNutzap({ recipient: rec.recipient, e: rec.e, k: rec.k, mint: rec.mint, proofs: rec.locked, comment: rec.comment })).then(function (ev) {
+      if (!NT.verifyEvent(ev) || ev.kind !== 9321) throw new Error("signer returned an invalid event");
+      rec.event = ev; rec.state = "signed"; return vaultPut(rec);
+    });
+  }
+  function renderVault() {
+    var box = $("km-tip-vault"); if (!box) return;
+    vaultAll().then(function (l) {
+      box.textContent = ""; if (!l.length) { box.appendChild(el("p", "No saved Cashu tips in this browser.")); return; }
+      box.appendChild(el("p", "Saved Cashu tips in this browser (IndexedDB). Export any you have not finished; the change token is your money and the locked proofs are the recipient's."));
+      l.forEach(function (rec) {
+        var d = el("div"); d.className = "km-break";
+        d.appendChild(el("p", rec.sats + " sats at " + rec.mint + " · " + rec.state + (rec.published_to ? " to " + rec.published_to + " relay(s)" : "") + " · " + new Date(rec.created_at).toLocaleString()));
+        if (rec.change) d.appendChild(el("p", "Change token: " + rec.change));
+        var bx = el("button", "Export JSON"); bx.type = "button"; bx.addEventListener("click", function () { exportRec(rec); }); d.appendChild(bx);
+        if (rec.state !== "published") {
+          var br = el("button", rec.event ? "Retry publish" : "Sign and publish"); br.type = "button";
+          br.addEventListener("click", function () {
+            if (!confirm("Publish this nutzap (kind 9321) to " + rec.relays.join(", ") + "? It is public; the recipient redeems it.")) return;
+            (rec.event ? Promise.resolve(rec) : signRec(rec)).then(publishRec).then(function (n) { status(n ? "Nutzap published to " + n + " relay(s)." : "Publish failed on every relay. It is still saved here; retry or export it."); })
+              .catch(function (e) { status("Retry failed: " + e.message + ". The ecash is still saved here."); });
+          }); d.appendChild(br);
+        }
+        var bd = el("button", "Delete from this browser"); bd.type = "button";
+        bd.addEventListener("click", function () { if (confirm("Delete this record? If you have not exported the change token or published the nutzap, that ecash is lost.")) vaultDel(rec.id).then(renderVault); }); d.appendChild(bd);
+        box.appendChild(d);
+      });
+    }).catch(function (e) { box.textContent = "Saved Cashu tips unavailable: " + e.message; });
+  }
   $("km-tip-nutzap").addEventListener("click", function () {
     var x = t.info && t.info.cashu; if (!x) { status("Recipient is not set up for Cashu."); return; }
     if (!CT) { status("Cashu library failed to load."); return; }
     var token = $("km-tip-token").value.trim(); var sats = Number($("km-tip-sats").value);
     var mint; try { mint = normMint(CT.getTokenMetadata(token).mint); } catch (e) { status("Not a Cashu token: " + e.message); return; }
     var why = mintAllowed(mint, x.mints, ALLOWED_MINTS); if (why) { status(why); return; }
-    var s; try { s = signer(); } catch (e) { status(e.message); return; }
-    if (!confirm("Swap " + sats + " sats of this token at " + mint + " into ecash locked to the recipient? Your token is spent; you will get a change token.")) return;
-    var w = new CT.Wallet(mint); var locked, change;
-    status("Swapping at " + mint + "…");
-    w.loadMint().then(function () {
-      var dec = w.decodeToken(token);
-      return w.ops.send(sats, dec.proofs).asP2PK({ pubkey: x.p2pk }).run();
+    try { signer(); } catch (e) { status(e.message); return; }
+    var relays = x.relays.filter(function (r) { return ZAP_RELAYS.indexOf(r) !== -1; }); var fallback = !relays.length; if (fallback) relays = ZAP_RELAYS;
+    // One confirm, before the swap, covers both the swap and the publish (R8-012).
+    if (!confirm("Swap " + sats + " sats of this token at " + mint + " into ecash locked to the recipient, then sign and publish a public nutzap (kind 9321) to " + relays.join(", ") + "?" +
+      (fallback ? " Warning: none of the recipient's relays (" + x.relays.join(", ") + ") are reachable from this page, so it goes to these instead and they may not see it." : "") +
+      " Your token is spent; change and the locked ecash are saved in this browser first.")) return;
+    var rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), created_at: Date.now(), state: "swapping", mint: mint, sats: sats, recipient: t.recipient, e: t.e || null, k: t.k == null ? null : t.k, relays: relays, comment: $("km-tip-comment").value.slice(0, 280), input_token: token };
+    var w = new CT.Wallet(mint);
+    status("Saving, then swapping at " + mint + "…");
+    vaultPut(rec).then(function () { return w.loadMint(); }).then(function () {
+      return w.ops.send(sats, w.decodeToken(token).proofs).asP2PK({ pubkey: x.p2pk }).run();
     }).then(function (res) {
-      $("km-tip-token").value = "";
-      locked = CT.serializeProofs(res.send); change = res.keep && res.keep.length ? CT.getEncodedToken({ mint: mint, proofs: res.keep }) : "";
-      $("km-tip-change").textContent = change ? "Your change (save it now, it is money): " + change : "No change.";
-      return s.sign(buildNutzap({ recipient: t.recipient, e: t.e, k: t.k, mint: mint, proofs: locked, comment: $("km-tip-comment").value.slice(0, 280) }));
-    }).then(function (ev) {
-      if (!NT.verifyEvent(ev)) throw new Error("signer returned an invalid event");
-      var relays = x.relays.filter(function (r) { return ZAP_RELAYS.indexOf(r) !== -1; });
-      if (!relays.length) relays = ZAP_RELAYS;
-      if (!confirm("Publish this nutzap (kind 9321) to " + relays.join(", ") + "? It is public; the recipient redeems it.")) {
-        $("km-tip-change").textContent += " Locked (unpublished) nutzap event: " + JSON.stringify(ev); status("Not published. The locked ecash is in the event above; only the recipient can spend it."); return;
-      }
-      return Promise.allSettled(pool().publish(relays, ev)).then(function (rs) { status("Nutzap published to " + rs.filter(function (r) { return r.status === "fulfilled"; }).length + " of " + relays.length + " relays."); });
-    }).catch(function (e) { status("Cashu tip failed: " + e.message + (locked ? " Locked proofs: " + JSON.stringify(locked) : "")); });
+      rec.locked = CT.serializeProofs(res.send); rec.change = res.keep && res.keep.length ? CT.getEncodedToken({ mint: mint, proofs: res.keep }) : ""; rec.state = "swapped"; delete rec.input_token;
+      return vaultPut(rec);
+    }).then(function () {
+      $("km-tip-token").value = ""; $("km-tip-change").textContent = rec.change ? "Your change (saved in this browser; export it): " + rec.change : "No change."; renderVault();
+      return signRec(rec);
+    }).then(publishRec).then(function (n) {
+      status(n ? "Nutzap published to " + n + " of " + relays.length + " relays." : "Publish failed on every relay. The nutzap is saved below; retry or export it.");
+    }).catch(function (e) {
+      renderVault();
+      status("Cashu tip stopped: " + e.message + (rec.state === "swapping" ? " (the input token is saved below in case the swap went through)" : ". The ecash is saved below; retry or export it."));
+    });
   });
+  renderVault();
 
   var qp = new URLSearchParams(location.search);
   if (qp.get("tip")) open(qp.get("tip").toLowerCase(), qp.get("e"), qp.get("k"));

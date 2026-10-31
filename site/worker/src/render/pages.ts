@@ -725,7 +725,7 @@ export const APP_SRI = "sha384-YCWjKGmDqekIIfMYDRUp2jPUTmnKWu+hKGWQQUSx/fCNcd227
 /** /app: Nostr-app-style login and filtered feeds. All logic in /km-app.js (no inline script). */
 export const CASHU_SRI = "sha384-wT+CzErlyp/nNCHR3ITAifmXVCBrw7Gn3NRTcGQA8tJ/N0X150ARgtSZG/7fRKS7";
 export const QR_SRI = "sha384-MbJLkSnPHVLPbpmqCTjXjXV7LuNukmE8Lu2EDMBK3iVPKj2/H/s9AywCuL/ugU3o";
-export const TIP_SRI = "sha384-kHU0ud/n80xt8VETur/Z2YQ3x2WUeTts5GZSUJOlycr0nFlyiJdennG2LrmFWoPt";
+export const TIP_SRI = "sha384-rc6fDYKGQFpSpxTGG+I8jsI2lXBq5UpG78Eog08XcPROTTsr2VlJYoB73UtXcVPk";
 export function renderApp(origin: string, shell: PageShell, o: { mints: string[]; nwcRelays: string[] } = { mints: [], nwcRelays: [] }): string {
   const kinds: [number, string][] = [[31420, "31420 store records"], [421, "421 met-with-proof"], [422, "422 experience notes"], [420, "420 needs"], [1, "kind-1 #klickymart notes"]];
   const tags = ["btc", "x402", "agent-native", "phonereq"];
@@ -779,8 +779,9 @@ export function renderApp(origin: string, shell: PageShell, o: { mints: string[]
 <div id="km-tip-cashu" hidden>
 <p class="km-warning" role="note"><strong>Cashu tokens are bearer money.</strong> Your token is swapped in this browser, directly with the mint, into ecash only the recipient can spend. The mint holds the bitcoin. Save the change token shown afterwards.</p>
 <p><label for="km-tip-token">Cashu token (cashuA… / cashuB…)</label> <textarea id="km-tip-token" rows="3" spellcheck="false" autocomplete="off"></textarea></p>
-<p><button type="button" id="km-tip-nutzap">Lock to recipient and sign nutzap</button></p>
+<p><button type="button" id="km-tip-nutzap">Lock to recipient, save, sign and publish nutzap</button></p>
 <p id="km-tip-change" class="km-break"></p>
+<h3>Saved Cashu tips (this browser)</h3><div id="km-tip-vault" data-testid="tip-vault"></div>
 </div>
 <p id="km-tip-status" role="status" aria-live="polite"></p>
 </section>

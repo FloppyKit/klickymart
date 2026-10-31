@@ -180,6 +180,13 @@ describe("Cashu nutzaps (NIP-61)", () => {
     const j = await (await SELF.fetch(`https://klickymart.com/tip/nutzaps.json?e=${target}`)).json() as { note: string };
     expect(j.note).toMatch(/always claimed/);
   });
+  it("R8-012: swapped proofs and change go to IndexedDB before signing/publishing; one confirm before the swap; retry/export view", () => {
+    const src = TIPJS as string; const h = src.slice(src.indexOf('$("km-tip-nutzap").addEventListener'));
+    const order = ["confirm(", "vaultPut(rec).then", "w.ops.send", "rec.locked = ", "return vaultPut(rec)", "signRec(rec)", "publishRec"].map((x) => h.indexOf(x));
+    expect(order.every((i) => i >= 0)).toBe(true); expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(src).toMatch(/Retry publish/); expect(src).toMatch(/Export JSON/); expect(src).toMatch(/no IndexedDB[^"]*not swapping/);
+    expect(src).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+  });
   it("tip-ready without 10019 or lud16 is false; ingest follows 9321/10019 and keeps nutzaps only for held events", async () => {
     const tr = await (await SELF.fetch(`https://klickymart.com/tip-ready.json?pubkeys=${"77".repeat(32)}`)).json() as { items: any[] };
     expect(tr.items[0]).toMatchObject({ tip_ready: false, rails: { lightning: false, cashu: false }, cashu: null });
