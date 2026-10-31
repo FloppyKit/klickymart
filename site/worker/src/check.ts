@@ -4,7 +4,7 @@ import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
 import { TRUST_SCOPE_NOTE } from "./submissions";
-import { checkExtras, checkoutOf, deriveVerdict } from "./explain";
+import { checkExtras, checkoutOf, deriveVerdict, checkoutKnown } from "./explain";
 
 export type Verdict = "reachable" | "checkout-blocked" | "agents-not-welcome" | "blocked-tos" | "error" | "not-in-index";
 
@@ -41,6 +41,7 @@ export function checkDomain(snap: Snapshot, input: string, origin: string): { ok
       verdict,
       pages_reachable: dv.pages_reachable,
       verdict_reason: dv.verdict_reason,
+      checkout_known: checkoutKnown(row, raw), // false = the probe never established checkout depth (verdict covers pages only)
       primary_reason: dv.primary_reason,
       status: row.status,
       ...storeFacts(row),

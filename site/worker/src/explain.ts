@@ -96,6 +96,13 @@ export type CheckVerdict = "reachable" | "checkout-blocked" | "agents-not-welcom
  * - crawled + agent_policy (terms restrict agent orders) -> verdict "reachable" for pages, but primary_reason = terms,
  *   and any probe blocker is marked secondary.
  */
+/** Probe outcomes that say nothing about the store's checkout (the probe or network failed). */
+export const UNTESTED_KINDS = new Set(["network-error", "probe-error", "unclassified"]);
+/** True when the probe actually established how far a guest checkout gets. */
+export const checkoutKnown = (row: IndexRow, raw: Record<string, unknown>) => {
+  const fb = checkoutMapOf(raw)?.first_blocker ?? null;
+  return !!fb && !UNTESTED_KINDS.has(fb.kind) && row.co !== null && row.co !== undefined;
+};
 export function deriveVerdict(row: IndexRow, raw: Record<string, unknown>): { verdict: CheckVerdict; pages_reachable: boolean; verdict_reason: string; primary_reason: { source: "terms" | "checkout-probe" | "crawl" | "none"; kind: string; detail: string } } {
   const ap = agentPolicyOf(raw);
   const fb = checkoutMapOf(raw)?.first_blocker ?? null;
@@ -110,6 +117,9 @@ export function deriveVerdict(row: IndexRow, raw: Record<string, unknown>): { ve
     return { verdict: "checkout-blocked", pages_reachable: true, verdict_reason: `pages load, but our guest checkout probe hit a ${fb.kind}${fb.url ? ` at ${fb.url}` : ""}; an agent should not expect to check out here`, primary_reason: { source: "checkout-probe", kind: fb.kind, detail: fb.evidence ?? fb.kind } };
   }
   if (fb && fb.kind !== "none") {
+    // Customer audit 2026-10-31 (Scout, bestbuy): when the probe errored and co is null, say plainly that checkout is untested.
+    if (UNTESTED_KINDS.has(fb.kind) || row.co === null || row.co === undefined)
+      return { verdict: "reachable", pages_reachable: true, verdict_reason: `pages load, but CHECKOUT IS UNKNOWN: the checkout probe stopped at ${fb.kind} without reaching a verdict${row.co == null ? " (co is null)" : ""}; "reachable" here means pages only, not that an agent can check out`, primary_reason: { source: "checkout-probe", kind: fb.kind, detail: fb.evidence ?? fb.kind } };
     return { verdict: "reachable", pages_reachable: true, verdict_reason: `pages load; the checkout probe stopped at ${fb.kind}, which is not a refusal (checkout depth may be unknown)`, primary_reason: { source: "checkout-probe", kind: fb.kind, detail: fb.evidence ?? fb.kind } };
   }
   return { verdict: "reachable", pages_reachable: true, verdict_reason: fb ? "pages load and the checkout probe found no blocker before the payment screen" : "pages load; no checkout probe recorded", primary_reason: { source: "none", kind: fb ? "none" : "no-probe", detail: "" } };
