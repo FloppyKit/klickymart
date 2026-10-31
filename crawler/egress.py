@@ -3,7 +3,9 @@ Every destination (navigation, redirect hop, browser subresource, robots fetch) 
 credentials, and resolve only to globally routable addresses: no loopback, RFC1918, link-local/metadata
 (169.254.0.0/16), CGNAT, ULA, multicast or reserved ranges, no localhost/.local/.internal names and no odd IP
 notations (0x7f.0.0.1, 2130706433). install() wires it into Playwright: a route on every new context and a check of
-page.url after each goto. Known gap: DNS rebinding between this check and the browser's own lookup."""
+page.url after each goto. All browser traffic (every redirect hop, ctx.request.*) and urllib go through the in-process
+pinning proxy (egress_proxy.py), which resolves once and connects to the vetted IP, so DNS rebinding and redirects to
+internal hosts are refused before any byte is sent (R-C-001/002/003)."""
 import ipaddress, os, re, socket, threading, time, urllib.parse
 
 class EgressRefused(Exception):
@@ -61,12 +63,58 @@ def egress_check(url):
     if sp.username or sp.password: raise EgressRefused("egress: credentials in URL")
     if not public_host(sp.hostname): raise EgressRefused(f"egress: not a public internet host: {sp.hostname}")
 
+def _literal(h):
+    try: ipaddress.ip_address(h); return True
+    except ValueError: return False
+
+def vetted_addr(host, url=None):
+    """R-C-003: resolve ONCE and return the one public address to connect to (the proxy never re-resolves)."""
+    h = (host or "").strip().lower().rstrip(".").strip("[]")
+    bad = f"egress: not a public internet host: {h}"
+    if _literal(h):
+        if not public_host(h): raise EgressRefused(bad)
+        return h
+    if not h or h == "localhost" or h.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa")) \
+            or re.fullmatch(r"[0-9a-fx.]+", h) or not re.fullmatch(r"[a-z0-9.-]+", h):
+        raise EgressRefused(bad)
+    try: addrs = [i[4][0].split("%")[0] for i in socket.getaddrinfo(h, None, type=socket.SOCK_STREAM)]
+    except Exception as e: raise EgressRefused(f"egress: resolve failed for {h} ({type(e).__name__})")
+    if not addrs or not all(_addr_public(a, resolved=True) for a in addrs): raise EgressRefused(bad)
+    return addrs[0]
+
+PROXY_URL = None
+def start_egress_proxy():
+    """R-C-001/002/003: in-process pinning proxy; urllib is pointed at it through the standard proxy env vars."""
+    global PROXY_URL
+    if PROXY_URL: return PROXY_URL
+    import urllib.request, egress_proxy
+    PROXY_URL = egress_proxy.start(lambda host, url: vetted_addr(host, url))
+    for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"): os.environ[k] = PROXY_URL
+    for k in ("no_proxy", "NO_PROXY"): os.environ.pop(k, None)
+    urllib.request._opener = None
+    return PROXY_URL
+
 _installed = False
 def install():
     """Patch Playwright so every context routes requests through egress_check and every goto re-checks the final URL."""
     global _installed
     if _installed: return
-    from playwright.sync_api._generated import Browser, Page
+    from playwright.sync_api._generated import Browser, BrowserType, Page, APIRequestContext
+    proxy = start_egress_proxy()
+    def _proxied(k):
+        k = dict(k); k.setdefault("proxy", {"server": proxy})
+        k["args"] = list(k.get("args") or []) + ["--proxy-bypass-list=<-loopback>"]
+        return k
+    for name in ("launch", "launch_persistent_context"):
+        orig_l = getattr(BrowserType, name)
+        def wrap_l(self, *a, __orig=orig_l, **k): return __orig(self, *a, **_proxied(k))
+        setattr(BrowserType, name, wrap_l)
+    for name in ("get", "post", "head", "fetch", "put", "delete", "patch"):  # R-C-001: ctx.request.* checked too
+        orig_r = getattr(APIRequestContext, name, None)
+        if orig_r is None: continue
+        def wrap_r(self, u, *a, __orig=orig_r, **k):
+            egress_check(u if isinstance(u, str) else getattr(u, "url", str(u))); return __orig(self, u, *a, **k)
+        setattr(APIRequestContext, name, wrap_r)
     def route_handler(route):
         try: egress_check(route.request.url)
         except EgressRefused: return route.abort("blockedbyclient")

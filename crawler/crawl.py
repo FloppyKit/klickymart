@@ -8,6 +8,7 @@ import json, re, sys, time, hashlib, argparse, os, urllib.robotparser
 from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
 from extract import extract_payments, scope_split
+from url_redact import redact, redact_str, clean_url  # R-C-006: redact at write time, not only before signing
 from egress import egress_check, install as _egress_install
 _egress_install()  # KIMI-007: every Playwright context/goto in crawl.py and tos.py goes through the egress guard
 
@@ -119,7 +120,7 @@ def visit(ctx, site, url, step, ev_dir, rec):
         hidden = page.evaluate(HIDDEN_JS)
         if hidden: text += "\n[collapsed]\n" + "\n".join(dict.fromkeys(hidden))
         os.makedirs(os.path.join(os.path.dirname(ev_dir), "text"), exist_ok=True)
-        open(os.path.join(os.path.dirname(ev_dir), "text", f"{site['d']}_{step}_{hashlib.sha1(url.encode()).hexdigest()[:8]}.txt"), "w").write(url + "\n" + title + "\n\n" + text)
+        open(os.path.join(os.path.dirname(ev_dir), "text", f"{site['d']}_{step}_{hashlib.sha1(url.encode()).hexdigest()[:8]}.txt"), "w").write(redact_str(clean_url(url)) + "\n" + title + "\n\n" + redact_str(text))
         res["chars"] = len(text)
         links = [(a.get("text") or "", a.get("href")) for a in page.eval_on_selector_all(
             "a[href]", "els=>els.map(e=>({text:e.innerText.trim().slice(0,80),href:e.href}))")]
@@ -248,7 +249,7 @@ def main():
             try: rec = crawl_site(browser, s, a.out + "/evidence", tosmap.get(s["d"]))
             except Exception as e:
                 rec = {"d": s["d"], "v": "0.2", "ts": now(), "ag": None, "err": str(e)[:200], "ar": []}
-            with open(outp, "a") as f: f.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            with open(outp, "a") as f: f.write(json.dumps(redact(rec), separators=(",", ":")) + "\n")
             line = f"{s['d']}: status={rec.get('status','crawled')} ag={rec.get('ag')} ar={[x['c'] for x in rec['ar']]} pay={rec.get('pay')} fetch={rec.get('fetch')} {time.time()-t0:.0f}s"
             print(line, flush=True); log.write(line + "\n"); log.flush()
         browser.close()
@@ -257,6 +258,6 @@ def main():
     for l in open(outp):
         if l.strip(): r = json.loads(l); recs[r["d"]] = r
     with open(outp, "w") as f:
-        for r in recs.values(): f.write(json.dumps(r, separators=(",", ":")) + "\n")
+        for r in recs.values(): f.write(json.dumps(redact(r), separators=(",", ":")) + "\n")
 
 if __name__ == "__main__": main()
