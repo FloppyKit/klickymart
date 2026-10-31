@@ -20,19 +20,25 @@ test("story line is computed from live data", async ({ page, request }) => {
   expect(story.startsWith(`${reachable} of `)).toBe(true);
 });
 
-test("store and shoppers follow reach and btc overrides", async ({ page }) => {
+test("store and shoppers follow reach and btc overrides", async ({ page, request }) => {
+  // Shopper count scales with dataset size (km-landscape.js shopperCounts), so derive it from /stats.
+  const records = ((await (await request.get(`${base}/stats`)).json()) as { records: number }).records;
+  const shoppersAt = (reach: number) => Math.max(0, Math.min(8, Math.round(Math.round(reach * records) / 20)));
+  const lowN = shoppersAt(0.2);
+  const highN = shoppersAt(0.9);
+  expect(lowN).toBeGreaterThanOrEqual(3);
   await darkHome(page, "?reach=0.2&btc=0.1&nomotion=1");
   const low = await page.locator("#km-landscape").evaluate((c) => ({ ...(c as HTMLCanvasElement).dataset }));
   expect(low.storeOpen).toBe("0");
-  expect(Number(low.shoppers)).toBe(3);
-  expect(Number(low.shoppersOrange)).toBe(0);
+  expect(Number(low.shoppers)).toBe(lowN);
+  expect(Number(low.shoppersOrange)).toBe(Math.round(0.1 * lowN));
 
   await page.goto(`${base}/?reach=0.9&btc=0.8&nomotion=1`);
   await waitFor2dLandscape(page);
   const high = await page.locator("#km-landscape").evaluate((c) => ({ ...(c as HTMLCanvasElement).dataset }));
   expect(high.storeOpen).toBe("1");
-  expect(Number(high.shoppers)).toBe(8);
-  expect(Number(high.shoppersOrange)).toBe(6);
+  expect(Number(high.shoppers)).toBe(highN);
+  expect(Number(high.shoppersOrange)).toBe(Math.round(0.8 * highN));
   expect(Number(high.storeLitWindows)).toBeGreaterThan(Number(low.storeLitWindows));
 });
 

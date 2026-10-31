@@ -45,6 +45,8 @@ async function expectDarkBackgroundRule(page: Page, path: string): Promise<void>
       if (el.classList.contains("km-skip")) return;
       if (el.closest(".km-landscape-wrap")) return;
       if (el.classList.contains("km-grade")) return;
+      // n-of-N data bars are an intentional BTC-orange accent fill, not a surface.
+      if (el.classList.contains("km-hbar")) return;
       const tag = el.tagName;
       if (tag === "OPTION") return;
       const bg = getComputedStyle(el).backgroundColor;
@@ -222,12 +224,14 @@ test("search start9 finds start9.com", async ({ page }) => {
   await expect(page.getByText("start9.com", { exact: false })).toBeVisible();
 });
 
-test("stats reflects 250 real records", async ({ request }) => {
+test("stats reflects at least the 250-site pilot", async ({ request }) => {
   const res = await request.get(`${base}/stats`);
   expect(res.ok()).toBeTruthy();
   const j = (await res.json()) as { records?: number; by_status?: Record<string, number> };
-  expect(j.records).toBe(250);
-  expect(j.by_status?.crawled).toBe(121);
+  // Dataset grows past the pilot; assert sane lower bounds, not an exact size.
+  expect(j.records ?? 0).toBeGreaterThanOrEqual(250);
+  expect(j.by_status?.crawled ?? 0).toBeGreaterThanOrEqual(121);
+  expect(j.by_status?.crawled ?? 0).toBeLessThanOrEqual(j.records ?? 0);
 });
 
 test("default homepage lists real merchants only (no .example)", async ({ page }) => {
