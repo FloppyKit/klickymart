@@ -64,3 +64,17 @@ describe("F3 network-error staleness", () => {
     expect(c.staleness_note).toMatch(/last_good_co/);
   });
 });
+
+describe("F7 chart: crawl-observed rails are pay_seen, not pay_used", async () => {
+  const { buildChart } = await import("../src/chart");
+  it("with no community data, pay_used is null (community) and pay_seen carries the crawl list", async () => {
+    const s = await snap();
+    const ch = buildChart(s, new Map());
+    const withPay = ch.items.find((i) => Array.isArray(i.values.pay_seen?.value) && (i.values.pay_seen!.value as string[]).length)!;
+    expect(withPay).toBeTruthy();
+    expect(withPay.values.pay_seen!.source).toBe("crawl");
+    expect(withPay.values.pay_used!.value).toBeNull();
+    expect(withPay.values.pay_used!.source).toBe("community");
+    for (const i of ch.items) expect(i.values.pay_used!.source).toBe("community");
+  });
+});

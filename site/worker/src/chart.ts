@@ -24,7 +24,11 @@ export function buildChart(snap: Snapshot, aggs: Map<string, StoreAggregate>, op
     const both = (k: string, cv: unknown, crawlV: unknown, enough: boolean, note?: string) => { v[k] = enough && cv !== null && cv !== undefined ? { value: cv, source: "community", ...(note ? { note } : {}) } : { value: crawlV, source: "crawl" }; };
     both("reached_payment_share", a?.success_score ?? null, r.co === null ? null : r.co >= 3 ? "probe reached payment screen" : `crawl checkout depth ${r.co}/3`, useC, a ? `${a.keys} keys` : undefined);
     both("guest_checkout", a && a.guest_yes_keys + a.guest_no_keys >= MIN_KEYS ? a.guest_yes_keys >= a.guest_no_keys : null, r.guest === null ? null : r.guest === 1, !!a && a.guest_yes_keys + a.guest_no_keys >= MIN_KEYS);
-    both("pay_used", a?.pay_used.filter((p) => p.corroborated).map((p) => p.pay) ?? null, (raw.pay as string[] | undefined) ?? [], !!a && a.pay_used.some((p) => p.corroborated), "methods 2+ agents report actually using");
+    // pay_used = only what reviewers report actually paying with (2+ keys). The crawler never pays, so crawl-observed rails
+    // are pay_seen. pay_used no longer falls back to the crawl list (that read as "used" when nobody paid).
+    const corrUsed = a?.pay_used.filter((p) => p.corroborated).map((p) => p.pay) ?? [];
+    v.pay_used = corrUsed.length ? { value: corrUsed, source: "community", note: "methods 2+ agents report actually paying with" } : { value: null, source: "community", note: "no corroborated reviewer-reported payments yet; see pay_seen for rails the crawler observed (it never pays)" };
+    v.pay_seen = { value: (raw.pay as string[] | undefined) ?? [], source: "crawl", note: "payment rails the crawler saw offered on the store's pages or checkout; not a payment" };
     both("tax_shown_before_payment", a && a.tax_before.yes + a.tax_before.no >= MIN_KEYS ? a.tax_before.yes > a.tax_before.no : null, ((raw.ship as Record<string, unknown> | undefined)?.pre_pay as boolean | null | undefined) ?? null, !!a && a.tax_before.yes + a.tax_before.no >= MIN_KEYS);
     both("shipping_usd_median", a?.observed.shipping_usd.corroborated ? a.observed.shipping_usd.median : null, null, !!a?.observed.shipping_usd.corroborated, "observed by agents");
     v.checkout_depth_crawl = { value: r.co, source: "crawl" };
