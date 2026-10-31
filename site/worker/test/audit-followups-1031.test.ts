@@ -120,3 +120,16 @@ describe("#34/#35/#32 template and Link copy", () => {
     if (b.total === 0) expect(b.empty_note.try).toMatch(/pay=card/);
   });
 });
+
+describe("POST /reviews only accepts validly signed events (script UAs are allowed past BIC only here)", () => {
+  it("rejects unsigned, tampered and bad-sig bodies; accepts a signed dry run", async () => {
+    const good = sign([["r", "unindexed-shop-example.com"], ["basis", "directory"], ["rating", "3", "5"]]);
+    const { id, sig, ...unsigned } = good;
+    for (const [name, body] of [["unsigned", unsigned], ["no sig", { ...good, sig: undefined }], ["bad sig", { ...good, sig: "0".repeat(128) }], ["tampered", { ...good, content: "changed" }], ["junk", { hello: "world" }]] as const) {
+      const r = await post(body);
+      expect(r.status, name).toBe(400);
+      expect((await r.json<any>()).ok, name).toBe(false);
+    }
+    expect((await post(good)).status).toBe(200);
+  });
+});
