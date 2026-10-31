@@ -116,6 +116,24 @@ export const HISTORY_STATUS = "facilitated-history";
 /** After a store claims its listing, facilitated 421s (signed by our facilitator key) are history only: notes and reviews that
  * cite one keep it visible but get proof_status "facilitated-history" (no proof weight, never store-confirmed, not a
  * verified payment). Idempotent; call after a claim and after storing notes/reviews for a claimed domain. */
+/** KM-002 follow-up: revoke facilitated 421s (default: every 421 KlickyMart signed as facilitator, i.e. all signed before the
+ * pause) and demote any note that used one as payment proof from verified-* to facilitated-unverified (plain-note weight,
+ * never a Verified tier). Idempotent. Returns {revoked, demoted}. Migration 0015 runs the same SQL once on deploy. */
+export async function revokeFacilitated(db: D1Database, opts: { ids?: string[]; reason?: string; now?: number } = {}): Promise<{ revoked: number; demoted: number }> {
+  const now = Math.floor((opts.now ?? Date.now()) / 1000); const reason = opts.reason ?? "facilitated-before-pause";
+  const ids = opts.ids ?? ((await db.prepare("SELECT id FROM nostr_events WHERE kind = ? AND pubkey = ?").bind(NOSTR_KIND_FULFILLMENT, FACILITATOR_PUBKEY).all<{ id: string }>()).results ?? []).map((r) => r.id);
+  let revoked = 0, demoted = 0;
+  for (const id of ids) {
+    const r = await db.batch([
+      db.prepare("INSERT OR IGNORE INTO revoked_events (id, reason, revoked_at) VALUES (?,?,?)").bind(id, reason, now),
+      db.prepare("UPDATE reviews SET proof_status = 'facilitated-unverified' WHERE fulfillment = ? AND IFNULL(proof_status,'') LIKE 'verified%'").bind(id),
+      db.prepare("UPDATE experiences SET proof_status = 'facilitated-unverified' WHERE instr(raw_json, ?) > 0 AND IFNULL(proof_status,'') LIKE 'verified%'").bind(id),
+    ]);
+    revoked += r[0].meta?.changes ?? 0; demoted += (r[1].meta?.changes ?? 0) + (r[2].meta?.changes ?? 0);
+  }
+  return { revoked, demoted };
+}
+
 export async function markFacilitatedHistory(db: D1Database, d: string): Promise<number> {
   try {
     // KIMI-004: any claim (NIP-05 claims table or an active DNS store_claims row) turns facilitated 421s into history.

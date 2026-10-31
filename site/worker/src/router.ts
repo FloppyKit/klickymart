@@ -810,7 +810,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
       const badge = tierBadgeHtml((await tiersFor([row.d])).get(row.d));
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(/(<h1>[^<]*<\/h1>)/, (m) => m + badge), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(H1_RE, (m) => spliceBadge(m, badge)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -1094,3 +1094,9 @@ async function exTake(db: D1Database, id: string, pubkey: string): Promise<boole
   const hit = await takeAll(db, [{ k: `ex:ev:${id}`, limit: 1, ttlS: 2 * 86400 }, { k: `ex:pk:${pubkey}:${new Date().toISOString().slice(0, 10)}`, limit: REVIEW_LIMITS.perPubkeyPerDay, ttlS: 2 * 86400 }]);
   return !!hit && !hit.k.startsWith("ex:ev:");
 }
+
+/** KM-R1-001: the badge carries merchant-controlled text, so it must never be a String.replace replacement *string*
+ * ("$`", "$&", "$'" would expand). Always splice with a replacer function. */
+export const H1_RE = /(<h1>[^<]*<\/h1>)/;
+export function spliceBadge(h1: string, badge: string): string { return h1 + badge; }
+export function insertAfterH1(html: string, badge: string): string { return html.replace(H1_RE, (m) => spliceBadge(m, badge)); }
