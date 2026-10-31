@@ -21,7 +21,7 @@ export const BLOCKER_DESCRIPTIONS: Record<string, string> = {
   "login-wall": "checkout requires signing in or creating an account (guest checkout not offered)",
   "bot-wall": "a challenge or captcha page appeared; KlickyBot never tries to get past it",
   "http-refusal": "the site answered 403, 429 or 503 to our honest user agent",
-  "network-error": "connection resets or timeouts on every retry; not a refusal, so co stays null and a retry is scheduled",
+  "network-error": "connection resets or timeouts on every retry; not a refusal, so co stays null and a retry is scheduled (sooner than other blockers); /check checkout_depth shows last_successful_probe and last_good_co from the last good probe when one exists",
   "no-product-link": "the probe could not find a link to any product page from the public pages it may read",
   "no-add-to-cart": "a product page loaded but no add-to-cart control was found or it did nothing",
   "form-gate": "the checkout form was reached but a required field (needs: email, phone, address...) stopped the probe; it never types real personal data",

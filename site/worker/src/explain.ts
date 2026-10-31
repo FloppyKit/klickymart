@@ -41,12 +41,34 @@ export function checkoutOf(row: IndexRow, raw: Record<string, unknown>) {
     steps: ((raw.checkout_map as { steps?: { n: number; stage: string; url?: string | null; action?: string | null; status?: unknown }[] } | undefined)?.steps ?? []).map((x) => ({ n: x.n, stage: x.stage, url: x.url ?? null, action: x.action ?? null, status: x.status ?? null })),
     steps_src: raw.checkout_map ? "checkout_map (probe)" : null,
     ...(raw.checkout_map ? {} : { steps_note: probe?.step_reached ? `the probe reached "${probe.step_reached}" but no per-step map was recorded for this store yet` : "no checkout probe recorded for this store" }),
+    ...networkStaleness(row, raw),
     guest: row.guest === null ? null : row.guest === 1,
     guest_source: (raw.guest_src as string | undefined) ?? null,
     guest_evidence: (raw.guest_ev as { url: string; q: string } | undefined) ?? null,
     agent_access: row.ag,
     probe: probe ? { step_reached: probe.step_reached ?? null, stopped_at: probe.pm_visible ?? null, note: probe.n ?? (raw.co_n as string | undefined) ?? null, date: iso(probe.ts) } : null,
     scale: "co: 3 guest reaches payment screen in <=3 pages, 2 guest but more steps or gated by address/phone, 1 account required, 0 bot wall before cart, null not observed",
+  };
+}
+
+/**
+ * When the newest probe failed with a network error, co is null for that probe only. Expose the last good probe
+ * (checkout_map.last_good, carried forward by the crawler) instead of silently dropping it, plus the retry date.
+ */
+export function networkStaleness(row: IndexRow, raw: Record<string, unknown>) {
+  const m = raw.checkout_map as { first_blocker?: { kind?: string; retry_after?: string } | null; checked_at?: string; last_good?: { co?: number | null; stage?: string | null; guest?: boolean | null; checked_at?: string } } | undefined;
+  if (!m) return {};
+  const lg = m.last_good && typeof m.last_good === "object" ? m.last_good : null;
+  const netFail = m.first_blocker?.kind === "network-error";
+  if (!netFail && !lg) return {};
+  return {
+    newest_probe_failed: netFail ? "network-error" : null,
+    newest_probe_at: m.checked_at ?? null,
+    last_successful_probe: lg?.checked_at ?? null,
+    last_good_co: lg?.co ?? null,
+    last_good_stage: lg?.stage ?? null,
+    retry_after: m.first_blocker?.retry_after ?? null,
+    ...(netFail ? { staleness_note: lg ? `newest probe hit network errors; co shown as last_good_co from the last successful probe (${lg.checked_at ?? "date unknown"})` : "newest probe hit network errors and no earlier successful probe is on record; co is unknown (null), not 0. guest may come from a help-page quote, not the probe" } : {}),
   };
 }
 
@@ -184,7 +206,7 @@ export function v5Extras(raw: Record<string, unknown>) {
 const BLOCK_TEXT: Record<string, string> = {
   "bot-wall": "a bot challenge page (Akamai/PerimeterX/Cloudflare/captcha) before the cart; not circumvented",
   "http-refusal": "the store refused our requests (HTTP 403/429) on product or cart pages",
-  "network-error": "network/protocol errors (e.g. HTTP/2 reset) on every retry; not classified as a refusal",
+  "network-error": "network/protocol errors (e.g. HTTP/2 reset) on every retry; not classified as a refusal; checkout_depth then carries newest_probe_failed, last_successful_probe, last_good_co and retry_after",
   "no-product-link": "our probe could not find a product link to open",
   "no-add-to-cart": "the product page had no add-to-cart button our probe could use (or the item was out of stock)",
   "login-wall": "checkout requires signing in",

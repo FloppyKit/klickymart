@@ -41,3 +41,26 @@ describe("F1/F2 verdict never contradicts blocker or terms", () => {
     }
   });
 });
+
+describe("F3 network-error staleness", () => {
+  it("bestbuy.com: exposes newest_probe_failed, retry_after and last-good fields instead of a bare null", async () => {
+    const b = body(checkDomain(await snap(), "bestbuy.com", O));
+    const c = b.checkout_depth;
+    expect(c.newest_probe_failed).toBe("network-error");
+    expect(c.retry_after).toMatch(/^\d{4}-/);
+    expect(c).toHaveProperty("last_successful_probe");
+    expect(c).toHaveProperty("last_good_co");
+    expect(c.staleness_note).toMatch(/network errors/);
+  });
+  it("uses checkout_map.last_good when the crawler carried it forward", async () => {
+    const s = await snap();
+    const row = s.rows.find((r) => r.d === "bestbuy.com")!;
+    const raw = parseRaw(row.raw_json) as any;
+    raw.checkout_map.last_good = { co: 2, stage: "checkout", guest: true, checked_at: "2026-10-20T00:00:00Z" };
+    const { checkoutOf } = await import("../src/explain");
+    const c = checkoutOf(row, raw) as any;
+    expect(c.last_good_co).toBe(2);
+    expect(c.last_successful_probe).toBe("2026-10-20T00:00:00Z");
+    expect(c.staleness_note).toMatch(/last_good_co/);
+  });
+});
