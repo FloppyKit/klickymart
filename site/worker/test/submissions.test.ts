@@ -239,14 +239,13 @@ describe("trust ladder", () => {
   });
   it("verified by payment proof (not from the submitter, not flagged) or a protocol endpoint", async () => {
     const d = uniq("pv");
-    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-zap", flagged: 0 });
-    expect((await tier(d)).trust_tier).toBe("unverified");
-    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage" }); // K10-001: owner-mintable, not a payment proof
-    expect((await tier(d)).trust_tier).not.toBe("verified");
+    // K10-001: neither owner-mintable proof earns the payment-proof tier; the tier output says so plainly
+    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage" });
     await visit(d, pk(), { firstSeen: old(), proof_status: "verified-zap" });
     const t = await tier(d);
-    expect(t.trust_tier).toBe("verified");
-    expect(t.trust_label).toBe("Verified (payment proof: verified 422)");
+    expect(t.trust_tier).not.toBe("verified"); expect(t.trust_proofs).not.toContain("payment proof: verified 422");
+    const { tierFields } = await import("../src/submissions");
+    const tf = tierFields(t) as any; expect(tf.trust_dimensions.payment_proof).toBe(false); expect(tf.trust_dimensions.payment_proof_note).toMatch(/No proof type currently earns/);
     const u = await tier(uniq("ucp"), { ucp: { present: true, endpoint: "https://x.myshopify.com/api/ucp/mcp", src: "https://x/.well-known/ucp" } });
     expect(u.trust_label).toBe("Verified (protocol endpoint: UCP)");
     expect(u.trust_proofs).toEqual(["protocol endpoint: UCP"]);

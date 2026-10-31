@@ -26,7 +26,7 @@ describe("K10-001: owner-minted preimage proofs can't take the chart", () => {
     await note("a3".repeat(32), "c3".repeat(32), "2026-01-01"); await note("a4".repeat(32), "c4".repeat(32), "2026-01-01");
     const a = (await loadAggregates(env.DB, [D])).get(D)!;
     expect(a.keys).toBe(2); expect(a.verified_purchase_share).toBe(0); expect(a.proof_keys).toBe(0);
-    expect(proofWeight("preimage", "verified-preimage")).toBe(1); expect(proofWeight(null, null)).toBe(1); expect(proofWeight("zap", "verified-zap")).toBe(3);
+    expect(proofWeight("preimage", "verified-preimage")).toBe(1); expect(proofWeight(null, null)).toBe(1); expect(proofWeight("zap", "verified-zap")).toBe(1);
   });
   it("notes from the store's own claimed key never count, even when aged", async () => {
     const owner = "c5".repeat(32);
@@ -34,5 +34,21 @@ describe("K10-001: owner-minted preimage proofs can't take the chart", () => {
     await note("a5".repeat(32), owner, "2026-01-01", "verified-zap"); await note("a6".repeat(32), "c6".repeat(32), "2026-01-01");
     const a = (await loadAggregates(env.DB, [D])).get(D)!;
     expect(a.keys).toBe(1); expect(a.owner_notes_excluded).toBe(1); expect(a.corroborated).toBe(false);
+  });
+  it("owner-minted zap receipts: brand-new keys don't move the chart; aged independent keys count only as plain notes", async () => {
+    const before = await chartRow();
+    await note("b1".repeat(32), "d1".repeat(32), today, "verified-zap"); await note("b2".repeat(32), "d2".repeat(32), today, "verified-zap");
+    expect((await loadAggregates(env.DB, [D])).get(D)).toBeUndefined();
+    const after = await chartRow(); expect(after?.score).toBe(before?.score); expect(after?.rank).toBe(before?.rank); expect(after?.score_source).toBe(before?.score_source);
+    await env.DB.prepare("DELETE FROM experiences").run();
+    await note("b3".repeat(32), "d3".repeat(32), "2026-01-01", "verified-zap"); await note("b4".repeat(32), "d4".repeat(32), "2026-01-01", "verified-zap");
+    const a = (await loadAggregates(env.DB, [D])).get(D)!;
+    expect(a.keys).toBe(2); expect(a.proof_keys).toBe(0); expect(a.verified_purchase_share).toBe(0);
+  });
+  it("owner-controlled key with a zap receipt never counts", async () => {
+    const owner = "d5".repeat(32);
+    await env.DB.prepare("INSERT INTO claims (d,pubkey,nip05,checked_at) VALUES (?,?,?,?)").bind(D, owner, `_@${D}`, 1).run();
+    await note("b5".repeat(32), owner, "2026-01-01", "verified-zap");
+    expect((await loadAggregates(env.DB, [D])).get(D)).toBeUndefined();
   });
 });

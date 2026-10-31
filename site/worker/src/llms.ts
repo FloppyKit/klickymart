@@ -42,7 +42,10 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
    proof_status "verified-preimage" is kept as a label (non-breaking) but means only "invoice bound to the store's own node":
    the store owner knows every preimage, so it is NOT proof that anyone paid. It weighs the same as a plain note, does not
    count toward verified_purchase_share or the "Verified (payment proof)" tier, and never skips the 7-day key-age gate.
-   No proof skips that gate, and notes from the store's own declared keys (claimants, zap_pubkey) never count for rank.
+   proof_status "verified-zap" is demoted the same way: the 9735 receipt is signed by the store's own declared LNURL server,
+   which the owner can run and use to mint a receipt for a zap nobody paid. It weighs like a plain note too.
+   So NO proof type currently counts as a purchase proof or earns the "Verified (payment proof)" tier; trust_dimensions.payment_proof
+   is always false (see payment_proof_note). No proof skips that gate, and notes from the store's own declared keys (claimants, zap_pubkey) never count for rank.
 4. Publish the signed event to any of our relays (wss://relay.damus.io, wss://nos.lol, wss://relay.primal.net). That
    is enough: KlickyMart watches those relays live and catches up every 5 minutes. POST ${origin}/reviews (add ?dry_run=1
    to validate only) or the MCP tool submit_review {event} is optional, for clients that cannot reach a relay.
@@ -125,7 +128,7 @@ Every record from /q, /check, /records, /chart.json and MCP carries trust_tier, 
 - flagged : "Flagged: <reason>" (spam, affiliate redirect, look-alike, sub-domain stuffing). Still listed, ranked last.
 - unverified : "Unverified · community-submitted" (src=community) or "Unverified · crawler-indexed".
 - seen : "Seen by shoppers · N visits". At least 3 weighted distinct unflagged keys posted visit-basis notes (421, or 422 with basis=visit) in 60 days; new (< 30 days, fewer than 2 other stores) or anonymous keys count 0.5; at least 2 real keys. The submitter's key, keys first seen within 24 h of the submission, and keys with reputation below -3 do not count. Drops back if more than 40% of the basis notes are flagged.
-- verified : any ONE real proof (seen is not required first); trust_proofs[] and the label name it, e.g. "Verified (protocol endpoint: UCP)", "Verified (protocol endpoint: x402 challenge)", "Verified (store claim: DNS TXT)", "Verified (payment proof: verified 422)": a 422 with a verified payment proof from an unflagged key that is not the submitter; a store claim (DNS TXT, or a key verified by NIP-05 on the domain that signed its own 31420); or a crawler-observed protocol endpoint (/.well-known/ucp present, or our own probe got a real HTTP 402 challenge; directory-claimed rails do not count).
+- verified : any ONE real proof (seen is not required first); trust_proofs[] and the label name it, e.g. "Verified (protocol endpoint: UCP)", "Verified (protocol endpoint: x402 challenge)", "Verified (store claim: DNS TXT)". No payment proof currently earns this tier (verified-preimage and verified-zap can both be minted by the store owner); a store claim (DNS TXT, or a key verified by NIP-05 on the domain that signed its own 31420); or a crawler-observed protocol endpoint (/.well-known/ucp present, or our own probe got a real HTTP 402 challenge; directory-claimed rails do not count).
 - ${origin}/summary.json : counts and headline numbers.
 - ${origin}/export.ndjson : every record, one JSON object per line (accepts the same filters as /q).
 - ${origin}/.well-known/klickymart.json : machine-readable capabilities (endpoints, relays, licenses).

@@ -18,7 +18,7 @@ export const TIERS = ["flagged", "unverified", "seen", "verified"] as const;
 export type Tier = (typeof TIERS)[number];
 export const TIER_RANK: Record<Tier, number> = { flagged: 0, unverified: 1, seen: 2, verified: 3 };
 export const SEEN_RULE = { windowS: 60 * 86400, weighted: 3, realKeys: 2, newKeyWeight: 0.5, realAgeS: 30 * 86400, realOtherDomains: 2, sybilWindowS: 86400, dropFlaggedShare: 0.4 };
-export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = any ONE real proof, shown in trust_proofs[] and the label (seen is not required first): a payment proof (verified 422 from an unflagged key that is not the submitter), a store claim (DNS TXT at _klickymart.<domain> naming the npub plus a claim signed by that key, or a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count). 'verified' is protocol/ownership/payment-proof only, NOT a fulfillment or legitimacy check; trust_dimensions {protocol_verified, ownership_verified, payment_proof, checkout_accessible, merchant_legitimacy: not-assessed} separates them.";
+export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = any ONE real proof, shown in trust_proofs[] and the label (seen is not required first): (no payment proof currently qualifies: verified-preimage and verified-zap can be minted by the store owner), a store claim (DNS TXT at _klickymart.<domain> naming the npub plus a claim signed by that key, or a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count). 'verified' is protocol/ownership/payment-proof only, NOT a fulfillment or legitimacy check; trust_dimensions {protocol_verified, ownership_verified, payment_proof, checkout_accessible, merchant_legitimacy: not-assessed} separates them.";
 
 export interface SubmitFlag { flag: string; strength: "weak" | "strong"; detail: string }
 const STRONG_TIER_FLAGS = new Set(["spam", "affiliate-redirect", "lookalike?", "subdomain-stuffing"]);
@@ -388,7 +388,9 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     if (seen && share > SEEN_RULE.dropFlaggedShare) { seen = false; why.push({ kind: "basis-notes-flagged", detail: `${flaggedNotes.length} of ${list.length} basis notes are flagged (> 40%)`, ref: `/flags.json?domain=${d}` }); }
     if (seen) why.push({ kind: "shopper-notes", detail: `${perKey.size} distinct unflagged keys (weighted ${weighted}, ${real} real) posted visit-basis notes in 60 days`, ref: `/merchant/${d}#community` });
     const how: string[] = [];
-    const pay = (byD.get(d) ?? []).find((n) => n.proof_status?.startsWith("verified") && n.proof_status !== "verified-preimage" /* K10-001: owner can mint these */ && !flagW.has(n.id) && !strongKeys.has(n.pubkey) && n.pubkey !== sub?.submitter);
+    // K10-001: no proof_status earns the payment-proof tier any more (verified-preimage and verified-zap can both be minted
+    // by the store owner). PAYMENT_PROOF_STATUSES is empty on purpose; the path stays for a future independent proof.
+    const pay = (byD.get(d) ?? []).find((n) => !!n.proof_status && PAYMENT_PROOF_STATUSES.has(n.proof_status) && !flagW.has(n.id) && !strongKeys.has(n.pubkey) && n.pubkey !== sub?.submitter);
     if (pay) { how.push("payment proof: verified 422"); why.push({ kind: "payment-proof", ref: pay.id, detail: "a 422 with a verified payment proof from an unflagged key that is not the submitter" }); }
     const claimKey = [...claims].find((c) => c.startsWith(d + "|"));
     if (claimKey) { how.push("store claim: NIP-05"); why.push({ kind: "store-claim", ref: claimKey.split("|")[1], detail: "a key verified by NIP-05 on this domain signed its own 31420 record" }); }
@@ -454,7 +456,9 @@ export function tierBadgeHtml(t: TrustInfo | undefined): string {
   const why = t.trust_why.map((w) => escH(w.detail)).join("; ");
   return `<p class="km-trust-tier" data-trust-tier="${t.trust_tier}"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${BADGE[t.trust_tier]}" title="${why}">${escH(t.trust_label)}</span> <a href="/llms.txt#trust" style="font-size:12px">trust ladder</a>${t.submitted_by ? ` <small>submitted by ${escH(t.submitted_by === "anonymous" ? "an anonymous agent" : t.submitted_by.slice(0, 16) + "…")} on ${escH(t.submitted_at?.slice(0, 10) ?? "")}</small>` : ""}</p>`;
 }
-export const TRUST_SCOPE_NOTE = "trust_tier 'verified' means ONE of: a crawler-observed protocol endpoint (UCP or a real HTTP 402), a store ownership claim (DNS TXT or NIP-05), or a verified payment proof. It says nothing about fulfillment or merchant legitimacy: anyone can own a domain and run a protocol endpoint. See trust_dimensions.";
+export const PAYMENT_PROOF_STATUSES = new Set<string>();
+export const PAYMENT_PROOF_NOTE = "No proof type currently earns the payment-proof tier: verified-preimage and verified-zap can both be produced by the store owner without anyone paying, so they count as plain notes. payment_proof is always false until an independent payment proof exists.";
+export const TRUST_SCOPE_NOTE = "trust_tier 'verified' means ONE of: a crawler-observed protocol endpoint (UCP or a real HTTP 402) or a store ownership claim (DNS TXT or NIP-05). No payment proof currently earns it. It says nothing about fulfillment or merchant legitimacy: anyone can own a domain and run a protocol endpoint. See trust_dimensions.";
 /**
  * Separate the trust dimensions so 'verified' is not read as 'legitimate'. Non-breaking: trust_tier/label unchanged.
  * checkout_accessible is filled by /check from the verdict and probe; merchant_legitimacy is never asserted by KlickyMart.
@@ -466,6 +470,7 @@ export function trustDimensions(t: TrustInfo | undefined) {
     protocol_verified: proofs.some((p) => p.startsWith("protocol endpoint")) || kinds.has("protocol-endpoint"),
     ownership_verified: proofs.some((p) => p.startsWith("store claim")) || kinds.has("store-claim"),
     payment_proof: proofs.some((p) => p.startsWith("payment proof")) || kinds.has("payment-proof"),
+    payment_proof_note: PAYMENT_PROOF_NOTE,
     checkout_accessible: null as boolean | null,
     merchant_legitimacy: "not-assessed" as const,
   };
