@@ -32,15 +32,20 @@ export function nwcRelays(env: { NWC_RELAYS?: string }): string[] { const l = cs
 // ---------- SSRF + DNS-rebinding guard ----------
 /** Private, loopback, link-local, CGNAT, multicast, reserved and documentation ranges (v4 and v6). */
 export function privateIp(ip: string): boolean {
-  const s = ip.toLowerCase();
+  let s = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  // R9-006: IPv4-mapped/compatible IPv6 in hex form (::ffff:7f00:1, ::7f00:1) is checked as the IPv4 it carries.
+  const hx = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(s);
+  if (hx) { const a = parseInt(hx[1]!, 16), b = parseInt(hx[2]!, 16); s = `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`; }
   const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s.replace(/^::ffff:/, ""));
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51) || (a === 203 && b === 0);
+      || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51) || (a === 203 && b === 0)
+      || (a === 192 && b === 88) || [a, b, Number(v4[3]), Number(v4[4])].some((x) => x > 255); // 6to4 relay anycast; malformed octets
   }
   if (!s.includes(":")) return true;
-  return s === "::" || s === "::1" || /^(fc|fd|fe8|fe9|fea|feb|ff)/.test(s) || s.startsWith("2001:db8") || s.startsWith("64:ff9b") || s.startsWith("::ffff:");
+  return s === "::" || s === "::1" || /^(fc|fd|fe[89a-f]|ff)/.test(s) || s.startsWith("2001:db8") || s.startsWith("64:ff9b") || s.startsWith("::ffff:") || s.startsWith("::")
+    || s.startsWith("2002:") || /^2001:0{0,4}:/.test(s) || s.startsWith("100::"); // site-local fec0::/10, 6to4, Teredo, discard
 }
 /** Resolve A + AAAA over DNS-over-HTTPS; null when nothing resolves, else the sorted address list. */
 export async function resolveHost(host: string, doh: F): Promise<string[] | null> {
@@ -52,6 +57,19 @@ export async function resolveHost(host: string, doh: F): Promise<string[] | null
     for (const a of j.Answer ?? []) if (a.type === 1 || a.type === 28) out.push(a.data);
   }
   return out.length ? out.sort() : null;
+}
+/** Read a response body as UTF-8, or null as soon as it exceeds max bytes (the rest is cancelled, not buffered). */
+export async function readCapped(r: Response, max: number): Promise<string | null> {
+  const cl = Number(r.headers.get("content-length")); if (Number.isFinite(cl) && cl > max) { try { await r.body?.cancel(); } catch { /* */ } return null; }
+  if (!r.body) return "";
+  const reader = r.body.getReader(); const parts: Uint8Array[] = []; let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    n += value.byteLength; if (n > max) { try { await reader.cancel(); } catch { /* */ } return null; }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n); let o = 0; for (const p of parts) { all.set(p, o); o += p.byteLength; }
+  return new TextDecoder().decode(all);
 }
 /** Fetch a public https URL: public hostname, every resolved address public before AND after the request (a changed
  * answer = possible rebinding -> refuse the body), no redirects, timeout, size cap. Workers cannot pin the connect IP,
@@ -65,7 +83,8 @@ export async function guardedFetch(url: string, o: { fetcher?: F; doh?: F } = {}
     if (!before || before.some(privateIp)) return { ok: false, reason: "host does not resolve to public addresses" };
     const r = await fetcher(u.toString(), { redirect: "manual", headers: { Accept: "application/json", "User-Agent": "KlickyMart tip proxy (+https://klickymart.com/bot)" }, signal: AbortSignal.timeout(INVOICE_LIMITS.timeoutMs) });
     if (r.status !== 200) return { ok: false, reason: `upstream status ${r.status}` };
-    const text = await r.text(); if (text.length > INVOICE_LIMITS.maxBody) return { ok: false, reason: "upstream response too large" };
+    // R9-005: enforce the size cap while reading (Content-Length first, then a streaming byte count), never after.
+    const text = await readCapped(r, INVOICE_LIMITS.maxBody); if (text === null) return { ok: false, reason: "upstream response too large" };
     const after = await resolveHost(u.hostname, doh);
     if (!after || after.some(privateIp) || after.join(",") !== before.join(",")) return { ok: false, reason: "host address changed during the request" };
     return { ok: true, text };
@@ -76,7 +95,7 @@ export async function guardedFetch(url: string, o: { fetcher?: F; doh?: F } = {}
 export const ZAP_RELAYS = { max: 10, maxLen: 256 };
 export function validRelayUrl(u: unknown): boolean {
   if (typeof u !== "string" || u.length > ZAP_RELAYS.maxLen || !/^wss:\/\/[^\s"<>\\]+$/i.test(u)) return false;
-  try { const h = new URL(u).hostname.toLowerCase(); return new URL(u).protocol === "wss:" && !!h && h.includes(".") && !/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h) && !/^172\.(1[6-9]|2\d|3[01])\./.test(h) && !h.startsWith("["); } catch { return false; }
+  try { const x = new URL(u); return x.protocol === "wss:" && !x.username && !x.password && publicHost(x.hostname); } catch { return false; }
 }
 export function validACoord(v: string): boolean {
   const m = /^(\d{1,5}):([0-9a-f]{64}):(.{0,256})$/s.exec(v); if (!m) return false;

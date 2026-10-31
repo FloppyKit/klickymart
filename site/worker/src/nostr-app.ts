@@ -222,6 +222,9 @@ export function publicHost(h: string): boolean {
   const s = h.toLowerCase();
   if (!/^[a-z0-9.-]+$/.test(s) || !s.includes(".")) return false;
   if (/^\d+(\.\d+){3}$/.test(s) || /^\d+$/.test(s.replace(/\./g, ""))) return false; // IP literals
+  // R9-006: hex/octal-style IP spellings (0x7f.0.0.1, 0177.0.0.1), numeric TLDs, empty labels and leading/trailing dots or dashes.
+  const labels = s.split(".");
+  if (labels.some((l) => !l || l.length > 63 || l.startsWith("-") || l.endsWith("-") || /^0x[0-9a-f]*$/.test(l) || /^0\d+$/.test(l)) || /^\d+$/.test(labels[labels.length - 1]!) || s.length > 253) return false;
   return !/(^|\.)(localhost|local|internal|lan|home|arpa|test|invalid|onion)$/.test(s);
 }
 /** A pay endpoint "works" when it answers a LUD-06 payRequest with an https callback and sane sendable range. */
