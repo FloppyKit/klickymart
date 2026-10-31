@@ -20,7 +20,16 @@ export interface TipSummary { tips: number; sats: number; distinct_tippers: numb
 /** One receipt -> tip. tipper = pubkey of the embedded 9734 zap request (the payer). validated (KM-003) = NIP-57 binding:
  * the receipt is signed by the nostrPubkey of the zapped author's LNURL (lud16) endpoint, the BOLT11 node signature and
  * description_hash check, and the amount matches the request. Without a known author zap key nothing validates. */
-export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, zapKeyOf: (author: string) => string | null | undefined = () => null): Tip | null {
+/** R12-002: the receipt must pay the note's author: the receipt's single p, the embedded 9734's single p and the note
+ * author must match, and the 9734's e must be the tipped note. The receipt must be signed by the author's own LNURL
+ * nostrPubkey; a zap key that serves several recipients (custodial / shared) never validates, because anyone could
+ * zap their own wallet behind the same key and credit someone else's note. */
+const onlyTag = (tags: unknown, k: string): string | null => {
+  if (!Array.isArray(tags)) return null;
+  const v = tags.filter((t) => Array.isArray(t) && t[0] === k).map((t) => (t as unknown[])[1]);
+  return v.length === 1 && typeof v[0] === "string" ? v[0] : null;
+};
+export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, zapKeyOf: (author: string) => string | null | undefined = () => null, sharedKey: (zk: string) => boolean = () => false): Tip | null {
   const target = r.tags.find((t) => t[0] === "e")?.[1];
   if (!target) return null;
   const b = r.tags.find((t) => t[0] === "bolt11")?.[1];
@@ -30,7 +39,8 @@ export function parseTip(r: Ev, authorOf: (id: string) => string | undefined, za
   const tipper = req?.pubkey ?? r.tags.find((t) => t[0] === "P")?.[1] ?? null;
   const author = authorOf(target);
   const zk = author ? zapKeyOf(author) : null;
-  const validated = !!zk && checkZapReceipt(r, zk).ok;
+  const bound = !!author && onlyTag(r.tags, "p") === author && !!req && onlyTag(req.tags, "p") === author && onlyTag(req.tags, "e") === target;
+  const validated = bound && !!zk && !sharedKey(zk) && checkZapReceipt(r, zk).ok;
   return { receipt: r.id, target, tipper, sats: dec?.amount_msat != null ? Math.floor(dec.amount_msat / 1000) : null, validated, self: !!tipper && !!author && tipper === author, created_at: r.created_at };
 }
 
@@ -65,8 +75,16 @@ export async function loadTips(db: D1Database | undefined, d?: string): Promise<
       for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
     const zapKeys = new Map<string, string | null>();
     for (const a of new Set(author.values())) zapKeys.set(a, await cachedZapKey(db, await lud16Of(db, a)));
+    // R12-002: a zap key declared by more than one recipient is shared (custodial) and earns no weight.
+    const keyUsers = new Map<string, number>();
+    for (const k of zapKeys.values()) if (k) keyUsers.set(k, (keyUsers.get(k) ?? 0) + 1);
+    try { // any key that answers for several LNURL addresses we have cached is custodial
+      for (const r of (await db.prepare("SELECT nostr_pubkey AS k, COUNT(DISTINCT lud16) AS n FROM lnurl_cache WHERE nostr_pubkey IS NOT NULL GROUP BY nostr_pubkey HAVING n > 1").all<{ k: string; n: number }>()).results ?? [])
+        keyUsers.set(r.k, Math.max(keyUsers.get(r.k) ?? 0, r.n));
+    } catch { /* cache table pending */ }
+    const shared = (zk: string) => (keyUsers.get(zk) ?? 0) > 1;
     for (const row of results ?? []) {
-      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a));
+      const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a), shared);
       if (!t || !author.has(t.target)) continue;
       t.eligible = !!t.tipper && hist.has(t.tipper);
       (byNote.get(t.target) ?? byNote.set(t.target, []).get(t.target)!).push(t);

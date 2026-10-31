@@ -30,11 +30,12 @@ function fakeBolt11(hashHex: string, hrp = "lnbc10u"): string {
 }
 const NODE = key();
 /** A proper NIP-57 receipt: node-signed invoice whose description_hash commits to the 9734 request. */
-function zap(lnurlSk: Uint8Array, payerSk: Uint8Array, target: string, hrp = "lnbc10u"): Ev {
-  const req = sign(payerSk, 9734, [["e", target], ["amount", "1000000"], ["relays", "wss://r.test"]]);
+function zap(lnurlSk: Uint8Array, payerSk: Uint8Array, note: { id: string; pubkey: string }, hrp = "lnbc10u", recipient = note.pubkey): Ev {
+  const target = note.id;
+  const req = sign(payerSk, 9734, [["p", recipient], ["e", target], ["amount", "1000000"], ["relays", "wss://r.test"]]);
   const desc = JSON.stringify(req);
   const inv = encodeBolt11ForTest(NODE, hrp, bytesToHex(sha256(new TextEncoder().encode(req.id + "x"))), { descriptionHashHex: bytesToHex(sha256(new TextEncoder().encode(desc))) });
-  return sign(lnurlSk, 9735, [["e", target], ["bolt11", inv], ["description", desc], ["P", req.pubkey]]);
+  return sign(lnurlSk, 9735, [["p", recipient], ["e", target], ["bolt11", inv], ["description", desc], ["P", req.pubkey]]);
 }
 /** fake LNURL-pay endpoint: every lud16 resolves to the given nostrPubkey */
 const lnurlFetcher = (nostrPubkey: string) => (async () => Response.json({ allowsNostr: true, nostrPubkey, callback: "https://ln.example/cb" })) as never;
@@ -70,7 +71,7 @@ describe("POST /facilitate (facilitated 421)", () => {
     expect(String(r.body.label)).toMatch(/UNVERIFIED CLAIM/);
   });
   it("KM-001/002: well-formed NIP-57 zap receipt -> unverified-claim only; unsigned zap request refused", () => {
-    const rc = zap(key(), key(), "aa".repeat(32));
+    const rc = zap(key(), key(), { id: "aa".repeat(32), pubkey: "bb".repeat(32) });
     expect(checkFacilitationProof({ type: "zap", receipt: rc })).toMatchObject({ ok: true, verification: "unverified-claim" });
     const forged = sign(key(), 9735, [["bolt11", fakeBolt11("cd".repeat(32))], ["description", JSON.stringify({ kind: 9734, pubkey: "00".repeat(32), tags: [], content: "", created_at: 1, id: "00".repeat(32), sig: "00".repeat(64) })]]);
     expect(checkFacilitationProof({ type: "zap", receipt: forged })).toMatchObject({ ok: false });
@@ -108,7 +109,7 @@ describe("tips on 422 notes (NIP-57)", () => {
       await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)")
         .bind(bytesToHex(key()), 1, pk(t), 1, null, "{}", Math.floor(Date.now() / 1000) - 60 * 86400, "wss://r.test").run();
     }
-    const receipts = [...tippers.map((t) => zap(lnurl, t, n1.id)), zap(lnurl, tippers[0]!, n1.id), zap(lnurl, a, n1.id)];
+    const receipts = [...tippers.map((t) => zap(lnurl, t, n1)), zap(lnurl, tippers[0]!, n1), zap(lnurl, a, n1)];
     const res = await ingestEvents(env.DB, receipts.map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(lnurl)) });
     expect(res.accepted).toBe(receipts.length); // receipts are not per-pubkey rate limited
     const t = await loadTips(env.DB, DOM);
@@ -132,14 +133,35 @@ describe("tips on 422 notes (NIP-57)", () => {
     const old = Math.floor(Date.now() / 1000) - 400 * 86400;
     const tippers = Array.from({ length: 5 }, key);
     const backdated = tippers.map((t) => sign(t, 0, [], "{}", old)); // mintable "history"
-    const forged = tippers.map((t) => zap(attacker, t, n1.id)); // self-made receipts
-    const legit = tippers.map((t) => zap(lnurl, t, n1.id)); // real LNURL key, but fresh tippers
+    const forged = tippers.map((t) => zap(attacker, t, n1)); // self-made receipts
+    const legit = tippers.map((t) => zap(lnurl, t, n1)); // real LNURL key, but fresh tippers
     await ingestEvents(env.DB, [...backdated, ...forged, ...legit].map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(lnurl)) });
     const lt = await loadTips(env.DB, DOM);
     const s = summarize(lt.byNote.get(n1.id)!);
     expect(s.validated_tippers).toBe(5); // only the LNURL-signed receipts validate
     expect(s.bonus_tippers).toBe(0); // backdated kind-0 is not history: first_seen is now
     expect(s.weight).toBe(1);
+  });
+  it("R12-002: receipts paying someone other than the note author, or signed by a shared custodial key, add no weight", async () => {
+    const a = key(), c = key(), custodial = key();
+    const n1 = sign(a, 422, [["r", DOM], ["depth", "paid"], ["basis", "visit"], ["rating", "5", "5"], ["attempt", "paid"]], "great");
+    const profA = sign(a, 0, [], JSON.stringify({ lud16: "a@custodial.example" }));
+    const profC = sign(c, 0, [], JSON.stringify({ lud16: "c@custodial.example" }));
+    const nc = sign(c, 422, [["r", DOM], ["depth", "browse"], ["basis", "visit"], ["rating", "4", "5"], ["attempt", "browse"]], "ok");
+    await ingestEvents(env.DB, [n1, nc, profA, profC].map((ev) => ({ ev, relay: "wss://r.test" })), ctx());
+    // attacker c zaps their own wallet (p = c) but tags the victim's note
+    const misdirected = zap(custodial, c, n1, "lnbc10u", pk(c));
+    await ingestEvents(env.DB, [misdirected].map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(custodial)) });
+    let lt = await loadTips(env.DB, DOM);
+    expect(lt.byNote.get(n1.id)!.every((t) => !t.validated)).toBe(true);
+    // a correctly addressed receipt is still not counted when the signing key serves several recipients
+    await env.DB.prepare("DELETE FROM lnurl_cache").run();
+    await env.DB.prepare("INSERT INTO lnurl_cache (lud16, nostr_pubkey, checked_at) VALUES (?,?,?),(?,?,?)").bind("a@custodial.example", pk(custodial), Math.floor(Date.now() / 1000), "c@custodial.example", pk(custodial), Math.floor(Date.now() / 1000)).run();
+    await ingestEvents(env.DB, [zap(custodial, key(), n1)].map((ev) => ({ ev, relay: "wss://r.test" })), { ...ctx(), fetcher: lnurlFetcher(pk(custodial)) });
+    lt = await loadTips(env.DB, DOM);
+    expect(lt.byNote.get(n1.id)!.length).toBe(2);
+    expect(lt.byNote.get(n1.id)!.every((t) => !t.validated)).toBe(true);
+    expect(summarize(lt.byNote.get(n1.id)!).weight).toBe(1);
   });
   it("template accepts a lud16 tag and rejects junk", () => {
     const ok = experienceTemplate({ domain: DOM, depth: "browse", lud16: "Me@Getalby.com" }, null);
