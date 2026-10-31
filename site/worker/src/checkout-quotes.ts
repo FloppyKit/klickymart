@@ -5,6 +5,7 @@
 // drives est_total. Arithmetic (subtotal + shipping + tax = total, +-$0.02) and outliers (tax rate outside [0, state max + 2 pts],
 // shipping over 3x the median) are stored but excluded and flagged.
 import { STATE_TAX, zipToState } from "./landed";
+import { FACILITATOR_PUBKEY } from "./facilitate";
 import { keyFirstSeen, countsForRank, MIN_RANK_KEY_AGE_S } from "./key-age";
 import { ownerKeys } from "./experience";
 import { loadTips, summarize } from "./tips";
@@ -137,4 +138,40 @@ export function applyCheckoutQuote(landed: Record<string, unknown>, agg: Checkou
   landed.est_total = r2(price + ship + tax);
   landed.est_total_label = `agent-checkout quotes (${agg.keys_counting} independent keys)`;
   landed.est_total_note = `item_price + median shipping and tax rate seen at the payment step by ${agg.keys_counting} independent agents in ZIP3 ${agg.zip3}`;
+}
+
+/** CK-5: KlickyMart's own keys are seeds (level 1, never counted). Public keys only (never secrets): crawler / 31420 signer
+ * (env or snapshot), the site zap key and the facilitator key. Note: kind 421 events are NOT read by the quote path; only
+ * kind-422 checkout notes (experiences table) are aggregated, so "seed" is decided purely by the note's pubkey. */
+export const SITE_ZAP_PUBKEY_HEX_DEFAULT = "8a9cdf5624acbed82094d5954137d7febc8f1c41f9cad1ce665bdf40236fd8e4";
+export function quoteSeedKeys(...keys: (string | null | undefined)[]): Set<string> {
+  const out = new Set<string>();
+  for (const k of [...keys, SITE_ZAP_PUBKEY_HEX_DEFAULT, FACILITATOR_PUBKEY]) { const h = (k ?? "").trim().toLowerCase(); if (/^[0-9a-f]{64}$/.test(h)) out.add(h); }
+  return out;
+}
+
+/** CK-8: ZIP3s with no state in the built-in RANGES table (incl. 000) are unassigned and rejected. */
+export function validZip3(z3: string): boolean { return /^\d{3}$/.test(z3) && z3 !== "000" && (zipToState(z3 + "01") ?? zipToState(z3 + "00")) !== null; }
+
+/** CK-8: ISO week label (YYYY-Www) instead of the day. */
+export function isoWeek(tsS: number): string {
+  const d = new Date(Math.floor(tsS / 86400) * 86400000); const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day + 3);
+  const y = d.getUTCFullYear(); const jan4 = new Date(Date.UTC(y, 0, 4)); const w = 1 + Math.round(((d.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+  return `${y}-W${String(w).padStart(2, "0")}`;
+}
+/** CK-8: coarse public view for /landed/notes: week not day, subtotal to nearest $5, tax rate to 1 dp, no exact tax/total. */
+export function publicQuoteView(agg: CheckoutQuoteAgg, createdAt: Map<string, number>) {
+  const r1 = (x: number | null) => (x === null ? null : Math.round(x * 10) / 10);
+  return { ...agg, median_tax_rate_pct: r1(agg.median_tax_rate_pct),
+    notes: agg.notes.map(({ day: _d, tax: _t, total: _tt, price, tax_rate_pct, ...n }) => ({ ...n, level_label: n.level === "seed" ? "seed (level 1)" : "agent", week: isoWeek(createdAt.get(n.id) ?? Date.parse(_d) / 1000), subtotal_approx_usd: Math.round(price / 5) * 5, tax_rate_pct: r1(tax_rate_pct) })),
+    privacy: "Coarsened: ISO week (not day), subtotal rounded to $5, tax rate to 0.1 pt; exact tax and total are not shown." };
+}
+
+/** CK-3 + CK-4: one path for HTTP and MCP. Applies quotes only to rows whose store is indexed (in the crawled set). Mutates rows. */
+export async function applyQuotesToRows(rows: Record<string, any>[], z3: string, indexed: (d: string) => boolean, load: (d: string) => Promise<CheckoutQuoteAgg | null>, drill: (d: string) => string): Promise<void> {
+  const dOf = (i: Record<string, any>) => String(i.d ?? i.domain ?? "").toLowerCase().replace(/^www\./, "");
+  const items = rows.filter((i) => i.landed && i.store?.indexed !== false && indexed(dOf(i)));
+  const ds = [...new Set(items.map(dOf).filter(Boolean))].slice(0, 20);
+  const aggs = new Map(await Promise.all(ds.map(async (d) => [d, await load(d)] as const)));
+  for (const i of items) { const d = dOf(i); applyCheckoutQuote(i.landed, aggs.get(d) ?? null, drill(d)); }
 }

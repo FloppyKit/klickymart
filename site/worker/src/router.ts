@@ -1,4 +1,4 @@
-import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES } from "./checkout-quotes";
+import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
 import { WALLET_GUIDE } from "./wallet";
 import { cashuMints, findReceipt, getInvoice, loadNutzaps, nutzapInfoOf, nwcRelays, type InvoiceInput } from "./tip-rails";
 import { handleLnurlForward } from "./lnurl-forward";
@@ -725,6 +725,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const before = rows.length;
     const pf = applyProductFilters(rows.map((i) => (i.source === "klickymart-observed" ? annotate(i, q.q) : i)), { condition: q.condition, type: q.type, brand_strict: q.brand_strict });
     const dd = dedupe(pf.rows); rows = dd.rows;
+    await attachCheckoutQuotes(rows, zip); // CK-4: before max_landed + sort, same path for HTTP and MCP
     // max_landed = budget on the delivered total (price + shipping + est. tax). Rows whose total is unknown are left out and counted.
     const ml = maxLanded;
     let mlOver = 0, mlUnknown = 0;
@@ -793,28 +794,28 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     for (const [d, a] of aggs) obs[d] = { source: "observed by agents (Nostr kind 422 notes)", keys: a.keys, corroborated: a.corroborated, shipping_usd: a.observed.shipping_usd, tax_rate_pct: a.observed.tax_rate_pct, latest: a.latest_at };
     body.observed_by_agents = { note: "Separate from landed totals above, which come from KlickyMart's crawl and store policies. Corroborated means 2+ distinct keys.", stores: obs };
   };
-  const quoteSeeds = new Set([env.CRAWLER_PUBKEY_HEX].filter(Boolean) as string[]);
-  const attachCheckoutQuotes = async (body: Record<string, unknown>, zip: string) => {
+  const quoteSeeds = quoteSeedKeys(env.CRAWLER_PUBKEY_HEX, crawlerHex, env.SITE_ZAP_PUBKEY_HEX);
+  const indexedSet = new Set(snap.rows.map((x) => String(x.d).toLowerCase().replace(/^www\./, "")));
+  const attachCheckoutQuotes = async (rows: Record<string, any>[], zip: string) => {
     if (env.CHECKOUT_QUOTES_ENABLED !== "true") return;
     if (!/^\d{5}$/.test(zip)) return; const z3 = zip.slice(0, 3);
-    const items = ((body.items as Record<string, unknown>[] | undefined) ?? []).filter((i) => i.landed);
-    const ds = [...new Set(items.map((i) => String(i.d ?? i.domain ?? "")).filter(Boolean))].slice(0, 20);
-    const aggs = new Map(await Promise.all(ds.map(async (d) => [d, await loadCheckoutQuotes(env.DB, d, z3, quoteSeeds)] as const)));
-    for (const i of items) { const d = String(i.d ?? i.domain ?? ""); applyCheckoutQuote(i.landed as Record<string, unknown>, aggs.get(d) ?? null, `${origin}/landed/notes?domain=${encodeURIComponent(d)}&zip3=${z3}`); }
+    await applyQuotesToRows(rows, z3, (d) => indexedSet.has(d), (d) => loadCheckoutQuotes(env.DB, d, z3, quoteSeeds), (d) => `${origin}/landed/notes?domain=${encodeURIComponent(d)}&zip3=${z3}`);
   };
   if (path === "/landed/notes" && request.method === "GET") {
     if (env.CHECKOUT_QUOTES_ENABLED !== "true") return Response.json({ ok: false, disabled: true, notes: [], note: "Checkout-quote corroboration is disabled." }, { status: 404, headers: apiHeaders(snap.version, 0) });
     const d = (url.searchParams.get("domain") ?? "").toLowerCase().replace(/^www\./, ""); const z3 = url.searchParams.get("zip3") ?? "";
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return err400("domain", "domain is required");
     if (!/^\d{3}$/.test(z3)) return err400("zip3", "zip3 must be 3 digits (KlickyMart never takes a full ZIP here)");
+    if (!validZip3(z3)) return err400("zip3", "zip3 is not an assigned US ZIP prefix");
     const agg = await loadCheckoutQuotes(env.DB, d, z3, quoteSeeds);
-    return Response.json(agg ?? { d, zip3: z3, keys_counting: 0, corroborated: false, status: "no checkout notes", notes: [], rules: CHECKOUT_RULES }, { headers: apiHeaders(snap.version, 0) });
+    const ts = new Map<string, number>();
+    if (agg) for (const n of agg.notes) ts.set(n.id, Date.parse(n.day + "T00:00:00Z") / 1000);
+    return Response.json(agg ? publicQuoteView(agg, ts) : { d, zip3: z3, keys_counting: 0, corroborated: false, status: "no checkout notes", notes: [], rules: CHECKOUT_RULES }, { headers: apiHeaders(snap.version, 0) });
   }
   if (path === "/landed" && request.method === "GET") {
     const r = await landedCall((k) => url.searchParams.get(k));
     if (!r.ok) return err400(r.param, r.message);
     await attachObserved(r.body as Record<string, unknown>);
-    await attachCheckoutQuotes(r.body as Record<string, unknown>, url.searchParams.get("zip") ?? "");
     return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: { ...apiHeaders(snap.version, 0), ...(url.searchParams.get("live") === "1" ? { "Cache-Control": "no-store" } : {}) } });
   }
 
