@@ -726,7 +726,7 @@ export const APP_SRI = "sha384-YCWjKGmDqekIIfMYDRUp2jPUTmnKWu+hKGWQQUSx/fCNcd227
 /** /app: Nostr-app-style login and filtered feeds. All logic in /km-app.js (no inline script). */
 export const CASHU_SRI = "sha384-wT+CzErlyp/nNCHR3ITAifmXVCBrw7Gn3NRTcGQA8tJ/N0X150ARgtSZG/7fRKS7";
 export const QR_SRI = "sha384-MbJLkSnPHVLPbpmqCTjXjXV7LuNukmE8Lu2EDMBK3iVPKj2/H/s9AywCuL/ugU3o";
-export const TIP_SRI = "sha384-rc6fDYKGQFpSpxTGG+I8jsI2lXBq5UpG78Eog08XcPROTTsr2VlJYoB73UtXcVPk";
+export const TIP_SRI = "sha384-3lw0QKVgEoC/2E/NetWmxO8be4391YfGmYNfkSxuae7+IGFhEF2Agij7rH3WTflX";
 export function renderApp(origin: string, shell: PageShell, o: { mints: string[]; nwcRelays: string[] } = { mints: [], nwcRelays: [] }): string {
   const kinds: [number, string][] = [[31420, "31420 store records"], [421, "421 met-with-proof"], [422, "422 experience notes"], [420, "420 needs"], [1, "kind-1 #klickymart notes"]];
   const tags = ["btc", "x402", "agent-native", "phonereq"];

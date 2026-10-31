@@ -50,7 +50,29 @@
       return { method: "pay_invoice", params: { invoice: inv, amount: expectedMsat } };
     }, conn: conn };
   }
-  window.KMTipLib = { buildZapRequest: buildZapRequest, buildNutzap: buildNutzap, mintAllowed: mintAllowed, parseNwc: parseNwc, nwcSession: nwcSession };
+  /** K10-002: after a swap the input token is spent, so the change and locked proofs must never live only in memory.
+   * Builds the post-swap record, tries the durable write, and on ANY write failure returns the proofs as copyable cashu
+   * tokens (saved:false) so the page shows them at once with a NOT SAVED warning. Never reports saved unless put resolved. */
+  function persistSwap(rec, res, mint, put, encode, serialize) {
+    rec.locked = serialize ? serialize(res.send) : res.send.map(function (p) { return JSON.stringify(p); });
+    rec.change = res.keep && res.keep.length ? encode({ mint: mint, proofs: res.keep }) : "";
+    rec.locked_token = encode({ mint: mint, proofs: res.send });
+    rec.state = "swapped"; var input = rec.input_token; delete rec.input_token;
+    return Promise.resolve().then(function () { return put(rec); }).then(function () { return { saved: true, rec: rec }; }, function (e) {
+      rec.state = "swapped-unsaved"; if (input) rec.spent_input_token = input;
+      return { saved: false, rec: rec, error: e, change: rec.change, locked_token: rec.locked_token };
+    });
+  }
+  /** Refuse to start a swap when the browser reports less than `need` bytes of storage headroom (unknown = allowed). */
+  function storageRoomOk(est, need) {
+    if (!est || typeof est.quota !== "number" || typeof est.usage !== "number") return true;
+    return est.quota - est.usage >= (need || 1048576);
+  }
+  /** Vault records stuck in "swapping": the swap may have spent the saved input token; recover via the mint. */
+  function staleSwaps(list, now, olderThanMs) {
+    return (list || []).filter(function (r) { return r.state === "swapping" && now - (r.updated_at || r.created_at || 0) > (olderThanMs == null ? 120000 : olderThanMs); });
+  }
+  window.KMTipLib = { buildZapRequest: buildZapRequest, buildNutzap: buildNutzap, mintAllowed: mintAllowed, parseNwc: parseNwc, nwcSession: nwcSession, persistSwap: persistSwap, storageRoomOk: storageRoomOk, staleSwaps: staleSwaps };
   var root = document.getElementById("km-tip");
   if (!root || !NT) return;
 
@@ -197,6 +219,7 @@
       l.forEach(function (rec) {
         var d = el("div"); d.className = "km-break";
         d.appendChild(el("p", rec.sats + " sats at " + rec.mint + " · " + rec.state + (rec.published_to ? " to " + rec.published_to + " relay(s)" : "") + " · " + new Date(rec.created_at).toLocaleString()));
+        if (rec.state === "swapping") d.appendChild(el("p", "Interrupted swap: the input token saved here was probably already spent by the mint, so it is likely useless. Recover the change and locked ecash with your mint (or the wallet that issued the token); do not rely on this record."));
         if (rec.change) d.appendChild(el("p", "Change token: " + rec.change));
         var bx = el("button", "Export JSON"); bx.type = "button"; bx.addEventListener("click", function () { exportRec(rec); }); d.appendChild(bx);
         if (rec.state !== "published") {
@@ -227,23 +250,39 @@
       " Your token is spent; change and the locked ecash are saved in this browser first.")) return;
     var rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), created_at: Date.now(), state: "swapping", mint: mint, sats: sats, recipient: t.recipient, e: t.e || null, k: t.k == null ? null : t.k, relays: relays, comment: $("km-tip-comment").value.slice(0, 280), input_token: token };
     var w = new CT.Wallet(mint);
-    status("Saving, then swapping at " + mint + "…");
-    vaultPut(rec).then(function () { return w.loadMint(); }).then(function () {
+    var est = navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().catch(function () { return null; }) : Promise.resolve(null);
+    var unsaved = null;
+    est.then(function (e) {
+      if (!storageRoomOk(e, 1048576)) throw new Error("this browser is nearly out of storage, so the swapped ecash might not save; free some space first (nothing was swapped)");
+      status("Saving, then swapping at " + mint + "…");
+      return vaultPut(rec);
+    }).then(function () { return w.loadMint(); }).then(function () {
       return w.ops.send(sats, w.decodeToken(token).proofs).asP2PK({ pubkey: x.p2pk }).run();
     }).then(function (res) {
-      rec.locked = CT.serializeProofs(res.send); rec.change = res.keep && res.keep.length ? CT.getEncodedToken({ mint: mint, proofs: res.keep }) : ""; rec.state = "swapped"; delete rec.input_token;
-      return vaultPut(rec);
-    }).then(function () {
-      $("km-tip-token").value = ""; $("km-tip-change").textContent = rec.change ? "Your change (saved in this browser; export it): " + rec.change : "No change."; renderVault();
+      return persistSwap(rec, res, mint, vaultPut, CT.getEncodedToken, CT.serializeProofs);
+    }).then(function (r) {
+      $("km-tip-token").value = "";
+      if (!r.saved) {
+        unsaved = r;
+        // Show the proofs NOW: they exist nowhere else. Copyable, not saved.
+        var box = $("km-tip-change"); box.textContent = "";
+        box.appendChild(el("strong", "NOT SAVED: this browser could not store the swapped ecash (" + (r.error && r.error.message || "write failed") + "). Copy both tokens below somewhere safe now; closing this page loses them."));
+        [["Your change token (your money)", r.change || "(no change)"], ["Locked tip token (P2PK to the recipient; publish or give it to them)", r.locked_token]].forEach(function (p) {
+          box.appendChild(el("p", p[0] + ":")); var ta = document.createElement("textarea"); ta.readOnly = true; ta.rows = 3; ta.cols = 70; ta.value = p[1]; box.appendChild(ta);
+        });
+        throw new Error("swapped ecash NOT saved (copy the tokens shown above)");
+      }
+      $("km-tip-change").textContent = rec.change ? "Your change (saved in this browser; export it): " + rec.change : "No change."; renderVault();
       return signRec(rec);
     }).then(publishRec).then(function (n) {
       status(n ? "Nutzap published to " + n + " of " + relays.length + " relays." : "Publish failed on every relay. The nutzap is saved below; retry or export it.");
     }).catch(function (e) {
       renderVault();
-      status("Cashu tip stopped: " + e.message + (rec.state === "swapping" ? " (the input token is saved below in case the swap went through)" : ". The ecash is saved below; retry or export it."));
+      status("Cashu tip stopped: " + e.message + (unsaved ? ". It is NOT saved in this browser." : rec.state === "swapping" ? " (the input token is saved below in case the swap did not go through; if it did, recover the change with your mint)" : rec.state === "swapped" ? ". The ecash is saved below; retry or export it." : ""));
     });
   });
   renderVault();
+  vaultAll().then(function (l) { if (staleSwaps(l, Date.now()).length) status("A Cashu swap was interrupted earlier: its saved input token was probably spent. See Saved Cashu tips below and recover with your mint."); }).catch(function () {});
 
   var qp = new URLSearchParams(location.search);
   if (qp.get("tip")) open(qp.get("tip").toLowerCase(), qp.get("e"), qp.get("k"));

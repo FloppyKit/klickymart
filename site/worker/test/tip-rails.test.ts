@@ -182,10 +182,33 @@ describe("Cashu nutzaps (NIP-61)", () => {
   });
   it("R8-012: swapped proofs and change go to IndexedDB before signing/publishing; one confirm before the swap; retry/export view", () => {
     const src = TIPJS as string; const h = src.slice(src.indexOf('$("km-tip-nutzap").addEventListener'));
-    const order = ["confirm(", "vaultPut(rec).then", "w.ops.send", "rec.locked = ", "return vaultPut(rec)", "signRec(rec)", "publishRec"].map((x) => h.indexOf(x));
+    const order = ["confirm(", "storageRoomOk(", "return vaultPut(rec)", "w.ops.send", "persistSwap(rec, res", "if (!r.saved)", "signRec(rec)", "publishRec"].map((x) => h.indexOf(x));
     expect(order.every((i) => i >= 0)).toBe(true); expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(src).toMatch(/Retry publish/); expect(src).toMatch(/Export JSON/); expect(src).toMatch(/no IndexedDB[^"]*not swapping/);
     expect(src).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+  });
+  it("K10-002: a QuotaExceededError on the post-swap write never claims 'saved' and returns copyable tokens", async () => {
+    const L = tipLib(); let puts = 0;
+    const quota = () => { puts++; const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; return Promise.reject(e); };
+    const enc = (t: { mint: string; proofs: unknown[] }) => "cashuB" + btoa(JSON.stringify(t));
+    const res = { send: [{ amount: 16, secret: "s1", C: "02aa", id: "00" }], keep: [{ amount: 4, secret: "s2", C: "02bb", id: "00" }] };
+    const rec: Record<string, any> = { id: "x", state: "swapping", input_token: "cashuBspent" };
+    const r = await L.persistSwap(rec, res, "https://mint.example", quota, enc);
+    expect(puts).toBe(1); expect(r.saved).toBe(false); expect(r.error.name).toBe("QuotaExceededError");
+    expect(r.change).toBe(enc({ mint: "https://mint.example", proofs: res.keep })); expect(r.locked_token).toBe(enc({ mint: "https://mint.example", proofs: res.send }));
+    expect(rec.state).toBe("swapped-unsaved"); expect(rec.input_token).toBeUndefined();
+    const ok = await L.persistSwap({ id: "y", state: "swapping", input_token: "t" }, res, "https://mint.example", () => Promise.resolve(), enc);
+    expect(ok.saved).toBe(true); expect(ok.rec.state).toBe("swapped");
+    // storage headroom check before swapping, and stale 'swapping' records are detected on reload
+    expect(L.storageRoomOk({ quota: 10_000_000, usage: 9_500_000 }, 1048576)).toBe(false);
+    expect(L.storageRoomOk({ quota: 10_000_000, usage: 1_000 }, 1048576)).toBe(true); expect(L.storageRoomOk(null)).toBe(true);
+    expect(L.staleSwaps([{ state: "swapping", created_at: 0 }, { state: "swapped", created_at: 0 }, { state: "swapping", created_at: 999_000 }], 1_000_000).length).toBe(1);
+    const src = TIPJS as string;
+    expect(src).toMatch(/NOT SAVED: this browser could not store the swapped ecash/);
+    expect(src).toMatch(/Interrupted swap: the input token saved here was probably already spent/);
+    // the 'saved' wording only appears on the confirmed-write path
+    const h = src.slice(src.indexOf('$("km-tip-nutzap").addEventListener'));
+    expect(h.indexOf("saved in this browser; export it")).toBeGreaterThan(h.indexOf("if (!r.saved)"));
   });
   it("tip-ready without 10019 or lud16 is false; ingest follows 9321/10019 and keeps nutzaps only for held events", async () => {
     const tr = await (await SELF.fetch(`https://klickymart.com/tip-ready.json?pubkeys=${"77".repeat(32)}`)).json() as { items: any[] };
