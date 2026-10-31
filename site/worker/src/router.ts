@@ -492,7 +492,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const ids = (url.searchParams.get("e") ?? "").toLowerCase().split(",").filter(Boolean);
     if (!ids.length || ids.length > 100 || ids.some((x) => !/^[0-9a-f]{64}$/.test(x))) return err400("e", "1 to 100 comma-separated 64-hex event ids");
     const m = await loadNutzaps(env.DB, ids);
-    return Response.json({ items: [...m].map(([id, l]) => ({ id, nutzaps: l })), note: "Display only; never ranking weight. sats are claimed unless locked_to_recipient and mint_listed are both true." }, { headers: { "Cache-Control": "public, max-age=30", "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ items: [...m].map(([id, l]) => ({ id, nutzaps: l })), note: "Display only; never ranking weight. Only nutzaps P2PK-locked to the recipient's 10019 key at a mint in that 10019 are listed. sats are always claimed: mint signatures are not checked." }, { headers: { "Cache-Control": "public, max-age=30", "Access-Control-Allow-Origin": "*" } });
   }
   if (path === "/wallet" && request.method === "GET") {
     return new Response(renderWallet(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" } });

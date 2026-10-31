@@ -167,6 +167,19 @@ describe("Cashu nutzaps (NIP-61)", () => {
       expect(tr.items[0]).toMatchObject({ tip_ready: true, rails: { lightning: false, cashu: true }, ranking_weight: 0, cashu: { mints: [m.base], p2pk } });
     } finally { globalThis.fetch = real; }
   });
+  it("R8-007 repro: forged 9321s (unlocked, wrong key, unlisted mint) are dropped; a lock-shaped one at a listed mint is shown only as claimed", async () => {
+    const rSk = key(); const r = pkOf(rSk); const p2 = "02" + pkOf(key()); const target = "5a".repeat(32);
+    await store(sign({ kind: 10019, created_at: now(), content: "", tags: [["mint", "https://mint.listed.example"], ["pubkey", p2]] }, rSk));
+    const lockTo = (k: string) => JSON.stringify(["P2PK", { nonce: "00", data: k }]);
+    const nz = (mint: string, secret: string, amount = 1000000) => sign({ kind: 9321, created_at: now(), content: "", tags: [["proof", JSON.stringify({ amount, secret, C: "02" + "00".repeat(32), id: "00" })], ["u", mint], ["e", target], ["p", r]] });
+    const forged = [nz("https://mint.listed.example", "plain-secret"), nz("https://mint.listed.example", lockTo("02" + "11".repeat(32))), nz("https://evil.mint.example", lockTo(p2))];
+    for (const f of forged) await store(f);
+    expect((await loadNutzaps(env.DB, [target])).get(target) ?? []).toEqual([]);
+    await store(nz("https://mint.listed.example", lockTo(p2), 21));
+    const got = (await loadNutzaps(env.DB, [target])).get(target)!; expect(got.length).toBe(1); expect(got[0].sats).toBe(21);
+    const j = await (await SELF.fetch(`https://klickymart.com/tip/nutzaps.json?e=${target}`)).json() as { note: string };
+    expect(j.note).toMatch(/always claimed/);
+  });
   it("tip-ready without 10019 or lud16 is false; ingest follows 9321/10019 and keeps nutzaps only for held events", async () => {
     const tr = await (await SELF.fetch(`https://klickymart.com/tip-ready.json?pubkeys=${"77".repeat(32)}`)).json() as { items: any[] };
     expect(tr.items[0]).toMatchObject({ tip_ready: false, rails: { lightning: false, cashu: false }, cashu: null });
@@ -187,7 +200,7 @@ describe("display, ranking and CSP", () => {
   it("reviews show 'tipped' with verified counts, a tip link, and escape everything", () => {
     const rv = { count: 1, avg_rating_5: 5, note: "", items: [{ id: "ab".repeat(32), d: "x.com", pubkey: "cd".repeat(32), created_at: now(), rating: 5, rating_max: 5, attempt: "completed", pay: null, fulfillment: null, proof: null, content: "<script>alert(1)</script> $& $1", verified: "unverified", event: {} }] } as never;
     const html = renderReviewsSection("x.com", rv, null, new Map([["ab".repeat(32), { zaps: 2, zap_sats: 42, zap_validated: 1, nutzaps: 1, nutzap_sats: 21, nutzap_checked: 1 }]]));
-    expect(html).toContain("tipped: 2 zaps · 42 sats (1 verified); 1 nutzap · 21 sats (1 locked to the author at a listed mint, 0 claimed)");
+    expect(html).toContain("tipped: 2 zaps · 42 sats (1 verified); 1 nutzap · 21 sats claimed (locked to the author Cashu key at a mint they list; mint signatures not checked)");
     expect(html).toContain(`/app?tip=${"cd".repeat(32)}&amp;e=${"ab".repeat(32)}&amp;k=422`);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt; $&amp; $1"); expect(html).not.toContain("<script>alert");
   });

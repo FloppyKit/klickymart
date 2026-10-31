@@ -595,7 +595,7 @@ export function tippedHtml(t: TippedMap extends Map<string, infer V> ? V | undef
   if (!t || (!t.zaps && !t.nutzaps)) return "";
   const parts: string[] = [];
   if (t.zaps) parts.push(`${t.zaps} zap${t.zaps === 1 ? "" : "s"} · ${t.zap_sats} sats (${t.zap_validated} verified)`);
-  if (t.nutzaps) parts.push(`${t.nutzaps} nutzap${t.nutzaps === 1 ? "" : "s"} · ${t.nutzap_sats} sats (${t.nutzap_checked} locked to the author at a listed mint, ${t.nutzaps - t.nutzap_checked} claimed)`);
+  if (t.nutzaps) parts.push(`${t.nutzaps} nutzap${t.nutzaps === 1 ? "" : "s"} · ${t.nutzap_sats} sats claimed (locked to the author Cashu key at a mint they list; mint signatures not checked)`);
   return ` <span class="km-badge km-tipped" data-testid="tipped">tipped: ${parts.join("; ")}</span>`;
 }
 export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, aTag: string | null, tipped?: TippedMap): string {

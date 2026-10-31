@@ -198,7 +198,7 @@ export function parseNutzap(ev: Ev, info: NutzapInfo | null): Nutzap | null {
   return { id: ev.id, target: ev.tags.find((t) => t[0] === "e")?.[1] ?? null, recipient: ev.tags.find((t) => t[0] === "p")?.[1] ?? null, tipper: ev.pubkey,
     sats: proofs.reduce((a, p) => a + (p!.amount as number), 0), mint, locked_to_recipient: locked, mint_listed: !!mint && !!info?.mints.includes(mint), created_at: ev.created_at };
 }
-/** Nutzaps per target note id (display only; never fed into ranking). */
+/** Nutzaps per target note id that pass the lock + listed-mint checks (display only; never fed into ranking). */
 export async function loadNutzaps(db: D1Database | undefined, ids: string[]): Promise<Map<string, Nutzap[]>> {
   const out = new Map<string, Nutzap[]>(); if (!db || !ids.length) return out;
   const want = new Set(ids); const infos = new Map<string, NutzapInfo | null>();
@@ -209,6 +209,9 @@ export async function loadNutzaps(db: D1Database | undefined, ids: string[]): Pr
     if (!e || !want.has(e) || !p) continue;
     if (!infos.has(p)) infos.set(p, await nutzapInfoOf(db, p));
     const n = parseNutzap(ev, infos.get(p) ?? null); if (!n || n.tipper === n.recipient) continue;
+    // R8-007: a 9321 only counts when every proof is P2PK-locked to the author's 10019 key AND the mint is in that
+    // 10019. Even then the amount stays "claimed": mint signatures (C / DLEQ) are not checked server-side.
+    if (!n.locked_to_recipient || !n.mint_listed || n.recipient !== p) continue;
     (out.get(e) ?? out.set(e, []).get(e)!).push(n);
   }
   return out;
