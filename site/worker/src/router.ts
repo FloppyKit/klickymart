@@ -1,4 +1,5 @@
 import { WALLET_GUIDE } from "./wallet";
+import { cashuMints, findReceipt, getInvoice, loadNutzaps, nutzapInfoOf, nwcRelays, type InvoiceInput } from "./tip-rails";
 import { APP_RELAYS, authSecret, checkFeedList, clearCookie, login, makeChallenge, parseFeedParams, readFeed, readSession, sessionCookie, tipReadyFor, TIP_LIMITS } from "./nostr-app";
 const TEMPLATE_HELP = {
   estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
@@ -94,6 +95,10 @@ export interface Env {
   AUTH_SECRET?: string;
   /** Value-for-value Lightning address for the site footer. Unset -> slot hidden. */
   SITE_TIP_LUD16?: string;
+  /** Comma list of Cashu mint origins the /app page may reach (CSP). Unset -> DEFAULT_CASHU_MINTS. */
+  CASHU_MINTS?: string;
+  /** Comma list of wss:// relays a browser NWC connection may use (CSP). Unset -> DEFAULT_NWC_RELAYS. */
+  NWC_RELAYS?: string;
 }
 
 /** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
@@ -417,8 +422,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}|{type:'hash',sha256}}. Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
   }
   if (path === "/app" && request.method === "GET") {
-    return new Response(renderApp(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
-      "Content-Security-Policy": `default-src 'none'; script-src 'self'; connect-src 'self' ${APP_RELAYS.join(" ")}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'` } });
+    return new Response(renderApp(origin, shell, { mints: cashuMints(env), nwcRelays: nwcRelays(env) }), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": `default-src 'none'; script-src 'self'; connect-src 'self' ${[...new Set([...APP_RELAYS, ...nwcRelays(env), ...cashuMints(env)])].join(" ")}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'` } });
   }
   if (path === "/auth/challenge" && request.method === "GET") {
     const sec = authSecret(env);
@@ -457,8 +462,30 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/tip-ready.json" && request.method === "GET") {
     const pks = [...new Set((url.searchParams.get("pubkeys") ?? "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean))];
     if (!pks.length || pks.length > TIP_LIMITS.maxPubkeys || pks.some((p) => !/^[0-9a-f]{64}$/.test(p))) return err400("pubkeys", `1 to ${TIP_LIMITS.maxPubkeys} comma-separated 64-hex pubkeys`);
-    const items = await tipReadyFor(env.DB, pks, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    const ln = await tipReadyFor(env.DB, pks, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    const allowed = new Set(cashuMints(env));
+    const items = await Promise.all(ln.map(async (t) => {
+      const c = await nutzapInfoOf(env.DB, t.pubkey);
+      const cashu = c ? { mints: c.mints, relays: c.relays, p2pk: c.p2pk, info_id: c.id, mints_reachable_here: c.mints.filter((m) => allowed.has(m)) } : null;
+      return { ...t, tip_ready: t.tip_ready || !!cashu, rails: { lightning: t.tip_ready, cashu: !!cashu }, lightning: t.tip_ready ? { addr: t.addr } : null, cashu, ranking_weight: 0 as const };
+    }));
     return Response.json({ items, note: "Display only: tip-ready never adds ranking weight. KlickyMart never holds keys or funds.", wallet: `${origin}/wallet#tip-ready` }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
+  }
+  if (path === "/tip/invoice" && request.method === "POST") {
+    const body = await request.json().catch(() => null) as InvoiceInput | null;
+    const r = await getInvoice(env.DB, body ?? {}, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    return Response.json(r.body, { status: r.status, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (path === "/tip/receipt" && request.method === "GET") {
+    const id = (url.searchParams.get("zap_request") ?? "").toLowerCase(); const zapper = url.searchParams.get("zapper")?.toLowerCase() ?? null;
+    if (!/^[0-9a-f]{64}$/.test(id) || (zapper && !/^[0-9a-f]{64}$/.test(zapper))) return err400("zap_request", "zap_request (and optional zapper) must be 64-hex");
+    return Response.json(await findReceipt(env.DB, id, zapper), { headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (path === "/tip/nutzaps.json" && request.method === "GET") {
+    const ids = (url.searchParams.get("e") ?? "").toLowerCase().split(",").filter(Boolean);
+    if (!ids.length || ids.length > 100 || ids.some((x) => !/^[0-9a-f]{64}$/.test(x))) return err400("e", "1 to 100 comma-separated 64-hex event ids");
+    const m = await loadNutzaps(env.DB, ids);
+    return Response.json({ items: [...m].map(([id, l]) => ({ id, nutzaps: l })), note: "Display only; never ranking weight. sats are claimed unless locked_to_recipient and mint_listed are both true." }, { headers: { "Cache-Control": "public, max-age=30", "Access-Control-Allow-Origin": "*" } });
   }
   if (path === "/wallet" && request.method === "GET") {
     return new Response(renderWallet(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" } });
@@ -860,7 +887,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (!row) return new Response(render404(origin, shell), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.headers.get("Accept")?.includes("text/html")) {
       const badge = tierBadgeHtml((await tiersFor([row.d])).get(row.d));
-      return new Response(renderMerchant(row, origin, shell, await getReviews(env.DB, domain), aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap))).replace(H1_RE, (m) => spliceBadge(m, badge)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      const rvs = await getReviews(env.DB, domain);
+      const tipped = await tippedFor(env.DB, domain, (rvs?.items ?? []).map((x) => x.id));
+      return new Response(renderMerchant(row, origin, shell, rvs, aTagFor(domain), await getCommunity(env.DB, domain, crawlerHex, inStoreOnly(snap)), tipped).replace(H1_RE, (m) => spliceBadge(m, badge)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     return handleRequest(new Request(`${origin}/records/${domain}`, request), env);
   }
@@ -1150,3 +1179,13 @@ async function exTake(db: D1Database, id: string, pubkey: string): Promise<boole
 export const H1_RE = /(<h1>[^<]*<\/h1>)/;
 export function spliceBadge(h1: string, badge: string): string { return h1 + badge; }
 export function insertAfterH1(html: string, badge: string): string { return html.replace(H1_RE, (m) => spliceBadge(m, badge)); }
+
+/** Per-review "tipped" display: zap receipts (validated where the LNURL zap key is known) and nutzaps. Display only. */
+async function tippedFor(db: D1Database | undefined, d: string, ids: string[]): Promise<Map<string, { zaps: number; zap_sats: number; zap_validated: number; nutzaps: number; nutzap_sats: number; nutzap_checked: number }>> {
+  const out = new Map<string, { zaps: number; zap_sats: number; zap_validated: number; nutzaps: number; nutzap_sats: number; nutzap_checked: number }>();
+  if (!db || !ids.length) return out;
+  const get = (id: string) => out.get(id) ?? out.set(id, { zaps: 0, zap_sats: 0, zap_validated: 0, nutzaps: 0, nutzap_sats: 0, nutzap_checked: 0 }).get(id)!;
+  try { const t = await loadTips(db, d); for (const id of ids) for (const z of (t.byNote.get(id) ?? []).filter((x) => !x.self)) { const g = get(id); g.zaps++; g.zap_sats += z.sats ?? 0; if (z.validated) g.zap_validated++; } } catch { /* */ }
+  for (const [id, l] of await loadNutzaps(db, ids)) for (const n of l) { const g = get(id); g.nutzaps++; g.nutzap_sats += n.sats; if (n.locked_to_recipient && n.mint_listed) g.nutzap_checked++; }
+  return out;
+}

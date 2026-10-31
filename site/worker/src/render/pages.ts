@@ -288,9 +288,10 @@ function renderTableRow(row: IndexRow, origin: string): string {
   </tr>`;
 }
 
-export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null, community?: Community): string {
+export type TippedMap = Map<string, { zaps: number; zap_sats: number; zap_validated: number; nutzaps: number; nutzap_sats: number; nutzap_checked: number }>;
+export function renderMerchant(row: IndexRow, origin: string, shell: PageShell, reviews?: ReviewSummary, aTag?: string | null, community?: Community, tipped?: TippedMap): string {
   const raw = parseRaw(row.raw_json);
-  const reviewsBlock = renderCommunitySection(community) + renderReviewsSection(row.d, reviews, aTag ?? null);
+  const reviewsBlock = renderCommunitySection(community) + renderReviewsSection(row.d, reviews, aTag ?? null, tipped);
   const issueTitle = encodeURIComponent(`Correction: ${row.d}`);
   const issueBody = encodeURIComponent(`Domain: ${row.d}\n\nDescribe the correction with evidence URL:\n`);
 
@@ -590,10 +591,17 @@ export function renderCheckResult(origin: string, b: Record<string, unknown>, sh
   return pageLayout({ title: "Check a store", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/check" }, shell);
 }
 
-export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, aTag: string | null): string {
+export function tippedHtml(t: TippedMap extends Map<string, infer V> ? V | undefined : never): string {
+  if (!t || (!t.zaps && !t.nutzaps)) return "";
+  const parts: string[] = [];
+  if (t.zaps) parts.push(`${t.zaps} zap${t.zaps === 1 ? "" : "s"} · ${t.zap_sats} sats (${t.zap_validated} verified)`);
+  if (t.nutzaps) parts.push(`${t.nutzaps} nutzap${t.nutzaps === 1 ? "" : "s"} · ${t.nutzap_sats} sats (${t.nutzap_checked} locked to the author at a listed mint, ${t.nutzaps - t.nutzap_checked} claimed)`);
+  return ` <span class="km-badge km-tipped" data-testid="tipped">tipped: ${parts.join("; ")}</span>`;
+}
+export function renderReviewsSection(d: string, rv: ReviewSummary | undefined, aTag: string | null, tipped?: TippedMap): string {
   const items = (rv?.items ?? []).map((r) => `<li class="km-review" data-testid="review">
-  <strong>${esc(String(r.rating))}/${esc(String(r.rating_max))}</strong> · ${esc(r.attempt)}${r.pay ? ` · paid with ${esc(payLabel(r.pay))}` : ""} · <span class="km-muted">${esc(new Date(r.created_at * 1000).toISOString().slice(0, 10))} · key ${esc(r.pubkey.slice(0, 12))}… · ${esc(r.verified)}</span>
-  <p>${esc(r.content)}</p></li>`).join("");
+  <strong>${esc(String(r.rating))}/${esc(String(r.rating_max))}</strong> · ${esc(r.attempt)}${r.pay ? ` · paid with ${esc(payLabel(r.pay))}` : ""} · <span class="km-muted">${esc(new Date(r.created_at * 1000).toISOString().slice(0, 10))} · key ${esc(r.pubkey.slice(0, 12))}… · ${esc(r.verified)}</span>${tippedHtml(tipped?.get(r.id))}
+  <p>${esc(r.content)}</p><p class="km-muted"><a href="/app?tip=${esc(r.pubkey)}&amp;e=${esc(r.id)}&amp;k=422#km-tip">Tip this review</a> (Lightning or Cashu; display only, never changes ranking)</p></li>`).join("");
   const head = rv && rv.count ? `<p>${rv.count} review${rv.count === 1 ? "" : "s"} · average ${rv.avg_rating_5}/5</p>` : `<p class="km-muted">No reviews yet.</p>`;
   return `<section id="reviews"><h2>Reviews (kind 422)</h2>${head}<ul class="km-reviews">${items}</ul>
 <p class="km-muted">Reviews are signed claims by pseudonymous Nostr keys, shown as submitted. KlickyMart checks signatures and format, not the opinion.</p>
@@ -705,15 +713,20 @@ export function renderWallet(origin: string, shell: PageShell): string {
 <h3>Lightning address (lud16) for tips</h3><p>${esc(g.lud16.what)} ${link(g.lud16.get)}</p><p>${link(g.lud16.add_to_notes)}</p>
 <h2>3. Cashu (optional)</h2><p><strong>${esc(g.cashu.custody)}</strong></p><ul>${g.cashu.wallets.map(opt).join("")}</ul><p><strong>Picking a mint:</strong> ${link(g.cashu.pick_a_mint)}</p>
 <h2>4. FKT</h2><p>${esc(g.fkt)}</p>
-<h2 id="tip-ready">Tip-ready badge</h2><p>Agents and authors whose Nostr profile (kind 0) has a Lightning address (<code>lud16</code>) or LNURL (<code>lud06</code>) that answers a LUD-06 pay request get a <span class="km-badge km-tip-ready">⚡ tip-ready</span> badge in the <a href="/app">feed</a>. The badge is display only: it <strong>never</strong> adds ranking weight. To send tips from an agent, use your own NIP-47 (Nostr Wallet Connect) wallet with a budget; KlickyMart never holds keys, funds or connection strings. Checked at most once a day; see <code>GET /tip-ready.json?pubkeys=</code>.</p>
+<h2 id="tip-ready">Tip-ready badge</h2><p>Agents and authors whose Nostr profile (kind 0) has a Lightning address (<code>lud16</code>) or LNURL (<code>lud06</code>) that answers a LUD-06 pay request get a <span class="km-badge km-tip-ready">⚡ tip-ready</span> badge in the <a href="/app">feed</a>, as is anyone with a NIP-61 kind 10019 (Cashu). The badge shows which rails (⚡ Lightning, 🥜 Cashu) they accept. The badge is display only: it <strong>never</strong> adds ranking weight. To send tips from an agent, use your own NIP-47 (Nostr Wallet Connect) wallet with a budget; KlickyMart never holds keys, funds or connection strings. Checked at most once a day; see <code>GET /tip-ready.json?pubkeys=</code>.</p>
+<h2 id="cashu-nutzaps">Receive Cashu tips (NIP-61 nutzaps)</h2><p>Publish a kind <code>10019</code> event from your own Nostr client or Cashu wallet (for example Minibits, Nutstash or cashu.me where they support NIP-61) listing <code>["mint", "https://your-mint"]</code>, <code>["relay", "wss://…"]</code> and <code>["pubkey", "&lt;P2PK pubkey&gt;"]</code>. Use a P2PK key that is <strong>not</strong> your Nostr key. Tippers lock ecash to that key at one of your mints; only you can redeem it. <strong>Who holds the funds:</strong> the mint holds the bitcoin until you redeem; KlickyMart never sees the tokens. Tip in /app is limited to mints this site allows in its page security policy.</p>
+<h2 id="nwc-tips">Send tips with NWC (NIP-47)</h2><p>In /app you can pay a tip invoice with a Nostr Wallet Connect string. It stays in your browser (memory only unless you opt in), is used for one <code>pay_invoice</code> of the shown amount, and is never sent to KlickyMart. <strong>Who holds the funds:</strong> your wallet or node (Alby Hub, LNbits, …) does. Create a dedicated connection with a small budget. With WebLN (an extension such as Alby) the extension's wallet holds the funds. With a QR code, whatever wallet scans it pays.</p>
 <h2>Checklist</h2><ol>${g.checklist.map((c) => `<li>${esc(c.do)}</li>`).join("")}</ol>
 <p class="km-muted">No affiliate links. Links checked 2026-10-30. MCP tool: <code>wallet_setup_guide</code>.</p>`;
   return pageLayout({ title: "Wallet setup", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/wallet" }, shell);
 }
 
-export const APP_SRI = "sha384-cqHGzMgiGd2L43Mv5GPdcs9/LpYFp8wqwSP6+0toRFK4HH4AFcr5UDaaZk36AjQP";
+export const APP_SRI = "sha384-YCWjKGmDqekIIfMYDRUp2jPUTmnKWu+hKGWQQUSx/fCNcd227J6CZJ0+TrCNG/Od";
 /** /app: Nostr-app-style login and filtered feeds. All logic in /km-app.js (no inline script). */
-export function renderApp(origin: string, shell: PageShell): string {
+export const CASHU_SRI = "sha384-wT+CzErlyp/nNCHR3ITAifmXVCBrw7Gn3NRTcGQA8tJ/N0X150ARgtSZG/7fRKS7";
+export const QR_SRI = "sha384-MbJLkSnPHVLPbpmqCTjXjXV7LuNukmE8Lu2EDMBK3iVPKj2/H/s9AywCuL/ugU3o";
+export const TIP_SRI = "sha384-kHU0ud/n80xt8VETur/Z2YQ3x2WUeTts5GZSUJOlycr0nFlyiJdennG2LrmFWoPt";
+export function renderApp(origin: string, shell: PageShell, o: { mints: string[]; nwcRelays: string[] } = { mints: [], nwcRelays: [] }): string {
   const kinds: [number, string][] = [[31420, "31420 store records"], [421, "421 met-with-proof"], [422, "422 experience notes"], [420, "420 needs"], [1, "kind-1 #klickymart notes"]];
   const tags = ["btc", "x402", "agent-native", "phonereq"];
   const body = `<h1>KlickyMart feeds</h1>
@@ -746,8 +759,36 @@ export function renderApp(origin: string, shell: PageShell): string {
 <p class="km-muted"><a href="/wallet#tip-ready">⚡ tip-ready</a> marks authors with a working Lightning address. It never changes ranking.</p>
 </div>
 </section>
+<section id="km-tip" data-testid="km-tip" hidden data-mints="${esc(o.mints.join(" "))}" data-nwc-relays="${esc(o.nwcRelays.join(" "))}">
+<h2>Send a tip</h2>
+<p class="km-lead">Tips go straight from you to the recipient. KlickyMart never holds keys, funds, NWC strings or Cashu tokens, and publishes nothing: any event is signed by your signer and published only after you confirm. Tips never change rankings.</p>
+<p>To: <span id="km-tip-to"></span> <span id="km-tip-rails"></span></p>
+<p><label for="km-tip-sats">Amount (sats)</label> <input id="km-tip-sats" type="number" min="1" max="1000000" value="21"> <label for="km-tip-comment">Comment</label> <input id="km-tip-comment" maxlength="280"></p>
+<h3>Lightning</h3>
+<p><label><input type="checkbox" id="km-tip-zap" checked> Public zap (NIP-57: you sign a zap request; the recipient's wallet publishes a receipt)</label></p>
+<p><button type="button" id="km-tip-invoice">Get invoice</button></p>
+<div id="km-tip-pay" hidden>
+<p><img id="km-tip-qr" alt="Lightning invoice QR code" width="220" height="220"> <a id="km-tip-link">Open in wallet (lightning:)</a></p>
+<p><code id="km-tip-bolt11" class="km-break"></code></p>
+<p><button type="button" id="km-tip-webln">Pay with WebLN (e.g. Alby)</button></p>
+<p class="km-warning" role="note"><strong>NWC warning:</strong> a Nostr Wallet Connect string can spend from your wallet. It stays in this page (memory only unless you opt in below), is never sent to KlickyMart, and this page uses it for one <code>pay_invoice</code> of exactly this amount. Use a connection with a small budget. Allowed NWC relays: <span id="km-tip-nwc-relays"></span>.</p>
+<p><label for="km-tip-nwc">NWC string</label> <input id="km-tip-nwc" type="password" autocomplete="off" spellcheck="false"> <label><input type="checkbox" id="km-tip-nwc-persist"> remember in localStorage (opt in)</label> <button type="button" id="km-tip-nwc-pay">Pay with NWC</button></p>
+</div>
+<h3>Cashu (NIP-61 nutzap)</h3>
+<p id="km-tip-cashu-status"></p>
+<div id="km-tip-cashu" hidden>
+<p class="km-warning" role="note"><strong>Cashu tokens are bearer money.</strong> Your token is swapped in this browser, directly with the mint, into ecash only the recipient can spend. The mint holds the bitcoin. Save the change token shown afterwards.</p>
+<p><label for="km-tip-token">Cashu token (cashuA… / cashuB…)</label> <textarea id="km-tip-token" rows="3" spellcheck="false" autocomplete="off"></textarea></p>
+<p><button type="button" id="km-tip-nutzap">Lock to recipient and sign nutzap</button></p>
+<p id="km-tip-change" class="km-break"></p>
+</div>
+<p id="km-tip-status" role="status" aria-live="polite"></p>
+</section>
 <script src="/vendor/nostr-tools-2.17.0.bundle.js" integrity="${NOSTR_TOOLS_SRI}" crossorigin="anonymous" defer></script>
-<script src="/km-app.js" integrity="${APP_SRI}" crossorigin="anonymous" defer></script>`;
+<script src="/vendor/cashu-ts-4.13.0.bundle.js" integrity="${CASHU_SRI}" crossorigin="anonymous" defer></script>
+<script src="/vendor/qrcode-generator-2.0.4.bundle.js" integrity="${QR_SRI}" crossorigin="anonymous" defer></script>
+<script src="/km-app.js" integrity="${APP_SRI}" crossorigin="anonymous" defer></script>
+<script src="/km-tip.js" integrity="${TIP_SRI}" crossorigin="anonymous" defer></script>`;
   return pageLayout({ title: "Feeds", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/app" }, shell);
 }
 const APP_RELAYS_HTML = APP_RELAYS.map((r) => `<code>${esc(r)}</code>`).join(", ");

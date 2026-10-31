@@ -225,19 +225,20 @@ export function publicHost(h: string): boolean {
   return !/(^|\.)(localhost|local|internal|lan|home|arpa|test|invalid|onion)$/.test(s);
 }
 /** A pay endpoint "works" when it answers a LUD-06 payRequest with an https callback and sane sendable range. */
-export async function probePayUrl(url: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+export async function probePayUrl(url: string, fetcher?: typeof fetch, doh?: typeof fetch): Promise<boolean> {
+  // Same SSRF + DNS-rebinding guard as the tip invoice proxy (tip-rails.ts guardedFetch).
+  const { guardedFetch } = await import("./tip-rails");
+  const r = await guardedFetch(url, { fetcher: fetcher as never, doh: doh as never });
+  if (!r.ok) return false;
   try {
-    const r = await fetcher(url, { redirect: "manual", headers: { Accept: "application/json", "User-Agent": "KlickyMart tip-ready check (+https://klickymart.com/bot)" }, signal: AbortSignal.timeout(4000) });
-    if (r.status !== 200) return false;
-    const t = await r.text(); if (t.length > 32768) return false;
-    const j = JSON.parse(t) as { tag?: unknown; callback?: unknown; minSendable?: unknown; maxSendable?: unknown };
+    const j = JSON.parse(r.text) as { tag?: unknown; callback?: unknown; minSendable?: unknown; maxSendable?: unknown };
     if (j.tag !== "payRequest" || typeof j.callback !== "string" || !j.callback.startsWith("https://")) return false;
     return typeof j.minSendable === "number" && typeof j.maxSendable === "number" && j.minSendable > 0 && j.maxSendable >= j.minSendable;
   } catch { return false; }
 }
 export interface TipReady { pubkey: string; tip_ready: boolean; addr: string | null; checked_at: number | null; ranking_weight: 0 }
 /** tip-ready badges. NEVER used for ranking: ranking_weight is always 0 and nothing in query/ranking reads tip_ready_cache. */
-export async function tipReadyFor(db: D1Database | undefined, pubkeys: string[], o: { salt: string; ip: string | null; fetcher?: typeof fetch; nowMs?: number }): Promise<TipReady[]> {
+export async function tipReadyFor(db: D1Database | undefined, pubkeys: string[], o: { salt: string; ip: string | null; fetcher?: typeof fetch; doh?: typeof fetch; nowMs?: number }): Promise<TipReady[]> {
   const nowS = Math.floor((o.nowMs ?? Date.now()) / 1000);
   const out: TipReady[] = [];
   for (const pk of pubkeys) {
@@ -254,7 +255,7 @@ export async function tipReadyFor(db: D1Database | undefined, pubkeys: string[],
     const ipH = ipHash(o.ip, o.salt, o.nowMs);
     const refused = await takeAll(db, [...(ipH ? [{ k: `tr:ip:${ipH}:${hr}`, limit: TIP_LIMITS.perNetPerHour, ttlS: 7200 }] : []), { k: `tr:g:${hr}`, limit: TIP_LIMITS.globalPerHour, ttlS: 7200 }], nowS).catch(() => ({ k: "err", limit: 0, ttlS: 0 }));
     if (refused) { out.push({ pubkey: pk, tip_ready: c ? !!c.ok : false, addr: pay.addr, checked_at: c?.checked_at ?? null, ranking_weight: 0 }); continue; }
-    const ok = await probePayUrl(pay.url, o.fetcher);
+    const ok = await probePayUrl(pay.url, o.fetcher, o.doh);
     await db.prepare("INSERT INTO tip_ready_cache (pubkey, addr, ok, checked_at) VALUES (?,?,?,?) ON CONFLICT(pubkey, addr) DO UPDATE SET ok=excluded.ok, checked_at=excluded.checked_at").bind(pk, pay.addr, ok ? 1 : 0, nowS).run().catch(() => undefined);
     out.push({ pubkey: pk, tip_ready: ok, addr: pay.addr, checked_at: nowS, ranking_weight: 0 });
   }

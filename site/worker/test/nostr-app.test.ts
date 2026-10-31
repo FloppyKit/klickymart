@@ -135,9 +135,10 @@ describe("tip-ready badge", () => {
     for (const e of [p, p2]) await env.DB.prepare("INSERT OR REPLACE INTO nostr_events (id, kind, pubkey, created_at, d, raw_json, first_seen, relays) VALUES (?,?,?,?,?,?,?,?)").bind(e.id, 0, e.pubkey, e.created_at, null, JSON.stringify(e), now(), "test").run();
     let calls = 0;
     const f = (async (u: string) => { calls++; return String(u).includes("/agent") ? ok(u) : new Response("no", { status: 404 }); }) as unknown as typeof fetch;
-    const r = await tipReadyFor(env.DB, [p.pubkey, p2.pubkey], { salt: "s", ip: "203.0.113.5", fetcher: f });
+    const doh = (async (u: string) => Response.json({ Status: 0, Answer: new URL(u).searchParams.get("type") === "A" ? [{ type: 1, data: "93.184.215.14" }] : [] })) as unknown as typeof fetch;
+    const r = await tipReadyFor(env.DB, [p.pubkey, p2.pubkey], { salt: "s", ip: "203.0.113.5", fetcher: f, doh });
     expect(r.map((x) => [x.tip_ready, x.ranking_weight])).toEqual([[true, 0], [false, 0]]);
-    await tipReadyFor(env.DB, [p.pubkey], { salt: "s", ip: "203.0.113.5", fetcher: f });
+    await tipReadyFor(env.DB, [p.pubkey], { salt: "s", ip: "203.0.113.5", fetcher: f, doh });
     expect(calls).toBe(2);
   });
   it("never adds ranking weight: ranking code does not read the badge", () => {
@@ -154,7 +155,8 @@ describe("/app page, CSP and site tip slot", () => {
     const r = await SELF.fetch(`${O}/app`, { headers: { Accept: "text/html" } });
     const csp = r.headers.get("Content-Security-Policy")!; const html = await r.text();
     expect(csp).toContain("script-src 'self';"); expect(csp).not.toMatch(/unsafe-inline'[^;]*;?\s*$|script-src[^;]*unsafe/);
-    expect(csp).toContain("connect-src 'self' wss://relay.primal.net wss://nos.lol wss://relay.damus.io wss://relay.nsec.app;");
+    expect(csp).toMatch(/connect-src 'self' wss:\/\/relay\.primal\.net wss:\/\/nos\.lol wss:\/\/relay\.damus\.io wss:\/\/relay\.nsec\.app [^;]*;/);
+    expect(csp.match(/connect-src ([^;]*)/)![1].split(" ").every((x) => x === "'self'" || /^(wss|https):\/\/[a-z0-9.-]+$/.test(x))).toBe(true);
     expect(csp).toContain("frame-ancestors 'none'");
     expect([...html.matchAll(/<script\b([^>]*)>/g)].every((m) => /\bsrc=/.test(m[1]) || /application\/ld\+json/.test(m[1]))).toBe(true);
     expect(html).toContain(`integrity="${APP_SRI}"`); expect(html).toContain(`integrity="${NOSTR_TOOLS_SRI}"`);
@@ -169,5 +171,15 @@ describe("/app page, CSP and site tip slot", () => {
     expect(siteTipAddress({ SITE_TIP_LUD16: '"><script>@x.com' })).toBeNull();
     expect(siteTipAddress({ SITE_TIP_LUD16: "tips@example.com" })).toBe("tips@example.com");
     expect(layout({ ...base, siteTip: "tips@example.com" })).toContain('href="lightning:tips@example.com"');
+  });
+});
+
+describe("vendored tip libraries", () => {
+  it("SRI hashes match public/ files", async () => {
+    const { CASHU_SRI, QR_SRI, TIP_SRI } = await import("../src/render/pages");
+    const c = (await import("../../public/vendor/cashu-ts-4.13.0.bundle.js?raw")).default as string;
+    const q = (await import("../../public/vendor/qrcode-generator-2.0.4.bundle.js?raw")).default as string;
+    const t = (await import("../../public/km-tip.js?raw")).default as string;
+    expect(await sri(c)).toBe(CASHU_SRI); expect(await sri(q)).toBe(QR_SRI); expect(await sri(t)).toBe(TIP_SRI);
   });
 });

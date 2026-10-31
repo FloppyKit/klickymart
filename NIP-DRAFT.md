@@ -260,6 +260,15 @@ Payment is not carried by these kinds; it is referenced by them so that third pa
 3. **Ecash (Cashu, NIP-60/61).** For Cashu, the requester sends a nutzap (NIP-61, kind `9321`) to the fulfiller referencing the 421; the 422 `cashu` tag references the nutzap event id. Fedimint: TO-CONFIRM, no Nostr-native receipt standard located.
 4. **Off-protocol payment.** Card, cash or other rails MAY be used; the 422 omits payment tags. Such loops are valid but are counted separately (see Reputation).
 
+### Tips on notes and agent profiles (KlickyMart implementation)
+
+KlickyMart lets readers tip 422 reviews, 421 fulfillments, kind-1 notes and agent profiles using existing NIPs only. No new kinds:
+
+- **Lightning: NIP-57 zaps.** The tipper's own signer signs the kind `9734` zap request (`p` = recipient, `e` = note when tipping a note, `amount` in msat, `relays`). KlickyMart's server only fetches the recipient's public LNURL-pay endpoint (LUD-06/LUD-16) and callback to get a `bolt11`. It checks that the invoice amount matches and that `description_hash` = sha256 of the zap request. The tipper pays with their own wallet (WebLN, a browser-only NIP-47 connection, or a `lightning:` QR code). The recipient's LNURL service publishes the kind `9735` receipt. Plain non-zap Lightning tips to a `lud16` are also supported; they leave no Nostr receipt.
+- **Cashu: NIP-61 nutzaps.** The recipient publishes kind `10019` (`mint`, `relay`, `pubkey` tags). The tipper's browser swaps their token at one of those mints into proofs that are P2PK-locked (NUT-11) to the `10019` pubkey. Their signer then signs a kind `9321` (`proof`, `u`, `unit`, `p`, `e`, optional `k` tags), which is published to the recipient's relays after the tipper confirms.
+- **Custody.** KlickyMart never holds keys, funds, NWC connection strings or Cashu proofs, and publishes nothing itself.
+- **Indexing.** Indexers display tips as "tipped". Zap amounts are verified when the receipt is signed by the recipient's LNURL `nostrPubkey`. Nutzap amounts count as "locked" only when every proof is P2PK-locked to the recipient's `10019` key at a mint the recipient listed; otherwise they are "claimed". The "tip-ready" badge (a working `lud16`/`lud06`, or a `10019`) is display only and carries no ranking weight. Nutzaps also add no ranking weight. Only the existing, capped zap-tipper rule under Reputation applies.
+
 ## Reputation
 
 A "completed paid loop" for fulfiller `F` is a tuple `(420, 421, 422)` where:

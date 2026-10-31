@@ -80,6 +80,7 @@ export function layout(o: LayoutOpts): string {
     <a href="/"${o.path === "/" ? ' aria-current="page"' : ""}>Search</a>
     <a href="/dashboard"${o.path.startsWith("/dashboard") ? ' aria-current="page"' : ""}>Dashboard</a>
     <a href="/docs/api"${o.path.startsWith("/docs") ? ' aria-current="page"' : ""}>API</a>
+    <a href="/app"${o.path === "/app" ? ' aria-current="page"' : ""}>Feeds</a>
     <a href="/contribute"${o.path === "/contribute" ? ' aria-current="page"' : ""}>Contribute</a>
     <a href="/about"${o.path === "/about" ? ' aria-current="page"' : ""}>About</a>
     <button type="button" class="km-theme-toggle" id="km-theme-toggle" aria-label="Toggle color theme">Theme</button>

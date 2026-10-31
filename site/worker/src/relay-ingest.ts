@@ -14,6 +14,8 @@ import { take } from "./ratelimit";
 import { lnurlNostrPubkey, lud16Of, type Fetcher, checkPreimage, checkZapReceipt, NO_BINDINGS, storeBindings, type StoreBindings } from "./pay-binding";
 
 export const ZAP_RECEIPT_KIND = 9735;
+export const NUTZAP_KIND = 9321;
+export const NUTZAP_INFO_KIND = 10019;
 export const DELETION_KIND = 5;
 /** KIMI-008: frame and buffer bounds applied when a frame is received, before it is buffered. */
 export const BUFFER_LIMITS = { maxFrameBytes: 65536 + 1024, liveMaxEvents: 2000, liveMaxBytes: 4 * 1024 * 1024, catchupMaxEvents: 5000, catchupMaxBytes: 8 * 1024 * 1024 };
@@ -49,11 +51,15 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   if (ctx.ourPubkey) f.push({ kinds: [NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE], "#a": domains.map((d) => `${NOSTR_KIND_CRAWL_RECORD}:${ctx.ourPubkey}:${d}`), since });
   // Zap receipts on known 421s (payment proof) and on known 422/kind-1 notes (tips; see tips.ts).
   if (fulfillmentIds.length) f.push({ kinds: [ZAP_RECEIPT_KIND], "#e": fulfillmentIds.slice(0, 400) });
+  // Cashu nutzaps (NIP-61) on the same notes: display only, never ranking weight (tip-rails.ts).
+  if (fulfillmentIds.length) f.push({ kinds: [NUTZAP_KIND], "#e": fulfillmentIds.slice(0, 400) });
   // NIP-09 deletions of anything we store (by id) and of notes tagged for us (k tags); applied only when the author matches.
   if (fulfillmentIds.length) f.push({ kinds: [DELETION_KIND, 1984], "#e": fulfillmentIds.slice(0, 400) });
   f.push({ kinds: [DELETION_KIND], "#k": [String(NOSTR_KIND_ACCEPTANCE), String(NOSTR_KIND_FULFILLMENT), String(NOSTR_KIND_NEED), String(KIND_NOTE)], since });
   // Profiles (kind 0) only for keys that posted notes: used for NIP-05 same-operator hints (flags.ts / nip05.ts).
   if (noteAuthors.length) f.push({ kinds: [0], authors: noteAuthors.slice(0, 200) });
+  // Nutzap info (NIP-61 kind 10019: mints, relays, P2PK key) for the same authors: tip-ready Cashu rail.
+  if (noteAuthors.length) f.push({ kinds: [NUTZAP_INFO_KIND], authors: noteAuthors.slice(0, 200) });
   // Shopping experiences: structured 422s tagged #klickymart (any store) and unstructured kind-1 notes tagged #klickymart.
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
   // Community store suggestions (Path 3): signed kind 1423 with an r tag; queued for the gated crawl, never trusted for facts.
@@ -86,7 +92,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, KIND_NOTE, DELETION_KIND, 1984, 0, NOSTR_KIND_STORE_SUGGESTION].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
+  if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, NUTZAP_KIND, NUTZAP_INFO_KIND, KIND_NOTE, DELETION_KIND, 1984, 0, NOSTR_KIND_STORE_SUGGESTION].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     return x.ok ? { ok: true, d: x.value.d } : { ok: false, reason: `note: ${x.message}` };
@@ -97,6 +103,8 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (ev.created_at > Math.floor((ctx.now ?? Date.now()) / 1000) + MAX_FUTURE_S) return { ok: false, reason: "future created_at" };
   if (ev.kind === ZAP_RECEIPT_KIND) return { ok: true, d: null };
   if (ev.kind === 0) return { ok: true, d: null };
+  if (ev.kind === NUTZAP_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) && ev.tags.some((t) => t[0] === "proof") ? { ok: true, d: null } : { ok: false, reason: "nutzap without e or proof" };
+  if (ev.kind === NUTZAP_INFO_KIND) return { ok: true, d: null };
   if (ev.kind === NOSTR_KIND_STORE_SUGGESTION) { const p = parseSuggestionEvent(ev, ctx.now ?? Date.now(), 365 * 86400); return p.ok ? { ok: true, d: null } : { ok: false, reason: `1423: ${p.message}` }; }
   if (ev.kind === 1984) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "report without e tag" };
   if (ev.kind === DELETION_KIND) return ev.tags.some((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")) ? { ok: true, d: null } : { ok: false, reason: "deletion without e tags" };
@@ -214,11 +222,11 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     for (const r of results ?? []) pkCount.set(r.pubkey, r.n);
   }
   // KM-009: zap receipts are kept only when they point at a note/421 we hold (or one in this batch).
-  const heldTargets = new Set(valid.filter((x) => x.ev.kind !== ZAP_RECEIPT_KIND).map((x) => x.ev.id));
-  const rTargets = [...new Set(valid.filter((x) => x.ev.kind === ZAP_RECEIPT_KIND).map((x) => tagv(x.ev.tags, "e")).filter((x): x is string => !!x && /^[0-9a-f]{64}$/.test(x)))];
+  const heldTargets = new Set(valid.filter((x) => x.ev.kind !== ZAP_RECEIPT_KIND && x.ev.kind !== NUTZAP_KIND).map((x) => x.ev.id));
+  const rTargets = [...new Set(valid.filter((x) => x.ev.kind === ZAP_RECEIPT_KIND || x.ev.kind === NUTZAP_KIND).map((x) => tagv(x.ev.tags, "e")).filter((x): x is string => !!x && /^[0-9a-f]{64}$/.test(x)))];
   for (let k = 0; k < rTargets.length; k += 30) {
     const chunk = rTargets.slice(k, k + 30); const q = chunk.map(() => "?").join(",");
-    for (const sql of [`SELECT id FROM nostr_events WHERE id IN (${q}) AND kind != ${ZAP_RECEIPT_KIND}`, `SELECT id FROM experiences WHERE id IN (${q})`, `SELECT id FROM reviews WHERE id IN (${q})`]) {
+    for (const sql of [`SELECT id FROM nostr_events WHERE id IN (${q}) AND kind NOT IN (${ZAP_RECEIPT_KIND}, ${NUTZAP_KIND})`, `SELECT id FROM experiences WHERE id IN (${q})`, `SELECT id FROM reviews WHERE id IN (${q})`]) {
       try { for (const r of (await db.prepare(sql).bind(...chunk).all<{ id: string }>()).results ?? []) heldTargets.add(r.id); } catch { /* table missing */ }
     }
   }
@@ -241,6 +249,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
       const target = tagv(ev.tags, "e");
       if (!target || !(heldTargets.has(target))) { reject("zap receipt for an event we do not hold"); continue; }
     }
+    if (ev.kind === NUTZAP_KIND) { const target = tagv(ev.tags, "e"); if (!target || !heldTargets.has(target)) { reject("nutzap for an event we do not hold"); continue; } }
     if (ev.pubkey !== ctx.ourPubkey) {
       const n = pkCount.get(ev.pubkey) ?? 0;
       const cap = ev.kind === ZAP_RECEIPT_KIND ? INGEST_LIMITS.receiptsPerSignerPerDay : INGEST_LIMITS.perPubkeyPerDay;

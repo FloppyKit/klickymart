@@ -125,6 +125,9 @@
       if (!j.ok) throw new Error((j.error && j.error.message) || "login refused");
       $("km-app-who").textContent = "Signed in as " + NT.nip19.npubEncode(state.pubkey) + " (" + signer.type + ")";
       $("km-app-feeds").hidden = false; $("km-app-logout").hidden = false;
+      // Tipping (km-tip.js) gets sign/getPublicKey only; never the key itself.
+      window.KMAppSigner = Object.freeze({ type: signer.type, pubkey: state.pubkey, sign: function (t) { return signer.sign(t).then(function (ev) { return publicEvent(ev, state.skHex); }); } });
+      if (window.KMTip) window.KMTip.signerReady();
       status("Logged in. Your key stayed in " + (signer.type === "local" ? "this page" : signer.type === "nip07" ? "your extension" : "your remote signer") + ".");
       renderLists();
     }).catch(function (e) { status("Login failed: " + e.message); });
@@ -150,7 +153,7 @@
   $("km-app-logout").addEventListener("click", function () {
     fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).finally(function () {
       if (state.signer && state.signer.close) state.signer.close();
-      state = { signer: null, pubkey: null, skHex: null, pool: state.pool };
+      state = { signer: null, pubkey: null, skHex: null, pool: state.pool }; window.KMAppSigner = null;
       $("km-app-feeds").hidden = true; $("km-app-logout").hidden = true; $("km-app-who").textContent = ""; status("Logged out. In-memory key cleared.");
     });
   });
@@ -212,7 +215,9 @@
         var h = document.createElement("div"); h.className = "km-muted";
         h.textContent = "kind " + ev.kind + " · " + new Date(ev.created_at * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC · " + NT.nip19.npubEncode(ev.pubkey).slice(0, 16) + "…";
         var body = document.createElement("p"); body.textContent = String(ev.content || "").slice(0, 600);
-        li.appendChild(h); li.appendChild(body); ol.appendChild(li);
+        li.appendChild(h); li.appendChild(body);
+        if ([422, 421, 1].indexOf(ev.kind) !== -1 && window.KMTip) { var tb = document.createElement("button"); tb.type = "button"; tb.textContent = "Tip"; tb.addEventListener("click", function () { window.KMTip.open(ev.pubkey, ev.id, ev.kind); }); li.appendChild(tb); }
+        ol.appendChild(li);
       });
       status(evs.length + " events (signatures verified).");
       badges(evs.map(function (e) { return e.pubkey; }));
@@ -226,7 +231,9 @@
         document.querySelectorAll("#km-feed li").forEach(function (li) {
           if (li.dataset.pubkey !== t.pubkey || li.querySelector(".km-tip-ready")) return;
           var a = document.createElement("a"); a.href = "/wallet#tip-ready"; a.className = "km-badge km-tip-ready"; a.textContent = "⚡ tip-ready";
-          a.title = "Has a working Lightning address (" + t.addr + "). Display only; never affects ranking.";
+          var rails = []; if (t.rails && t.rails.lightning) rails.push("⚡ Lightning"); if (t.rails && t.rails.cashu) rails.push("🥜 Cashu");
+          a.textContent = "tip-ready: " + (rails.join(" + ") || "⚡");
+          a.title = "Accepts tips via " + (rails.join(" and ") || "Lightning") + ". Display only; never affects ranking.";
           li.firstChild.appendChild(document.createTextNode(" ")); li.firstChild.appendChild(a);
         });
       });
