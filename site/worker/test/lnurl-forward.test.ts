@@ -26,10 +26,12 @@ function upstream(o: { badHash?: boolean; badAmount?: boolean; nostr?: boolean }
   }) as never;
   return { f, calls };
 }
-const E = { DB: env.DB, LNURL_FORWARD_ZAP: "DrMattBrown@primal.net" };
+const OWN = "f81611363554b64306467234d7396ec88455707633f54738f6c4683535098cd3"; // test-only stand-in for KlickyMart's zap pubkey
+const FOREIGN = "a".repeat(64);
+const E = { DB: env.DB, LNURL_FORWARD_ZAP: "DrMattBrown@primal.net", SITE_ZAP_PUBKEY_HEX: OWN };
 const call = (path: string, o: ReturnType<typeof upstream>, e: Record<string, unknown> = E, ip = "203.0.113.20") => handleLnurlForward(new URL(O + path).pathname, new URL(O + path), e as never, O, ip, "salt", { fetcher: o.f, doh: PUB });
-function zapReq(amount: number, sk = secp.utils.randomSecretKey()) {
-  const t = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: "", tags: [["p", "f81611363554b64306467234d7396ec88455707633f54738f6c4683535098cd3"], ["amount", String(amount)], ["relays", "wss://relay.damus.io"]] };
+function zapReq(amount: number, sk = secp.utils.randomSecretKey(), pTags: string[][] = [["p", OWN]]) {
+  const t = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: "", tags: [...pTags, ["amount", String(amount)], ["relays", "wss://relay.damus.io"]] };
   const pubkey = bytesToHex(secp.schnorr.getPublicKey(sk)); const id = nostrEventId({ ...t, pubkey });
   return { ...t, pubkey, id, sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) };
 }
@@ -93,6 +95,13 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     await env.DB.prepare("INSERT INTO rate_limits (k, n, exp) VALUES (?, 1200, ?)").bind(`lnf:c:g:${hr}`, Math.floor(Date.now() / 1000) + 7200).run();
     expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u))!.status).toBe(429);
     expect((await env.DB.prepare("SELECT n FROM rate_limits WHERE k LIKE 'lnf:c:ip:%'").first<{ n: number }>())?.n ?? 0).toBe(0);
+    expect(u.calls.length).toBe(0);
+  });
+  it("R9-002: invalid input is refused before any rate-limit budget is taken", async () => {
+    const u = upstream();
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=abc", u))!.status).toBe(400);
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=21000&nostr=notjson", u))!.status).toBe(400);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS c FROM rate_limits WHERE k LIKE 'lnf:%'").first<{ c: number }>())!.c).toBe(0);
     expect(u.calls.length).toBe(0);
   });
   it("footer v4v line", () => {

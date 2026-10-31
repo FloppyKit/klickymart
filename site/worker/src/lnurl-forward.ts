@@ -57,21 +57,26 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   const m = /^\/\.well-known\/lnurlp\/([^/]+)(\/callback)?$/.exec(path); if (!m) return null;
   const name = m[1].toLowerCase(); const up = name === "zap" ? upstreamUrl(env.LNURL_FORWARD_ZAP) : null;
   if (!up) return err("unknown lightning address", 404);
+  // R9-002: validate the caller's input BEFORE taking rate-limit budget (meta-dependent bounds are checked after).
+  const amount = Number(url.searchParams.get("amount"));
+  const nostr = m[2] ? url.searchParams.get("nostr") : null; const comment = m[2] ? url.searchParams.get("comment") : null;
+  if (m[2]) {
+    if (!Number.isInteger(amount) || amount < 1) return err("amount must be a positive integer (msat)");
+    if (comment !== null && comment.length > 2000) return err("comment too long");
+    if (nostr !== null) {
+      let ev: unknown; try { ev = JSON.parse(nostr); } catch { return err("nostr must be a JSON zap request"); }
+      const z = verifyZapRequest(ev); if (!z.ok) return err(z.message);
+      if (z.amount !== amount) return err("zap request amount differs from amount");
+    }
+  }
   const lim = await limited(env.DB, m[2] ? "c" : "m", ip, salt); if (lim) return lim;
   const meta = await upstreamMeta(up, o); if (!meta) return err("upstream wallet unavailable", 502);
   if (!m[2]) {
     return Response.json({ status: "OK", tag: "payRequest", callback: `${origin}/.well-known/lnurlp/${name}/callback`, metadata: meta.metadata, minSendable: meta.minSendable, maxSendable: meta.maxSendable,
       ...(meta.commentAllowed !== undefined ? { commentAllowed: meta.commentAllowed } : {}), ...(meta.allowsNostr ? { allowsNostr: true, nostrPubkey: meta.nostrPubkey } : {}) }, { headers: { ...CORS, "Cache-Control": "public, max-age=60" } });
   }
-  const amount = Number(url.searchParams.get("amount"));
-  if (!Number.isInteger(amount) || amount < meta.minSendable || amount > meta.maxSendable) return err(`amount must be an integer from ${meta.minSendable} to ${meta.maxSendable} msat`);
-  const nostr = url.searchParams.get("nostr"); const comment = url.searchParams.get("comment");
-  if (nostr !== null) {
-    if (!meta.allowsNostr) return err("zaps not supported by the upstream wallet");
-    let ev: unknown; try { ev = JSON.parse(nostr); } catch { return err("nostr must be a JSON zap request"); }
-    const z = verifyZapRequest(ev); if (!z.ok) return err(z.message);
-    if (z.amount !== amount) return err("zap request amount differs from amount");
-  }
+  if (amount < meta.minSendable || amount > meta.maxSendable) return err(`amount must be an integer from ${meta.minSendable} to ${meta.maxSendable} msat`);
+  if (nostr !== null && !meta.allowsNostr) return err("zaps not supported by the upstream wallet");
   if (comment !== null && comment.length > (meta.commentAllowed ?? 0)) return err("comment too long");
   const cb = new URL(meta.callback); cb.searchParams.set("amount", String(amount));
   if (nostr !== null) cb.searchParams.set("nostr", nostr);
