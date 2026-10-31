@@ -74,6 +74,8 @@ import {
 } from "./render/pages";
 
 /** R12-005: production = ENVIRONMENT "production" or the klickymart.com origin. */
+/** Customer audit 2026-10-31 (Linkly/Scout): in a dry run, counts_toward_chart describes the note IF published; say so. */
+const DRY_RUN_NOTE = (counts: boolean) => ({ would_count_toward_chart: counts, dry_run_note: `dry run: nothing was stored. counts_toward_chart / would_count_toward_chart say whether this note WOULD count once really published (${counts ? "yes: basis=visit" : "no: only basis=visit notes count"}), subject to the 7-day key-age gate.` });
 export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
 export const saltRequiredButMissing = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string; SUBMIT_SALT?: string }) => isProduction(env) && !env.SUBMIT_SALT;
 export interface Env {
@@ -273,7 +275,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), stored: false, warnings: x.value.warnings } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...DRY_RUN_NOTE(x.value.basis === "visit"), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
@@ -291,7 +293,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     const rl = await rateLimitCheck(env.DB, p.value);
     if (rl) return { status: 429, body: { ok: false, error: rl } };
     const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb, ...(x.ok ? DRY_RUN_NOTE(x.value.basis === "visit") : {}) } };
     let proof_status: string | null = null;
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };

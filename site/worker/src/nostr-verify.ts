@@ -26,7 +26,10 @@ export function verifyNostrEvent(ev: NostrEventLine, kind: number): { ok: true }
     return { ok: false, reason: "malformed event" };
   }
   if (!ev.pubkey || !/^[0-9a-f]{64}$/i.test(ev.pubkey)) {
-    return { ok: false, reason: "invalid pubkey" };
+    // Customer audit 2026-10-31: explain the common 33-byte compressed-key mistake (NIP-01 ids hash the 32-byte x-only key,
+    // so a 66-char key can't be accepted without changing the event id).
+    const compressed = typeof ev.pubkey === "string" && /^0[23][0-9a-f]{64}$/i.test(ev.pubkey);
+    return { ok: false, reason: compressed ? "invalid pubkey: got a 33-byte compressed key (66 hex); Nostr needs the 32-byte x-only BIP-340 key: drop the leading 02/03 and re-sign" : "invalid pubkey: must be 64 lowercase hex chars (32-byte x-only BIP-340 public key, not npub or a 33-byte compressed key)" };
   }
   if (!ev.sig || !/^[0-9a-f]{128}$/i.test(ev.sig)) {
     return { ok: false, reason: "invalid sig" };

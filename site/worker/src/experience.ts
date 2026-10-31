@@ -291,7 +291,13 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   }
   const lud = s("lud16"); if (lud) { if (/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(lud)) tags.push(["lud16", lud.toLowerCase()]); else warnings.push("lud16 ignored: expected name@domain lightning address"); }
   push("product", s("product") ?? s("product_url")); push("gtin", s("gtin")); push("depth", depth);
-  if (depth) tags.push(["attempt", REVIEW_ATTEMPT_OF[depth]!]);
+  if (depth) {
+    tags.push(["attempt", REVIEW_ATTEMPT_OF[depth]!]);
+    // Customer audit 2026-10-31 (Volt): say so when the legacy attempt tag is coarser than depth, or disagrees with a passed attempt.
+    if (REVIEW_ATTEMPT_OF[depth] !== depth) warnings.push(`attempt (legacy 4-step tag) filled as "${REVIEW_ATTEMPT_OF[depth]}" for depth "${depth}"; depth is the field KlickyMart reads`);
+    const given = s("depth") ? s("attempt") : undefined;
+    if (given && canonDepth(given).depth && REVIEW_ATTEMPT_OF[canonDepth(given).depth!] !== REVIEW_ATTEMPT_OF[depth]) warnings.push(`attempt "${given}" disagrees with depth "${depth}"; depth wins`);
+  }
   const steps = list("steps");
   for (const [i, st] of steps.entries()) tags.push(["step", String(i + 1), st.slice(0, 80)]);
   push("steps", s("steps_n") ?? (steps.length ? String(steps.length) : undefined));

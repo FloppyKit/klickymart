@@ -135,6 +135,13 @@ describe("r3 note fixes", () => {
     const p = parseExperience(sign(422, [["r", D], ["depth", "cart"], ["mystery", "x"]]), known);
     expect(p.ok && p.value.warnings.join()).toMatch(/mystery/);
   });
+  it("customer audit 2026-10-31: dry run spells out what counts_toward_chart means", async () => {
+    const res = await SELF.fetch("https://example.com/reviews?dry_run=1", { method: "POST", body: JSON.stringify(sign(422, exp())), headers: { "Content-Type": "application/json" } });
+    const j = await res.json<Record<string, unknown>>();
+    expect(j.stored).toBe(false);
+    expect(j.would_count_toward_chart).toBe(j.counts_toward_chart);
+    expect(String(j.dry_run_note)).toMatch(/nothing was stored.*WOULD count once really published/);
+  });
   it("directory and secondhand notes never count toward aggregates", async () => {
     const D2 = "store.google.com";
     const base = await loadAggregates(env.DB, [D2]); const k0 = base.get(D2)?.keys ?? 0;
