@@ -1,3 +1,4 @@
+import { sanitizeRawPolicies } from "./policy-shapes";
 import {
   AR_BIT,
   CAT_BIT,
@@ -198,7 +199,7 @@ export function normalize(raw: RawRecord, source: string, ingestedAt: number): N
     anw_type,
     ease,
     search,
-    raw_json: JSON.stringify(raw),
+    raw_json: JSON.stringify(sanitizeRawPolicies(raw as Record<string, unknown>)),
     source,
     event_id: typeof raw.event_id === "string" ? raw.event_id : null,
     pubkey: typeof raw.pubkey === "string" ? raw.pubkey : null,

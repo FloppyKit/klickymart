@@ -1,3 +1,4 @@
+import { cleanPolicies } from "./policy-shapes";
 import { guestFreeMin, type RuleLike } from "./ship-rules";
 /** GO 5.7: explain verdicts (why), agent-ordering policy, checkout depth provenance and landed-cost signals. Pure, from raw records. */
 import type { IndexRow } from "./index-mem";
@@ -180,8 +181,7 @@ export function checkoutMapOf(raw: Record<string, unknown>): CheckoutMap | null 
   return m && typeof m === "object" ? m : null;
 }
 export function policiesOf(raw: Record<string, unknown>) {
-  const p = raw.policies as Record<string, unknown> | undefined;
-  return p && typeof p === "object" ? p : null;
+  return cleanPolicies(raw.policies); // R11-002: never trust stored shapes at render
 }
 /**
  * /check view of policies: return_days is a SUMMARY of the standard window, never the whole policy. Always carries
