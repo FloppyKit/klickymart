@@ -223,3 +223,50 @@ describe("zap@ invoice checks (plain-payment fix)", () => {
     expect(zap!.status).toBe(200);
   });
 });
+
+describe("GP-1/GP-3 (2026-10-31): payee pin, replay guard, description_hash marking, failure budget", () => {
+  const fixed = (pr: string) => { const u = upstream(); return { calls: u.calls, f: (async (url: string, i?: RequestInit) => new URL(url).pathname.endsWith("/callback") ? Response.json({ pr, routes: [] }) : (u.f as any)(url, i)) as never }; };
+  const ph = () => bytesToHex(sha256(enc(String(Math.random()))));
+  const NODE_PUB = bytesToHex(secp.getPublicKey(NODE, true));
+  type J = { status: string; klickymart_check?: { verified: boolean; unverified?: string[]; payee: string } };
+  it("wrong amount is refused", async () => {
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", fixed(encodeBolt11ForTest(NODE, "lnbc60n", ph()))))!.status).toBe(502);
+  });
+  it("payee pin: matching node is verified, another node is refused, unset pin is marked unverified", async () => {
+    const dh = bytesToHex(sha256(enc(META)));
+    const ok = await call("/.well-known/lnurlp/zap/callback?amount=5000", fixed(encodeBolt11ForTest(NODE, "lnbc50n", ph(), { descriptionHashHex: dh })), { ...E, ZAP_PAYEE_NODE_PUBKEY: NODE_PUB });
+    const j = await ok!.json() as J; expect(j.klickymart_check).toMatchObject({ verified: true, payee: NODE_PUB }); expect(ok!.headers.get("X-KlickyMart-Invoice-Check")).toBe("verified");
+    const other = secp.utils.randomSecretKey();
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", fixed(encodeBolt11ForTest(other, "lnbc50n", ph(), { descriptionHashHex: dh })), { ...E, ZAP_PAYEE_NODE_PUBKEY: NODE_PUB }))!.status).toBe(502);
+    const un = await call("/.well-known/lnurlp/zap/callback?amount=5000", fixed(encodeBolt11ForTest(other, "lnbc50n", ph(), { descriptionHashHex: dh })));
+    expect(un!.status).toBe(200); expect((await un!.json() as J).klickymart_check).toMatchObject({ verified: false, unverified: ["payee_node_not_pinned"] });
+    expect(checkForwardInvoice(encodeBolt11ForTest(other, "lnbc10n", ph()), 1000, undefined, NODE_PUB)).toMatchObject({ ok: false, reason: expect.stringMatching(/payee/) });
+  });
+  it("replayed payment_hash is refused within 24h", async () => {
+    const u = fixed(encodeBolt11ForTest(NODE, "lnbc50n", ph()));
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u))!.status).toBe(200);
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u))!.status).toBe(502);
+    expect((await env.DB.prepare("SELECT exp FROM rate_limits WHERE k LIKE 'lnf:ph:%'").first<{ exp: number }>())!.exp).toBeGreaterThan(Math.floor(Date.now() / 1000) + 86_000);
+  });
+  it("bad description_hash: zap/plain marked unverified by default, refused with ZAP_REQUIRE_DESCRIPTION_HASH=1; good zap hash verified", async () => {
+    const pin = { ...E, ZAP_PAYEE_NODE_PUBKEY: NODE_PUB };
+    const zr = JSON.stringify(zapReq(21000)); const q = `/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(zr)}`;
+    const good = await call(q, upstream(), pin); expect((await good!.json() as J).klickymart_check?.verified).toBe(true);
+    resetForwardCache(); const bad = await call(q, upstream({ badHash: true }), pin);
+    expect(bad!.status).toBe(200); expect((await bad!.json() as J).klickymart_check).toMatchObject({ verified: false, unverified: ["description_hash_not_zap_request"] });
+    resetForwardCache(); const plain = await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream({ badHash: true }), pin);
+    expect((await plain!.json() as J).klickymart_check?.unverified).toEqual(["description_hash_not_metadata"]);
+    resetForwardCache(); expect((await call(q, upstream({ badHash: true }), { ...pin, ZAP_REQUIRE_DESCRIPTION_HASH: "1" }))!.status).toBe(502);
+  });
+  it("failure budget: 20 failures per network then 429 without calling upstream; global cap too", async () => {
+    const u = upstream(); let cbs = 0;
+    const bad = { f: (async (url: string, i?: RequestInit) => { if (new URL(url).pathname.endsWith("/callback")) { cbs++; return Response.json({ status: "ERROR" }); } return (u.f as any)(url, i); }) as never, calls: [] as string[] };
+    for (let i = 0; i < 20; i++) expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", bad, E, `198.51.100.${i + 1}`))!.status).toBe(502);
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", bad, E, "198.51.100.200"))!.status).toBe(429); // same /24
+    expect(cbs).toBe(20);
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u, E, "192.0.2.9"))!.status).toBe(200); // other network fine
+    const hr = Math.floor(Date.now() / 3_600_000);
+    await env.DB.prepare("INSERT OR REPLACE INTO rate_limits (k, n, exp) VALUES (?, 300, ?)").bind(`lnf:f:g:${hr}`, Math.floor(Date.now() / 1000) + 7200).run();
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u, E, "203.0.113.77"))!.status).toBe(429);
+  });
+});

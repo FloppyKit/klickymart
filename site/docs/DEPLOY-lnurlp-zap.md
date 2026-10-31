@@ -44,3 +44,17 @@ zap request. A compromised or misbehaving upstream could return a correctly pric
 and a NIP-57 receipt can't be cross-checked against the invoice hash. The host pin, the amount and the fact that
 KlickyMart holds no funds limit the damage to "the payer paid the configured upstream the amount they chose".
 If Primal starts committing to the 9734, re-enable the hash check for zaps.
+
+## GP-1 / GP-3 (2026-10-31)
+
+Added on top of the checks above:
+- payee node = the key recovered from the invoice signature (must equal the `n` tag when present). If the secret/var
+  `ZAP_PAYEE_NODE_PUBKEY` (33-byte compressed hex) is set, the payee must equal it or zap@ returns 502. If it is unset,
+  zap@ logs a warning and returns the invoice marked unverified (`klickymart_check.verified=false`,
+  `unverified: ["payee_node_not_pinned"]`, header `X-KlickyMart-Invoice-Check`). It does not refuse, so tips keep working until the pin is set.
+- replay guard: each payment_hash is stored once in D1 `rate_limits` (`lnf:ph:<hash>`, 24h TTL); a reused hash is a 502.
+- description_hash: compared with sha256(9734 as forwarded) for zaps, sha256(upstream metadata) for plain payments.
+  A mismatch or missing hash marks the response unverified (Primal does not commit today). Set
+  `ZAP_REQUIRE_DESCRIPTION_HASH="1"` to refuse instead.
+- failure budget: every failed upstream call (meta or callback) spends a non-refundable unit: 20 per network per
+  hour (IPv4 /24, IPv6 /48) and 300 per hour globally. Once spent, zap@ returns 429 without calling upstream.
