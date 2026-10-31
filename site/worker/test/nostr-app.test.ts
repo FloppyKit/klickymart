@@ -182,4 +182,13 @@ describe("vendored tip libraries", () => {
     const t = (await import("../../public/km-tip.js?raw")).default as string;
     expect(await sri(c)).toBe(CASHU_SRI); expect(await sri(q)).toBe(QR_SRI); expect(await sri(t)).toBe(TIP_SRI);
   });
+  it("R7-007: /km.js and /km-landscape.js carry matching SRI in the layout", async () => {
+    const { KM_JS_SRI, KM_LANDSCAPE_SRI } = await import("../src/render/layout");
+    const k = (await import("../../public/km.js?raw")).default as string;
+    const l = (await import("../../public/km-landscape.js?raw")).default as string;
+    expect(await sri(k)).toBe(KM_JS_SRI); expect(await sri(l)).toBe(KM_LANDSCAPE_SRI);
+    const html = await (await SELF.fetch("https://example.com/", { headers: { Accept: "text/html" } })).text();
+    expect(html).toContain(`src="/km.js" integrity="${KM_JS_SRI}"`);
+    expect(html).toContain(`src="/km-landscape.js" integrity="${KM_LANDSCAPE_SRI}"`);
+  });
 });

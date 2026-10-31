@@ -1,3 +1,6 @@
+/** R7-007: SRI for the site scripts; test/nostr-app.test.ts recomputes these from public/. */
+export const KM_JS_SRI = "sha384-S3m0mzA8ypc57LZuVF0IajyqKB2l4YmHtk88vNbD5Sdqpegm+pPzTge4/LOeUpPN";
+export const KM_LANDSCAPE_SRI = "sha384-379j43ps8jMXjuJIqiKUODoXVgKyJ1adKX4Kaee0XM+rIJxkI/T0bdlrOz8H3hAZ";
 import { shopperSplit } from "../agent-visits";
 export function esc(s: string | null | undefined): string {
   if (s == null) return "";
@@ -99,8 +102,8 @@ ${o.body}
   ${o.siteTip ? `<p class="km-footer-v4v" data-testid="km-site-tip">Value for value: if KlickyMart helped, tip <a href="lightning:${esc(o.siteTip)}" rel="nofollow">⚡ ${esc(o.siteTip)}</a>. Optional; nothing is unlocked by tipping. No ads, no paid rankings; tips help cover hosting.</p>` : ""}
   <p class="km-footer-meta">A signed map of where agents can shop. Records published as Nostr events. · Data version ${esc(o.version)} · Crawls ${esc(tsRange)}</p>
 </footer>
-<script src="/km.js" defer></script>
-<script src="/km-landscape.js" defer></script>
+<script src="/km.js" integrity="${KM_JS_SRI}" crossorigin="anonymous" defer></script>
+<script src="/km-landscape.js" integrity="${KM_LANDSCAPE_SRI}" crossorigin="anonymous" defer></script>
 </body>
 </html>`;
 }
