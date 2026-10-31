@@ -44,7 +44,6 @@ import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
-import { ephemeralSalt } from "./submissions";
 import { take, takeAll } from "./ratelimit";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
@@ -334,7 +333,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const t = await allTiers();
     return { ...snap, rows: snap.rows.filter((r) => meetsMinTrust(t.get(r.d)?.trust_tier, minTrust)) };
   };
-  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
+  const submitCtx = (via: "post" | "mcp" | "nostr", dryRun: boolean) => ({ db: env.DB, indexed: new Set(snap.rows.map((r) => r.d)), salt: env.SUBMIT_SALT ?? "", ip: request.headers.get("cf-connecting-ip"), via, dryRun, origin });
   const handleSubmit = async (body: Record<string, unknown>, via: "post" | "mcp", dryRun: boolean) => {
     const evIn = body.event ?? (typeof body.kind === "number" ? body : null);
     if (evIn) {
@@ -459,13 +458,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
   if (path === "/feed/list-check" && request.method === "POST") {
     const body = await request.json().catch(() => null);
-    const r = await checkFeedList(env.DB, body, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    const r = await checkFeedList(env.DB, body, { salt: env.SUBMIT_SALT ?? "", ip: request.headers.get("cf-connecting-ip") });
     return Response.json(r.body, { status: r.status, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
   if (path === "/tip-ready.json" && request.method === "GET") {
     const pks = [...new Set((url.searchParams.get("pubkeys") ?? "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean))];
     if (!pks.length || pks.length > TIP_LIMITS.maxPubkeys || pks.some((p) => !/^[0-9a-f]{64}$/.test(p))) return err400("pubkeys", `1 to ${TIP_LIMITS.maxPubkeys} comma-separated 64-hex pubkeys`);
-    const ln = await tipReadyFor(env.DB, pks, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    const ln = await tipReadyFor(env.DB, pks, { salt: env.SUBMIT_SALT ?? "", ip: request.headers.get("cf-connecting-ip") });
     const allowed = new Set(cashuMints(env));
     const items = await Promise.all(ln.map(async (t) => {
       const c = await nutzapInfoOf(env.DB, t.pubkey);
@@ -475,12 +474,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json({ items, note: "Display only: tip-ready never adds ranking weight. KlickyMart never holds keys or funds.", wallet: `${origin}/wallet#tip-ready` }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
   }
   if (path.startsWith("/.well-known/lnurlp/") && request.method === "GET") {
-    const r = await handleLnurlForward(path, url, env, origin, request.headers.get("cf-connecting-ip"), env.SUBMIT_SALT || ephemeralSalt());
+    const r = await handleLnurlForward(path, url, env, origin, request.headers.get("cf-connecting-ip"), env.SUBMIT_SALT ?? "");
     if (r) return r;
   }
   if (path === "/tip/invoice" && request.method === "POST") {
     const body = await request.json().catch(() => null) as InvoiceInput | null;
-    const r = await getInvoice(env.DB, body ?? {}, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    const r = await getInvoice(env.DB, body ?? {}, { salt: env.SUBMIT_SALT ?? "", ip: request.headers.get("cf-connecting-ip") });
     return Response.json(r.body, { status: r.status, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
   if (path === "/tip/receipt" && request.method === "GET") {

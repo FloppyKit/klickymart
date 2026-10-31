@@ -156,7 +156,10 @@ export function cleanCategory(c: unknown): string | null {
 export function ipHash(ip: string | null, salt: string, now = Date.now()): string | null {
   if (!ip) return null;
   const week = Math.floor(now / (7 * 86400_000));
-  return bytesToHex(hmac(sha256, utf8ToBytes(salt || ephemeralSalt()), utf8ToBytes(`km-submit:${week}:${ipNetwork(ip)}`))).slice(0, 24);
+  // R5-005: no per-isolate fallback. Without the SUBMIT_SALT secret every caller shares one bucket (strict, and nothing
+  // IP-derived is kept); submissions refuse outright (submitStore).
+  if (!salt) return "unsalted";
+  return bytesToHex(hmac(sha256, utf8ToBytes(salt), utf8ToBytes(`km-submit:${week}:${ipNetwork(ip)}`))).slice(0, 24);
 }
 /** R5-004: rate-limit by network, not address: the /64 for IPv6 (one subscriber's allocation), the /32 for IPv4. */
 export function ipNetwork(ip: string): string {
@@ -170,9 +173,6 @@ export function ipNetwork(ip: string): string {
   return groups.slice(0, 4).map((g) => (parseInt(g || "0", 16) || 0).toString(16)).join(":") + "::/64";
 }
 /** Random per-isolate key used only when no SUBMIT_SALT secret is configured (KM-013: no committed default salt). */
-let ephemeral: string | null = null;
-/** Per-isolate random salt, created lazily (random values are not allowed at Worker global scope). */
-export function ephemeralSalt(): string { return (ephemeral ??= bytesToHex(crypto.getRandomValues(new Uint8Array(32)))); }
 export function agentId(name: string, salt: string): string {
   return "agent:" + bytesToHex(sha256(utf8ToBytes(`km-agent:${salt}:${name.trim().toLowerCase().slice(0, 64)}`))).slice(0, 16);
 }
@@ -213,6 +213,7 @@ export async function submitStore(input: SubmitInput, ctx: SubmitCtx): Promise<S
   const claimed = typeof input?.submitter?.npub === "string" ? input.submitter.npub : null;
   if (ctx.signed) { submitter_kind = "npub"; submitter = ctx.signed.pubkey; }
   else if (typeof input?.submitter?.agent_name === "string" && input.submitter.agent_name.trim()) { submitter_kind = "agent"; submitter = agentId(input.submitter.agent_name, ctx.salt); }
+  if (!ctx.salt && (ctx.ip || submitter_kind === "agent")) return { status: 503, body: { ok: false, status: "rejected", reason: "submissions are not configured (SUBMIT_SALT unset)", error: { code: "not_configured", message: "SUBMIT_SALT unset; refusing rather than using a non-secret salt" } } };
   const ih = ipHash(ctx.ip, ctx.salt, now);
   const flags: SubmitFlag[] = [...n.flags, ...note.flags];
   const stripped = [...n.stripped, ...note.stripped, ...ev.stripped];

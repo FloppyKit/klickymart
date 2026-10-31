@@ -29,6 +29,7 @@ export default defineConfig(async () => {
             FIXTURE_NDJSON: loadFixtures(),
             USE_TEST_FIXTURES: "1",
             AUTH_SECRET: "test-only-auth-secret",
+            SUBMIT_SALT: "test-only-submit-salt",
           },
         },
       }),

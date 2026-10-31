@@ -93,5 +93,5 @@ export async function claimStatus(db: D1Database | undefined, domain: string) {
 async function recheckThrottled(db: D1Database, domain: string, nowS: number, perDomain = 1, prefix = "dns"): Promise<boolean> {
   try {
     return !!(await takeAll(db, [{ k: `${prefix}:d:${domain.toLowerCase()}:${Math.floor(nowS / 600)}`, limit: perDomain, ttlS: 1200 }, { k: `${prefix}:g:${Math.floor(nowS / 3600)}`, limit: 120, ttlS: 7200 }], nowS));
-  } catch { return false; /* migration pending */ }
+  } catch { return true; /* KIMI-010 / R6-007: fail closed: no throttle, no DNS lookup */ }
 }
