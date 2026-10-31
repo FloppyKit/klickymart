@@ -183,6 +183,23 @@ export function policiesOf(raw: Record<string, unknown>) {
   const p = raw.policies as Record<string, unknown> | undefined;
   return p && typeof p === "object" ? p : null;
 }
+/**
+ * /check view of policies: return_days is a SUMMARY of the standard window, never the whole policy. Always carries
+ * return_days_src (the page it came from), return_restrictions[] and conflicting_sources[] (from the crawler's
+ * deterministic extraction; null = not extracted for this record yet, [] = extracted and none found).
+ */
+export function policiesView(raw: Record<string, unknown>) {
+  const p = policiesOf(raw);
+  if (!p) return null;
+  const fs = (p.field_src ?? {}) as Record<string, string>;
+  return {
+    ...p,
+    return_days_src: fs.return_days ?? null,
+    return_days_note: "summary of the standard return window only; read return_restrictions, conflicting_sources and the source page before relying on it",
+    return_restrictions: Array.isArray(p.return_restrictions) ? p.return_restrictions : null,
+    conflicting_sources: Array.isArray(p.conflicting_sources) ? p.conflicting_sources : null,
+  };
+}
 export function trustOf(raw: Record<string, unknown>) {
   const t = raw.trust as Record<string, unknown> | undefined;
   return t && typeof t === "object" ? t : null;
@@ -194,7 +211,7 @@ export function v5Extras(raw: Record<string, unknown>) {
   return {
     checkout_map: checkoutMapOf(raw),
     agentpay: agentpayOf(raw),
-    policies: policiesOf(raw),
+    policies: policiesView(raw),
     trust: trustOf(raw),
     promos: Array.isArray(raw.promos) ? raw.promos : [],
     ucp: (raw.ucp as Record<string, unknown> | undefined) ?? null,
@@ -228,7 +245,7 @@ export function renderV5(raw: Record<string, unknown>): string {
   if (p) {
     const q = (p.quotes ?? {}) as Record<string, string>, fs = (p.field_src ?? {}) as Record<string, string>;
     const row = (label: string, k: string, v: unknown) => (v === undefined || v === null ? "" : `<li>${label}: <strong>${e(Array.isArray(v) ? v.join("; ") : v)}</strong>${q[k] ? ` — <q>${e(q[k])}</q>` : ""} ${link(fs[k])}</li>`);
-    parts.push(`<section id="policies" data-testid="policies"><h2>Returns and price policies</h2><ul>${row("Return window (days)", "return_days", p.return_days)}${row("Return shipping paid by", "return_ship_payer", p.return_ship_payer)}${row("Price match / adjustment", "price_match", p.price_match)}${row("Price-adjust window (days)", "price_match_window_days", p.price_match_window_days)}${row("Restocking fee (%)", "restocking_pct", p.restocking_pct)}${row("Not returnable", "exclusions", p.exclusions)}</ul><p class="km-muted">Extracted from the store's own policy pages with verbatim quotes, checked ${e(p.checked_at ?? "")}. A missing line means not stated, not "no".</p></section>`);
+    parts.push(`<section id="policies" data-testid="policies"><h2>Returns and price policies</h2><ul>${row("Return window (days)", "return_days", p.return_days)}${row("Return shipping paid by", "return_ship_payer", p.return_ship_payer)}${row("Price match / adjustment", "price_match", p.price_match)}${row("Price-adjust window (days)", "price_match_window_days", p.price_match_window_days)}${row("Restocking fee (%)", "restocking_pct", p.restocking_pct)}${row("Not returnable", "exclusions", p.exclusions)}</ul>${Array.isArray(p.return_restrictions) && p.return_restrictions.length ? `<p><strong>Restrictions:</strong></p><ul>${(p.return_restrictions as { kind: string; q: string; url?: string }[]).map((x) => `<li>${e(x.kind)} — <q>${e(x.q)}</q> ${link(x.url)}</li>`).join("")}</ul>` : ""}${Array.isArray(p.conflicting_sources) && p.conflicting_sources.length ? `<p><strong>Conflicting return windows:</strong></p><ul>${(p.conflicting_sources as { days: number; q: string; url?: string }[]).map((x) => `<li>${e(x.days)} days — <q>${e(x.q)}</q> ${link(x.url)}</li>`).join("")}</ul>` : ""}<p class="km-muted">The return window is a summary of the standard window, not the whole policy: exclusions, defect windows and fees may apply; read the source page. Extracted from the store's own policy pages with verbatim quotes, checked ${e(p.checked_at ?? "")}. A missing line means not stated, not "no".</p></section>`);
   }
   const pr = Array.isArray(raw.promos) ? (raw.promos as Record<string, unknown>[]) : [];
   if (pr.length) parts.push(`<section id="promos" data-testid="promos"><h2>Promotions the store advertises</h2><ul>${pr.map((x) => `<li>${x.code ? `<code>${e(x.code)}</code> ` : ""}${e(x.desc)}${x.stacking === "no" ? " <span class=\"km-muted\">(cannot be combined)</span>" : ""} — <q>${e(x.quote)}</q> ${link(x.src as string)}</li>`).join("")}</ul><p class="km-muted">From the store's own pages only; KlickyMart does not test codes at checkout.</p></section>`);

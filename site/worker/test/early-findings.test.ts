@@ -78,3 +78,23 @@ describe("F7 chart: crawl-observed rails are pay_seen, not pay_used", async () =
     for (const i of ch.items) expect(i.values.pay_used!.source).toBe("community");
   });
 });
+
+describe("F8 return_days is a summary with restrictions", () => {
+  it("cryptocloaks: return_days carries src + summary note; restrictions null until extracted", async () => {
+    const b = body(checkDomain(await snap(), "cryptocloaks.com", O));
+    expect(b.policies.return_days).toBe(30);
+    expect(b.policies.return_days_src).toMatch(/refund_returns/);
+    expect(b.policies.return_days_note).toMatch(/summary/);
+    expect(b.policies.return_restrictions).toBeNull();
+    expect(b.policies).toHaveProperty("conflicting_sources");
+  });
+  it("renders crawler-extracted restrictions and conflicts", async () => {
+    const { renderV5, policiesView } = await import("../src/explain");
+    const raw = { policies: { return_days: 30, field_src: { return_days: "https://s.example/r" }, return_restrictions: [{ kind: "no-change-of-mind", q: "We do not accept general change of mind returns.", url: "https://s.example/r" }], conflicting_sources: [{ url: "https://s.example/p", days: 90, q: "90-day return policy" }] } };
+    expect(policiesView(raw)!.return_restrictions).toHaveLength(1);
+    const h = renderV5(raw);
+    expect(h).toContain("no-change-of-mind");
+    expect(h).toContain("90 days");
+    expect(h).toMatch(/summary of the standard window/);
+  });
+});
