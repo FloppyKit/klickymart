@@ -172,13 +172,15 @@ async function getEvent(db: D1Database, id: string | undefined): Promise<Ev | nu
  * event's author, and keep a tombstone (id + author) so later catch-ups cannot re-ingest it. Ids we have not seen yet get a
  * tombstone bound to the deleter's pubkey, which only blocks events by that same pubkey. Tips on a deleted note disappear
  * with it (tips are read only for stored notes) and aggregates are computed on read, so they update immediately. */
+export const MAX_UNSEEN_TOMBSTONES = 10;
 export async function applyDeletion(db: D1Database, del: Ev, nowS: number): Promise<{ deleted: string[]; ignored: string[] }> {
-  const out = { deleted: [] as string[], ignored: [] as string[] };
+  const out = { deleted: [] as string[], ignored: [] as string[] }; let unseen = 0;
   for (const id of [...new Set(del.tags.filter((t) => t[0] === "e" && /^[0-9a-f]{64}$/.test(t[1] ?? "")).map((t) => t[1]!))].slice(0, 100)) {
     const row = await db.prepare("SELECT pubkey FROM nostr_events WHERE id = ?").bind(id).first<{ pubkey: string }>();
     let author = row?.pubkey;
     if (!author) { try { author = (await db.prepare("SELECT pubkey FROM experiences WHERE id = ? UNION SELECT pubkey FROM reviews WHERE id = ?").bind(id, id).first<{ pubkey: string }>())?.pubkey; } catch { /* */ } }
     if (author && author !== del.pubkey) { out.ignored.push(id); continue; }
+    if (!author && ++unseen > MAX_UNSEEN_TOMBSTONES) { out.ignored.push(id); continue; } // K-DEL: bound tombstones for ids we never held
     const stmts = [db.prepare("DELETE FROM nostr_events WHERE id = ?").bind(id), db.prepare("DELETE FROM reviews WHERE id = ?").bind(id),
       db.prepare("DELETE FROM site_records WHERE id = ?").bind(id), db.prepare("DELETE FROM experiences WHERE id = ?").bind(id),
       db.prepare("INSERT OR IGNORE INTO tombstones (id, pubkey, deletion_id, deleted_at) VALUES (?,?,?,?)").bind(id, del.pubkey, del.id, nowS)];
@@ -205,7 +207,18 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   }
   const dels = valid.filter((x) => x.ev.kind === DELETION_KIND);
   if (dels.length) {
-    for (const { ev } of dels) { await applyDeletion(db, ev, nowS); res.accepted++; }
+    // K-DEL / KM-009: kind 5 counts against the same per-key daily cap as other events (by distinct deletions applied
+    // in the last day, from the tombstones they wrote). Fails closed on a storage error.
+    const used = new Map<string, number>();
+    for (const { ev } of dels) {
+      if (!used.has(ev.pubkey)) {
+        try { used.set(ev.pubkey, (await db.prepare("SELECT COUNT(DISTINCT deletion_id) AS n FROM tombstones WHERE pubkey = ? AND deleted_at > ?").bind(ev.pubkey, nowS - 86400).first<{ n: number }>())?.n ?? 0); }
+        catch { used.set(ev.pubkey, Infinity); }
+      }
+      if (used.get(ev.pubkey)! >= INGEST_LIMITS.perPubkeyPerDay) { reject("rate-limited pubkey"); continue; }
+      used.set(ev.pubkey, used.get(ev.pubkey)! + 1);
+      await applyDeletion(db, ev, nowS); res.accepted++;
+    }
     for (let k = valid.length - 1; k >= 0; k--) if (valid[k]!.ev.kind === DELETION_KIND) valid.splice(k, 1);
   }
   if (valid.length) {

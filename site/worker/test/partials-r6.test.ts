@@ -30,3 +30,25 @@ describe("R5-005: no per-isolate salt fallback", () => {
     expect(r.status).toBe(503);
   });
 });
+
+import * as secp from "@noble/secp256k1";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { nostrEventId } from "../src/nostr-verify";
+import { ingestEvents, INGEST_LIMITS, MAX_UNSEEN_TOMBSTONES } from "../src/relay-ingest";
+const signK = (sk: Uint8Array, kind: number, tags: string[][], created_at = Math.floor(Date.now() / 1000)) => {
+  const ev = { pubkey: bytesToHex(secp.schnorr.getPublicKey(sk)), created_at, kind, tags, content: "" }; const id = nostrEventId(ev);
+  return { ...ev, id, sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) };
+};
+const rid = () => bytesToHex(secp.utils.randomSecretKey());
+describe("K-DEL / KM-009: kind 5 respects the per-key cap and bounds tombstones", () => {
+  it("a key's deletions stop at perPubkeyPerDay; one deletion writes at most MAX_UNSEEN_TOMBSTONES for unseen ids", async () => {
+    const sk = secp.utils.randomSecretKey(); const pk = bytesToHex(secp.schnorr.getPublicKey(sk));
+    const big = signK(sk, 5, Array.from({ length: 60 }, () => ["e", rid()]));
+    await ingestEvents(env.DB, [{ ev: big, relay: "wss://r.test" }], { domains: new Set(), ourPubkey: null });
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM tombstones WHERE deletion_id = ?").bind(big.id).first<{ n: number }>())!.n).toBe(MAX_UNSEEN_TOMBSTONES);
+    const many = Array.from({ length: INGEST_LIMITS.perPubkeyPerDay + 4 }, (_, i) => signK(sk, 5, [["e", rid()]], Math.floor(Date.now() / 1000) - i));
+    const r = await ingestEvents(env.DB, many.map((ev) => ({ ev, relay: "wss://r.test" })), { domains: new Set(), ourPubkey: null });
+    expect(r.reasons["rate-limited pubkey"]).toBe(5); // 1 earlier + 199 now = 200
+    expect((await env.DB.prepare("SELECT COUNT(DISTINCT deletion_id) n FROM tombstones WHERE pubkey = ?").bind(pk).first<{ n: number }>())!.n).toBe(INGEST_LIMITS.perPubkeyPerDay);
+  });
+});
