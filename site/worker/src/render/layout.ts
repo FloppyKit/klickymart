@@ -62,7 +62,11 @@ export function layout(o: LayoutOpts): string {
 <meta name="description" content="A signed map of where agents can shop. Records published as Nostr events.">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/km.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:image" content="${esc(o.origin)}/logo-512.png">
 </head>
 <body class="km-has-landscape${o.path === "/" ? " km-page-home" : ""}${o.sceneOnly ? " km-scene-only" : ""}">
 <a class="km-skip" href="#main">Skip to content</a>
@@ -72,7 +76,7 @@ export function layout(o: LayoutOpts): string {
 </div>
 <header class="km-header" role="banner">
   <a class="km-wordmark" href="/">
-    <svg class="km-glyph" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="currentColor" d="M3 3h5v5H3V3zm7 0h5v5h-5V3zM3 10h5v5H3v-5zm7 2h5v3h-5v-3z"/></svg>
+    <img class="km-glyph" src="/icon-192.png" width="24" height="24" alt="KlickyMart">
     KlickyMart
   </a>
   ${previewBadge}
