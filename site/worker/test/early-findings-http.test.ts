@@ -65,8 +65,8 @@ describe("F6 /landed max_landed (delivered total) vs max_price (item price)", ()
 describe("F9 site tip discoverable in read-only/API mode", () => {
   it("llms.txt and .well-known/klickymart.json name SITE_TIP_LUD16 when set, and omit it when unset", async () => {
     const { buildLlmsTxt } = await import("../src/llms");
-    expect(buildLlmsTxt("https://k.example", "c@k.example", [], undefined, "zap@klickymart.com")).toContain("Lightning address zap@klickymart.com");
-    expect(buildLlmsTxt("https://k.example", "c@k.example", [])).not.toContain("Tip KlickyMart");
+    expect(buildLlmsTxt("https://k.example.com", "c@k.example.com", [], undefined, "zap@klickymart.com")).toContain("Lightning address zap@klickymart.com");
+    expect(buildLlmsTxt("https://k.example.com", "c@k.example.com", [])).not.toContain("Tip KlickyMart");
     const { handleRequest } = await import("../src/router");
     const { env } = await import("cloudflare:test");
     const wk = await (await handleRequest(new Request("https://example.com/.well-known/klickymart.json"), { ...env, SITE_TIP_LUD16: "zap@klickymart.com" } as any)).json<any>();

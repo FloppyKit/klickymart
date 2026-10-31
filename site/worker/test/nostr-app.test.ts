@@ -42,8 +42,8 @@ describe("login (NIP-98-style signed challenge)", () => {
   });
   it("refuses cross-origin login, wrong u, stale time, forged challenge, bad signature and any secret in the body", async () => {
     const ch = makeChallenge(SEC);
-    expect((await SELF.fetch(`${O}/auth/login`, { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify({ event: authEv(ch) }) })).status).toBe(403);
-    expect(verifyAuthEvent(authEv(ch, undefined, { tags: [["u", "https://evil.example/auth/login"], ["method", "POST"], ["challenge", ch]] }), O, SEC)).toMatchObject({ ok: false, code: "bad_url" });
+    expect((await SELF.fetch(`${O}/auth/login`, { method: "POST", headers: { Origin: "https://evil.example.com" }, body: JSON.stringify({ event: authEv(ch) }) })).status).toBe(403);
+    expect(verifyAuthEvent(authEv(ch, undefined, { tags: [["u", "https://evil.example.com/auth/login"], ["method", "POST"], ["challenge", ch]] }), O, SEC)).toMatchObject({ ok: false, code: "bad_url" });
     expect(verifyAuthEvent(authEv(ch, undefined, { created_at: now() - 600 }), O, SEC)).toMatchObject({ ok: false, code: "bad_time" });
     expect(verifyAuthEvent(authEv(makeChallenge("other-secret")), O, SEC)).toMatchObject({ ok: false, code: "bad_challenge" });
     const bad = { ...authEv(ch), sig: "00".repeat(64) };
@@ -78,7 +78,7 @@ describe("feed + NIP-51 lists", () => {
   it("feed reads the D1 index, filters by kind/tag/store/author, requires #klickymart on kind 1 and re-verifies signatures", async () => {
     const sk = secp.utils.randomSecretKey();
     const evs = [
-      sign({ kind: 422, created_at: now() - 10, content: "<img src=x onerror=alert(1)>", tags: [["d", "feedtest.example"], ["t", "btc"]] }, sk),
+      sign({ kind: 422, created_at: now() - 10, content: "<img src=x onerror=alert(1)>", tags: [["d", "feedtest.example.com"], ["t", "btc"]] }, sk),
       sign({ kind: 1, created_at: now() - 20, content: "note", tags: [["t", "klickymart"], ["t", "x402"]] }, sk),
       sign({ kind: 1, created_at: now() - 30, content: "unrelated", tags: [["t", "x402"]] }, sk),
     ];
@@ -88,7 +88,7 @@ describe("feed + NIP-51 lists", () => {
     const pk = evs[0].pubkey;
     expect((await q(`author=${pk}`)).map((e) => e.id)).toEqual([evs[0].id, evs[1].id]);
     expect((await q(`author=${pk}&tag=x402`)).map((e) => e.id)).toEqual([evs[1].id]);
-    expect((await q(`store=feedtest.example`)).map((e) => e.id)).toEqual([evs[0].id]);
+    expect((await q(`store=feedtest.example.com`)).map((e) => e.id)).toEqual([evs[0].id]);
     expect((await q("kind=421&tag=btc")).some((e) => e.id === forged.id)).toBe(false);
     expect(parseFeedParams(new URLSearchParams("kind=7")).ok).toBe(false);
     const r = await SELF.fetch(`${O}/feed.json?author=${pk}`); const j = await r.json() as { items: { content: string }[] };
@@ -111,7 +111,7 @@ describe("feed + NIP-51 lists", () => {
   it("client helpers: bunker URI parse limits relays to the CSP list; secrets never leave", () => {
     const A = app(); const pk = "ab".repeat(32);
     expect(A.parseBunker(`bunker://${pk}?relay=wss://relay.nsec.app&secret=s3`)).toEqual({ pubkey: pk, relays: ["wss://relay.nsec.app"], secret: "s3" });
-    expect(() => A.parseBunker(`bunker://${pk}?relay=wss://evil.example`)).toThrow(/not allowed/);
+    expect(() => A.parseBunker(`bunker://${pk}?relay=wss://evil.example.com`)).toThrow(/not allowed/);
     expect(() => A.parseBunker("bunker://nothex")).toThrow();
     expect(() => A.publicEvent({ id: "1", content: "nsec1" + "q".repeat(58), tags: [] })).toThrow(/secret/);
     expect(APPJS as string).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
@@ -120,18 +120,18 @@ describe("feed + NIP-51 lists", () => {
 
 describe("tip-ready badge", () => {
   const prof = (content: object, sk?: Parameters<typeof sign>[1]) => sign({ kind: 0, created_at: now(), content: JSON.stringify(content), tags: [] }, sk);
-  const ok = (async () => new Response(JSON.stringify({ tag: "payRequest", callback: "https://w.example/cb", minSendable: 1000, maxSendable: 1e9 }), { status: 200 })) as unknown as typeof fetch;
+  const ok = (async () => new Response(JSON.stringify({ tag: "payRequest", callback: "https://w.example.com/cb", minSendable: 1000, maxSendable: 1e9 }), { status: 200 })) as unknown as typeof fetch;
   it("parses lud16 and lud06, refuses private hosts and non-https", () => {
-    expect(payUrlFromProfile(JSON.stringify({ lud16: "Me@Wallet.Example" }))).toEqual({ addr: "me@wallet.example", url: "https://wallet.example/.well-known/lnurlp/me" });
-    const l06 = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("https://pay.example/lnurlp/a")), 2000);
-    expect(payUrlFromProfile(JSON.stringify({ lud06: l06 }))?.url).toBe("https://pay.example/lnurlp/a");
-    const insecure = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("http://pay.example/x")), 2000);
+    expect(payUrlFromProfile(JSON.stringify({ lud16: "Me@Wallet.Example.com" }))).toEqual({ addr: "me@wallet.example.com", url: "https://wallet.example.com/.well-known/lnurlp/me" });
+    const l06 = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("https://pay.example.com/lnurlp/a")), 2000);
+    expect(payUrlFromProfile(JSON.stringify({ lud06: l06 }))?.url).toBe("https://pay.example.com/lnurlp/a");
+    const insecure = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("http://pay.example.com/x")), 2000);
     expect(payUrlFromProfile(JSON.stringify({ lud06: insecure }))).toBeNull();
     for (const a of ["a@localhost", "a@10.0.0.1", "a@host.internal", "a@x.onion"]) expect(payUrlFromProfile(JSON.stringify({ lud16: a }))).toBeNull();
   });
   it("working endpoint -> tip_ready with ranking_weight 0; broken endpoint -> not ready; cached for a day", async () => {
-    const sk = secp.utils.randomSecretKey(); const p = prof({ lud16: "agent@wallet.example", name: "<b>x</b>" }, sk);
-    const sk2 = secp.utils.randomSecretKey(); const p2 = prof({ lud16: "dead@wallet.example" }, sk2);
+    const sk = secp.utils.randomSecretKey(); const p = prof({ lud16: "agent@wallet.example.com", name: "<b>x</b>" }, sk);
+    const sk2 = secp.utils.randomSecretKey(); const p2 = prof({ lud16: "dead@wallet.example.com" }, sk2);
     for (const e of [p, p2]) await env.DB.prepare("INSERT OR REPLACE INTO nostr_events (id, kind, pubkey, created_at, d, raw_json, first_seen, relays) VALUES (?,?,?,?,?,?,?,?)").bind(e.id, 0, e.pubkey, e.created_at, null, JSON.stringify(e), now(), "test").run();
     let calls = 0;
     const f = (async (u: string) => { calls++; return String(u).includes("/agent") ? ok(u) : new Response("no", { status: 404 }); }) as unknown as typeof fetch;

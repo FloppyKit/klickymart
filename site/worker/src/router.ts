@@ -1,3 +1,4 @@
+import { isSpecialUseHost } from "./special-names";
 import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
 import { WALLET_GUIDE } from "./wallet";
 import { cashuMints, findReceipt, getInvoice, loadNutzaps, nutzapInfoOf, nwcRelays, type InvoiceInput } from "./tip-rails";
@@ -271,14 +272,12 @@ function err400(param: string, message: string): Response {
 
 /** Public hostname with a real TLD; no IPs, localhost or internal names. */
 const UNINDEXED_OK = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
-const JUNK_SUFFIXES = ["internal", "local", "localhost", "onion", "invalid", "test", "example", "lan", "home", "corp", "intranet", "arpa"];
 /** PQ-2: only public multi-label DNS names may be noted as unindexed stores or queued for a crawl. */
 export function isQueueableHost(d: string): boolean {
   if (typeof d !== "string" || !UNINDEXED_OK.test(d)) return false;
   const labels = d.split(".");
   if (labels.length < 2) return false;
-  if (JUNK_SUFFIXES.includes(labels[labels.length - 1])) return false;
-  if (labels.every((l) => /^(?:0x[0-9a-f]+|[0-9]+)$/.test(l))) return false; // IPv4 literal forms
+  if (isSpecialUseHost(d)) return false; // GP-5/PQ-2: shared special-use-name helper
   return true;
 }
 const UNINDEXED_NOTE = "This store is not in KlickyMart's index yet. Your note is kept and shown on its pending page, but it does not count toward the chart until KlickyBot has checked the store (robots.txt first, then terms, then public pages only).";

@@ -65,8 +65,8 @@ describe("one vocabulary across /q, MCP, llms.txt and openapi", () => {
 describe("live Shopify Catalog results: filters after fetch + store facts", () => {
   const products = [
     { title: "Cheap grinder", variants: [{ url: "https://www.bose.com/p/x", price: { amount: 9900, currency: "USD" }, availability: { available: true } }] },
-    { title: "Pricey grinder", variants: [{ url: "https://unknown-shop.example/p/y", price: { amount: 17999, currency: "USD" }, availability: { available: true } }] },
-    { title: "Sold out", variants: [{ url: "https://unknown-shop.example/p/z", price: { amount: 5000, currency: "USD" }, availability: { available: false } }] },
+    { title: "Pricey grinder", variants: [{ url: "https://unknown-shop.example.com/p/y", price: { amount: 17999, currency: "USD" }, availability: { available: true } }] },
+    { title: "Sold out", variants: [{ url: "https://unknown-shop.example.com/p/z", price: { amount: 5000, currency: "USD" }, availability: { available: false } }] },
   ];
   it("max_price and in_stock are applied and reported", async () => {
     const r = liveItems(products, await snap(), "https://x", { q: "grinder", max_price: 150, in_stock: true, zip: "66061" });

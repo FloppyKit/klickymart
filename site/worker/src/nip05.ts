@@ -1,3 +1,4 @@
+import { readCapped } from "./capped-read";
 /** NIP-05 checks for keys that have posted notes, used only as a public same-operator hint in flags.ts.
  * Mirrors crawler/gate.py: robots.txt first with our honest UA (404 = allowed; 403/5xx/timeout = disallowed), refuse
  * domains our index marks as not-welcome, public hostnames only, no redirects (NIP-05), small timeouts, few per pass. */
@@ -50,12 +51,12 @@ export async function checkNip05(pubkey: string, nip05: unknown, f: Fetcher, ind
   if (st && REFUSE.has(st)) return { status: "gate-refused", domain: p.domain, nip05: `${p.name}@${p.domain}` };
   const base = `https://${p.domain}`;
   const rb = await get(f, `${base}/robots.txt`);
-  const robotsOk = rb && rb.status === 404 ? true : rb && rb.status >= 200 && rb.status < 300 ? robotsAllows(await rb.text(), "/.well-known/nostr.json") : false;
+  const robotsOk = rb && rb.status === 404 ? true : rb && rb.status >= 200 && rb.status < 300 ? robotsAllows((await readCapped(rb, 500_000)) ?? "User-agent: *\nDisallow: /", "/.well-known/nostr.json") : false;
   if (!robotsOk) return { status: "robots-disallowed", domain: p.domain, nip05: `${p.name}@${p.domain}` };
   const r = await get(f, `${base}/.well-known/nostr.json?name=${encodeURIComponent(p.name)}`);
   if (!r || r.status !== 200) return { status: "error", domain: p.domain, nip05: `${p.name}@${p.domain}` };
   let j: { names?: Record<string, string> } = {};
-  try { j = JSON.parse((await r.text()).slice(0, 200_000)); } catch { return { status: "error", domain: p.domain, nip05: `${p.name}@${p.domain}` }; }
+  try { const body = await readCapped(r, 200_000); if (body === null) throw new Error("too large"); j = JSON.parse(body); } catch { return { status: "error", domain: p.domain, nip05: `${p.name}@${p.domain}` }; }
   return { status: j.names?.[p.name]?.toLowerCase() === pubkey ? "verified" : "mismatch", domain: p.domain, nip05: `${p.name}@${p.domain}` };
 }
 

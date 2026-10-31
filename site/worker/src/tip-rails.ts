@@ -31,21 +31,53 @@ export function nwcRelays(env: { NWC_RELAYS?: string }): string[] { const l = cs
 
 // ---------- SSRF + DNS-rebinding guard ----------
 /** Private, loopback, link-local, CGNAT, multicast, reserved and documentation ranges (v4 and v6). */
-export function privateIp(ip: string): boolean {
-  let s = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  // R9-006: IPv4-mapped/compatible IPv6 in hex form (::ffff:7f00:1, ::7f00:1) is checked as the IPv4 it carries.
-  const hx = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(s);
-  if (hx) { const a = parseInt(hx[1]!, 16), b = parseInt(hx[2]!, 16); s = `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`; }
-  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s.replace(/^::ffff:/, ""));
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51) || (a === 203 && b === 0)
-      || (a === 192 && b === 88) || [a, b, Number(v4[3]), Number(v4[4])].some((x) => x > 255); // 6to4 relay anycast; malformed octets
+function parseV4(s: string): number[] | null {
+  // inet_aton-style: 1-4 parts, each decimal, 0x hex or 0-leading octal; the last part fills the remaining bytes.
+  const parts = s.split("."); if (parts.length < 1 || parts.length > 4) return null;
+  const nums: number[] = [];
+  for (const p of parts) {
+    let n: number;
+    if (/^0x[0-9a-f]+$/.test(p)) n = parseInt(p.slice(2), 16);
+    else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+    else if (/^(0|[1-9][0-9]*)$/.test(p)) n = Number(p);
+    else return null;
+    nums.push(n);
   }
-  if (!s.includes(":")) return true;
-  return s === "::" || s === "::1" || /^(fc|fd|fe[89a-f]|ff)/.test(s) || s.startsWith("2001:db8") || s.startsWith("64:ff9b") || s.startsWith("::ffff:") || s.startsWith("::")
-    || s.startsWith("2002:") || /^2001:0{0,4}:/.test(s) || s.startsWith("100::"); // site-local fec0::/10, 6to4, Teredo, discard
+  const last = nums.pop()!; if (nums.some((n) => n > 255) || last >= 2 ** (8 * (4 - nums.length))) return null;
+  const out = [...nums]; for (let i = 4 - nums.length - 1; i >= 0; i--) out.push(Math.floor(last / 2 ** (8 * i)) % 256);
+  return out;
+}
+function parseV6(s: string): number[] | null {
+  s = s.replace(/%.*$/, ""); // zone id
+  const m = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (m) { const v = parseV4(m[2]!); if (!v || !/^\d+\.\d+\.\d+\.\d+$/.test(m[2]!)) return null; s = `${m[1]}${((v[0]! << 8) | v[1]!).toString(16)}:${((v[2]! << 8) | v[3]!).toString(16)}`; }
+  const halves = s.split("::"); if (halves.length > 2) return null;
+  const grp = (x: string) => (x === "" ? [] : x.split(":"));
+  const head = grp(halves[0]!), tail = halves.length === 2 ? grp(halves[1]!) : [];
+  if ([...head, ...tail].some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null;
+  return [...head, ...Array(halves.length === 2 ? fill : 0).fill("0"), ...tail].map((g) => parseInt(g, 16));
+}
+function privateV4([a, b, c]: number[]): boolean {
+  return a === 0 || a === 10 || a === 127 || a! >= 224 || (a === 100 && b! >= 64 && b! <= 127) || (a === 169 && b === 254) || (a === 172 && b! >= 16 && b! <= 31)
+    || (a === 192 && b === 168) || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51 && c === 100)
+    || (a === 203 && b === 0 && c === 113) || (a === 192 && b === 88 && c === 99);
+}
+/** Private, loopback, link-local, CGNAT, multicast, reserved and documentation ranges (v4 and v6). GP-4: parsed numerically, fails closed on anything unparseable. */
+export function privateIp(ip: string): boolean {
+  const s = String(ip).toLowerCase().trim().replace(/^\[|\]$/g, "");
+  if (!s.includes(":")) { const v = parseV4(s); return v ? privateV4(v) : true; }
+  const g = parseV6(s); if (!g) return true;
+  const v4 = [g[6]! >> 8, g[6]! & 255, g[7]! >> 8, g[7]! & 255];
+  if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0)) return g[5] === 0 && g[6] === 0 ? true : privateV4(v4); // ::, ::1, mapped, compatible
+  if (g[0] === 0x64 && g[1] === 0xff9b) return true; // NAT64
+  if (g[0] === 0x100 && g[1] === 0 && g[2] === 0 && g[3] === 0) return true; // discard 100::/64
+  if (g[0] === 0x2001 && (g[1] === 0xdb8 || g[1]! < 0x200)) return true; // documentation, Teredo/IETF protocol 2001::/23
+  if (g[0] === 0x2002) return true; // 6to4
+  if (g[0] === 0x3fff && g[1]! < 0x1000) return true; // documentation 3fff::/20
+  const h = g[0]!;
+  return (h & 0xfe00) === 0xfc00 || (h & 0xffc0) === 0xfe80 || (h & 0xffc0) === 0xfec0 || (h & 0xff00) === 0xff00 || h === 0;
 }
 /** Resolve A + AAAA over DNS-over-HTTPS; null when nothing resolves, else the sorted address list. */
 export async function resolveHost(host: string, doh: F): Promise<string[] | null> {
@@ -58,19 +90,8 @@ export async function resolveHost(host: string, doh: F): Promise<string[] | null
   }
   return out.length ? out.sort() : null;
 }
-/** Read a response body as UTF-8, or null as soon as it exceeds max bytes (the rest is cancelled, not buffered). */
-export async function readCapped(r: Response, max: number): Promise<string | null> {
-  const cl = Number(r.headers.get("content-length")); if (Number.isFinite(cl) && cl > max) { try { await r.body?.cancel(); } catch { /* */ } return null; }
-  if (!r.body) return "";
-  const reader = r.body.getReader(); const parts: Uint8Array[] = []; let n = 0;
-  for (;;) {
-    const { done, value } = await reader.read(); if (done) break;
-    n += value.byteLength; if (n > max) { try { await reader.cancel(); } catch { /* */ } return null; }
-    parts.push(value);
-  }
-  const all = new Uint8Array(n); let o = 0; for (const p of parts) { all.set(p, o); o += p.byteLength; }
-  return new TextDecoder().decode(all);
-}
+export { readCapped } from "./capped-read";
+import { readCapped } from "./capped-read";
 /** Fetch a public https URL: public hostname, every resolved address public before AND after the request (a changed
  * answer = possible rebinding -> refuse the body), no redirects, timeout, size cap. Workers cannot pin the connect IP,
  * so the post-check is the mitigation; Cloudflare egress also cannot reach private networks. */

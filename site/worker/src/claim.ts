@@ -41,8 +41,8 @@ export async function fetchNostrJson(domain: string, timeoutMs = 5000): Promise<
     }
     const cors = res.headers.get("Access-Control-Allow-Origin") === "*"
       || res.headers.get("Access-Control-Allow-Origin")?.includes("*") === true;
-    const text = await res.text();
-    if (text.length > 65536) {
+    const text = await readCapped(res, 65536);
+    if (text === null) {
       return { ok: false, status: res.status, cors, names: {}, error: "response too large" };
     }
     if (!res.ok) {
@@ -70,6 +70,7 @@ export async function fetchNostrJson(domain: string, timeoutMs = 5000): Promise<
   }
 }
 
+import { readCapped } from "./capped-read";
 import { hexToNpub as npubOf } from "./crawler-pubkey";
 /** KM-004: real NIP-19 bech32 npub (was a truncated display stub that no real npub could match). Non-hex input is returned as is. */
 export function hexToNpub(hex: string): string {

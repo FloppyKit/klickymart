@@ -31,7 +31,7 @@ function lnurl(o: { allowsNostr?: boolean; badAmount?: boolean; badHash?: boolea
   const NODE = key(); const ZAPPER = key(); const metadata = JSON.stringify([["text/plain", "tip"]]); const calls: string[] = [];
   const f = (async (u: string) => {
     calls.push(u); const url = new URL(u);
-    if (url.pathname.startsWith("/.well-known/lnurlp/")) return Response.json({ tag: "payRequest", callback: "https://wallet.example/cb", minSendable: 1000, maxSendable: 1e9, metadata, commentAllowed: 100, ...(o.allowsNostr !== false ? { allowsNostr: true, nostrPubkey: pkOf(ZAPPER) } : {}) });
+    if (url.pathname.startsWith("/.well-known/lnurlp/")) return Response.json({ tag: "payRequest", callback: "https://wallet.example.com/cb", minSendable: 1000, maxSendable: 1e9, metadata, commentAllowed: 100, ...(o.allowsNostr !== false ? { allowsNostr: true, nostrPubkey: pkOf(ZAPPER) } : {}) });
     if (url.pathname === "/cb") {
       const amt = Number(url.searchParams.get("amount")) * (o.badAmount ? 2 : 1); const desc = o.badHash ? "x" : (url.searchParams.get("nostr") ?? metadata);
       const hrp = `lnbc${amt / 100}n`;
@@ -50,51 +50,51 @@ describe("SSRF + DNS-rebinding guard", () => {
   });
   it("refuses http, private hosts, private DNS answers, changed answers and redirects", async () => {
     const ok = (async () => new Response("{}")) as never;
-    expect(await guardedFetch("http://a.example/x", { fetcher: ok, doh: PUB })).toMatchObject({ ok: false });
+    expect(await guardedFetch("http://a.example.com/x", { fetcher: ok, doh: PUB })).toMatchObject({ ok: false });
     expect(await guardedFetch("https://localhost/x", { fetcher: ok, doh: PUB })).toMatchObject({ ok: false });
-    expect(await guardedFetch("https://a.example:8443/x", { fetcher: ok, doh: PUB })).toMatchObject({ ok: false });
-    expect(await guardedFetch("https://a.example/x", { fetcher: ok, doh: doh([["10.0.0.5"]]) })).toMatchObject({ ok: false, reason: "host does not resolve to public addresses" });
-    expect(await guardedFetch("https://a.example/x", { fetcher: ok, doh: doh([["93.184.215.14"], ["127.0.0.1"]]) })).toMatchObject({ ok: false, reason: "host address changed during the request" });
-    expect(await guardedFetch("https://a.example/x", { fetcher: (async () => new Response(null, { status: 302, headers: { Location: "http://10.0.0.1/" } })) as never, doh: PUB })).toMatchObject({ ok: false, reason: "upstream status 302" });
-    expect(await guardedFetch("https://a.example/x", { fetcher: ok, doh: PUB })).toEqual({ ok: true, text: "{}" });
+    expect(await guardedFetch("https://a.example.com:8443/x", { fetcher: ok, doh: PUB })).toMatchObject({ ok: false });
+    expect(await guardedFetch("https://a.example.com/x", { fetcher: ok, doh: doh([["10.0.0.5"]]) })).toMatchObject({ ok: false, reason: "host does not resolve to public addresses" });
+    expect(await guardedFetch("https://a.example.com/x", { fetcher: ok, doh: doh([["93.184.215.14"], ["127.0.0.1"]]) })).toMatchObject({ ok: false, reason: "host address changed during the request" });
+    expect(await guardedFetch("https://a.example.com/x", { fetcher: (async () => new Response(null, { status: 302, headers: { Location: "http://10.0.0.1/" } })) as never, doh: PUB })).toMatchObject({ ok: false, reason: "upstream status 302" });
+    expect(await guardedFetch("https://a.example.com/x", { fetcher: ok, doh: PUB })).toEqual({ ok: true, text: "{}" });
   });
 });
 
 describe("Lightning zaps (NIP-57) and plain tips", () => {
   it("zap request built by km-tip.js and signed by a throwaway key gets a bolt11 bound to it (mock LNURL server)", async () => {
-    const L = lnurl(); const r = await profileWith("agent@wallet.example"); const payer = key();
+    const L = lnurl(); const r = await profileWith("agent@wallet.example.com"); const payer = key();
     const tmpl = tipLib().buildZapRequest({ recipient: r.pk, e: "ab".repeat(32), k: 422, msat: 21000, comment: "thanks" });
     const zr = sign(tmpl, payer);
     expect(verifyZapRequest(zr)).toMatchObject({ ok: true, recipient: r.pk, amount: 21000, target: "ab".repeat(32) });
     const out = await getInvoice(env.DB, { zap_request: zr }, { salt: "s", ip: "203.0.113.9", fetcher: L.f, doh: PUB });
     expect(out.status, JSON.stringify(out.body)).toBe(200);
-    expect(out.body).toMatchObject({ ok: true, amount_msat: 21000, zap: true, zap_request_id: zr.id, zapper_pubkey: pkOf(L.ZAPPER), addr: "agent@wallet.example" });
+    expect(out.body).toMatchObject({ ok: true, amount_msat: 21000, zap: true, zap_request_id: zr.id, zapper_pubkey: pkOf(L.ZAPPER), addr: "agent@wallet.example.com" });
     const cb = new URL(L.calls[1]); expect(cb.searchParams.get("nostr")).toBe(JSON.stringify(zr)); expect(cb.searchParams.get("lnurl")).toMatch(/^lnurl1/);
   });
   it("refuses an invoice with the wrong amount or not bound to the zap request, and zaps to non-zap addresses", async () => {
-    const r = await profileWith("agent@wallet.example"); const zr = sign(tipLib().buildZapRequest({ recipient: r.pk, msat: 5000 }));
+    const r = await profileWith("agent@wallet.example.com"); const zr = sign(tipLib().buildZapRequest({ recipient: r.pk, msat: 5000 }));
     expect((await getInvoice(env.DB, { zap_request: zr }, { salt: "s", ip: null, fetcher: lnurl({ badAmount: true }).f, doh: PUB })).body).toMatchObject({ error: { message: "invoice amount differs from the requested amount" } });
     expect((await getInvoice(env.DB, { zap_request: zr }, { salt: "s", ip: null, fetcher: lnurl({ badHash: true }).f, doh: PUB })).body).toMatchObject({ error: { code: "bad_invoice" } });
     expect((await getInvoice(env.DB, { zap_request: zr }, { salt: "s", ip: null, fetcher: lnurl({ allowsNostr: false }).f, doh: PUB })).body).toMatchObject({ error: { code: "zaps_unsupported" } });
   });
   it("plain (non-zap) tip to a lud16 checks the metadata description_hash", async () => {
     const L = lnurl({ allowsNostr: false });
-    const out = await getInvoice(env.DB, { lud16: "Tips@Wallet.Example", amount_msat: 2000, comment: "hi" }, { salt: "s", ip: null, fetcher: L.f, doh: PUB });
-    expect(out.body).toMatchObject({ ok: true, zap: false, amount_msat: 2000, addr: "tips@wallet.example" });
+    const out = await getInvoice(env.DB, { lud16: "Tips@Wallet.Example.com", amount_msat: 2000, comment: "hi" }, { salt: "s", ip: null, fetcher: L.f, doh: PUB });
+    expect(out.body).toMatchObject({ ok: true, zap: false, amount_msat: 2000, addr: "tips@wallet.example.com" });
     expect(new URL(L.calls[1]).searchParams.get("comment")).toBe("hi");
   });
   it("refuses secrets, bad input, tampered zap requests and unknown recipients", async () => {
     const o = { salt: "s", ip: null, fetcher: lnurl().f, doh: PUB };
-    expect((await getInvoice(env.DB, { lud16: "a@b.example", amount_msat: 2000, comment: "nostr+walletconnect://x" }, o)).body).toMatchObject({ error: { code: "secret_sent" } });
+    expect((await getInvoice(env.DB, { lud16: "a@b.example.com", amount_msat: 2000, comment: "nostr+walletconnect://x" }, o)).body).toMatchObject({ error: { code: "secret_sent" } });
     expect((await getInvoice(env.DB, { lud16: "a@10.0.0.1", amount_msat: 2000 }, o)).body).toMatchObject({ error: { code: "bad_lud16" } });
-    expect((await getInvoice(env.DB, { lud16: "a@b.example", amount_msat: 1 }, o)).body).toMatchObject({ error: { code: "bad_amount" } });
+    expect((await getInvoice(env.DB, { lud16: "a@b.example.com", amount_msat: 1 }, o)).body).toMatchObject({ error: { code: "bad_amount" } });
     const zr = sign(tipLib().buildZapRequest({ recipient: "cd".repeat(32), msat: 5000 }));
     expect((await getInvoice(env.DB, { zap_request: { ...zr, content: "edited" } }, o)).body).toMatchObject({ error: { code: "bad_zap_request" } });
     expect((await getInvoice(env.DB, { zap_request: zr, amount_msat: 6000 }, o)).body).toMatchObject({ error: { code: "amount_mismatch" } });
     expect((await getInvoice(env.DB, { zap_request: zr }, o)).status).toBe(404);
   });
   it("limiter: network before key before global, with give-back on refusal", async () => {
-    const r = await profileWith("agent@wallet.example"); const payer = key(); const o = { salt: "s", ip: "198.51.100.7", fetcher: lnurl().f, doh: PUB };
+    const r = await profileWith("agent@wallet.example.com"); const payer = key(); const o = { salt: "s", ip: "198.51.100.7", fetcher: lnurl().f, doh: PUB };
     const hr = Math.floor(Date.now() / 3_600_000);
     await env.DB.prepare("INSERT INTO rate_limits (k, n, exp) VALUES (?, 30, ?)").bind(`inv:pk:${pkOf(payer)}:${hr}`, now() + 7200).run();
     const res = await getInvoice(env.DB, { zap_request: sign(tipLib().buildZapRequest({ recipient: r.pk, msat: 5000 }), payer) }, o);
@@ -124,7 +124,7 @@ describe("Lightning zaps (NIP-57) and plain tips", () => {
     const L = tipLib(); const w = "ab".repeat(32), s = "cd".repeat(32);
     const c = L.parseNwc(`nostr+walletconnect://${w}?relay=wss://relay.getalby.com/v1&secret=${s}`, ["wss://relay.getalby.com"]);
     expect(c).toEqual({ walletPubkey: w, relay: "wss://relay.getalby.com/v1", secret: s });
-    expect(() => L.parseNwc(`nostr+walletconnect://${w}?relay=wss://evil.example&secret=${s}`, ["wss://relay.getalby.com"])).toThrow(/only use/);
+    expect(() => L.parseNwc(`nostr+walletconnect://${w}?relay=wss://evil.example.com&secret=${s}`, ["wss://relay.getalby.com"])).toThrow(/only use/);
     const sess = L.nwcSession(c, "lnbc1x", 21000, 21000);
     expect(() => sess.payInvoice("lnbc1other")).toThrow(/limited/);
     expect(sess.payInvoice("lnbc1x")).toEqual({ method: "pay_invoice", params: { invoice: "lnbc1x", amount: 21000 } });
@@ -169,13 +169,13 @@ describe("Cashu nutzaps (NIP-61)", () => {
   });
   it("R8-007 repro: forged 9321s (unlocked, wrong key, unlisted mint) are dropped; a lock-shaped one at a listed mint is shown only as claimed", async () => {
     const rSk = key(); const r = pkOf(rSk); const p2 = "02" + pkOf(key()); const target = "5a".repeat(32);
-    await store(sign({ kind: 10019, created_at: now(), content: "", tags: [["mint", "https://mint.listed.example"], ["pubkey", p2]] }, rSk));
+    await store(sign({ kind: 10019, created_at: now(), content: "", tags: [["mint", "https://mint.listed.example.com"], ["pubkey", p2]] }, rSk));
     const lockTo = (k: string) => JSON.stringify(["P2PK", { nonce: "00", data: k }]);
     const nz = (mint: string, secret: string, amount = 1000000) => sign({ kind: 9321, created_at: now(), content: "", tags: [["proof", JSON.stringify({ amount, secret, C: "02" + "00".repeat(32), id: "00" })], ["u", mint], ["e", target], ["p", r]] });
-    const forged = [nz("https://mint.listed.example", "plain-secret"), nz("https://mint.listed.example", lockTo("02" + "11".repeat(32))), nz("https://evil.mint.example", lockTo(p2))];
+    const forged = [nz("https://mint.listed.example.com", "plain-secret"), nz("https://mint.listed.example.com", lockTo("02" + "11".repeat(32))), nz("https://evil.mint.example.com", lockTo(p2))];
     for (const f of forged) await store(f);
     expect((await loadNutzaps(env.DB, [target])).get(target) ?? []).toEqual([]);
-    await store(nz("https://mint.listed.example", lockTo(p2), 21));
+    await store(nz("https://mint.listed.example.com", lockTo(p2), 21));
     const got = (await loadNutzaps(env.DB, [target])).get(target)!; expect(got.length).toBe(1); expect(got[0].sats).toBe(21);
     const j = await (await SELF.fetch(`https://klickymart.com/tip/nutzaps.json?e=${target}`)).json() as { note: string };
     expect(j.note).toMatch(/always claimed/);
@@ -193,11 +193,11 @@ describe("Cashu nutzaps (NIP-61)", () => {
     const enc = (t: { mint: string; proofs: unknown[] }) => "cashuB" + btoa(JSON.stringify(t));
     const res = { send: [{ amount: 16, secret: "s1", C: "02aa", id: "00" }], keep: [{ amount: 4, secret: "s2", C: "02bb", id: "00" }] };
     const rec: Record<string, any> = { id: "x", state: "swapping", input_token: "cashuBspent" };
-    const r = await L.persistSwap(rec, res, "https://mint.example", quota, enc);
+    const r = await L.persistSwap(rec, res, "https://mint.example.com", quota, enc);
     expect(puts).toBe(1); expect(r.saved).toBe(false); expect(r.error.name).toBe("QuotaExceededError");
-    expect(r.change).toBe(enc({ mint: "https://mint.example", proofs: res.keep })); expect(r.locked_token).toBe(enc({ mint: "https://mint.example", proofs: res.send }));
+    expect(r.change).toBe(enc({ mint: "https://mint.example.com", proofs: res.keep })); expect(r.locked_token).toBe(enc({ mint: "https://mint.example.com", proofs: res.send }));
     expect(rec.state).toBe("swapped-unsaved"); expect(rec.input_token).toBeUndefined();
-    const ok = await L.persistSwap({ id: "y", state: "swapping", input_token: "t" }, res, "https://mint.example", () => Promise.resolve(), enc);
+    const ok = await L.persistSwap({ id: "y", state: "swapping", input_token: "t" }, res, "https://mint.example.com", () => Promise.resolve(), enc);
     expect(ok.saved).toBe(true); expect(ok.rec.state).toBe("swapped");
     // storage headroom check before swapping, and stale 'swapping' records are detected on reload
     expect(L.storageRoomOk({ quota: 10_000_000, usage: 9_500_000 }, 1048576)).toBe(false);
@@ -238,8 +238,8 @@ describe("display, ranking and CSP", () => {
     for (const src of [QUERY_SRC, EXP_SRC] as string[]) expect(src).not.toMatch(/9321|nutzap|tip_ready|tip-rails/i);
   });
   it("/app CSP allows exactly the configured mints and NWC relays; /app nav link; vendored libs pinned", async () => {
-    expect(cashuMints({ CASHU_MINTS: "https://mint.a.example/, javascript:alert(1), http://10.0.0.1:80, http://127.0.0.1:3338" })).toEqual(["https://mint.a.example", "http://127.0.0.1:3338"]);
-    expect(nwcRelays({ NWC_RELAYS: "wss://r.example,https://x" })).toEqual(["wss://r.example"]);
+    expect(cashuMints({ CASHU_MINTS: "https://mint.a.example.com/, javascript:alert(1), http://10.0.0.1:80, http://127.0.0.1:3338" })).toEqual(["https://mint.a.example.com", "http://127.0.0.1:3338"]);
+    expect(nwcRelays({ NWC_RELAYS: "wss://r.example.com,https://x" })).toEqual(["wss://r.example.com"]);
     const r = await SELF.fetch("https://klickymart.com/app"); const csp = r.headers.get("Content-Security-Policy")!; const html = await r.text();
     for (const m of DEFAULT_CASHU_MINTS) expect(csp).toContain(m);
     expect(csp).toContain("wss://relay.getalby.com"); expect(csp).toContain("script-src 'self';"); expect(csp).not.toMatch(/connect-src[^;]*(\*|https:(\s|;)|wss:(\s|;))/);

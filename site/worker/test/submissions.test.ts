@@ -47,7 +47,7 @@ describe("domain normalization and abuse filters", () => {
     expect(normalizeSubmitDomain("go.skimresources.com/?id=1")).toMatchObject({ ok: false, code: "affiliate_host" });
   });
   it("strips links and key-like strings from notes and flags spam", () => {
-    const c = cleanNote("great shop https://evil.example/aff?x=1 nsec1" + "q".repeat(58));
+    const c = cleanNote("great shop https://evil.example.com/aff?x=1 nsec1" + "q".repeat(58));
     expect(c.note).not.toMatch(/https|nsec1/);
     expect(c.flags).toEqual([]);
     expect(cleanNote("best casino bonus").flags[0]!.flag).toBe("spam");

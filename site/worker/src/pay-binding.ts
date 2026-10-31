@@ -10,6 +10,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { verifyBolt11, type VerifiedBolt11 } from "./bolt11";
 import { verifyNostrEvent } from "./nostr-verify";
+import { readCapped } from "./capped-read";
 
 type Ev = { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string };
 export interface StoreBindings { nodes: Set<string>; zapKeys: Set<string> }
@@ -92,7 +93,7 @@ export async function lnurlNostrPubkey(db: D1Database | undefined, lud16: string
     const res = await fetcher(`https://${m[2]}/.well-known/lnurlp/${encodeURIComponent(m[1]!)}`, { redirect: "manual", signal: ctl.signal, headers: { Accept: "application/json", "User-Agent": "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com; lnurl-nip57)" } });
     clearTimeout(t);
     if (res.ok) {
-      const txt = (await res.text()).slice(0, 65536);
+      const txt = await readCapped(res, 65536); if (txt === null) throw new Error("too large");
       const j = JSON.parse(txt) as { allowsNostr?: boolean; nostrPubkey?: string };
       if (j.allowsNostr === true && typeof j.nostrPubkey === "string" && /^[0-9a-f]{64}$/.test(j.nostrPubkey)) pk = j.nostrPubkey;
     }

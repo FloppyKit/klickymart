@@ -1,6 +1,7 @@
 /** Nostr-app features: NIP-98-style login (kind 27235 signed challenge, never a key), feed reads over our D1 index,
  * NIP-51 feed-subscription lists (verified here, never stored or published by KlickyMart), tip-ready badges and the
  * optional value-for-value site tip slot. KlickyMart never sees secret keys, holds funds or publishes events. */
+import { isSpecialUseHost } from "./special-names";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
@@ -225,7 +226,7 @@ export function publicHost(h: string): boolean {
   // R9-006: hex/octal-style IP spellings (0x7f.0.0.1, 0177.0.0.1), numeric TLDs, empty labels and leading/trailing dots or dashes.
   const labels = s.split(".");
   if (labels.some((l) => !l || l.length > 63 || l.startsWith("-") || l.endsWith("-") || /^0x[0-9a-f]*$/.test(l) || /^0\d+$/.test(l)) || /^\d+$/.test(labels[labels.length - 1]!) || s.length > 253) return false;
-  return !/(^|\.)(localhost|local|internal|lan|home|arpa|test|invalid|onion)$/.test(s);
+  return !isSpecialUseHost(s); // GP-5
 }
 /** A pay endpoint "works" when it answers a LUD-06 payRequest with an https callback and sane sendable range. */
 export async function probePayUrl(url: string, fetcher?: typeof fetch, doh?: typeof fetch): Promise<boolean> {
