@@ -78,6 +78,7 @@ crons = ["*/5 * * * *"]
 
 [env.production.vars]
 SITE_ORIGIN = "https://klickymart.com"
+ENVIRONMENT = "production"  # R12-005: with this, a missing SUBMIT_SALT secret makes rate-limited endpoints return 503
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).
 SITE_TIP_LUD16 = "zap@klickymart.com"
 LNURL_FORWARD_ZAP = "majorbadger18@primal.net"

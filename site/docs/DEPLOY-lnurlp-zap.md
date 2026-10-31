@@ -10,9 +10,10 @@ Do not deploy until Klicky Audit signs off. Production values are public Lightni
 | `SITE_TIP_LUD16` | `zap@klickymart.com` | footer value-for-value slot (hidden when unset). |
 | `CASHU_MINTS` | unset (uses defaults in tip-rails.ts) | CSP allowlist of mints for in-browser nutzaps. |
 | `NWC_RELAYS` | unset (uses defaults) | CSP allowlist of NWC relays. |
+| `SUBMIT_SALT` | wrangler **secret**, **REQUIRED** in production (`wrangler secret put SUBMIT_SALT --env production`, 32+ random bytes) | keys the per-network rate-limit hashes. Without it every caller would share one bucket, so with `ENVIRONMENT = "production"` the Worker refuses (503) submissions, `/facilitate`, `/feed/list-check`, `/tip-ready.json`, `/tip/invoice` and zap@ until it is set (R12-005). |
 | `AUTH_SECRET` | wrangler **secret** (not a var) | login challenge/session HMAC; falls back to `SUBMIT_SALT`. |
 
-Also: apply D1 migration `0016_tip_ready.sql` before deploying.
+Before deploying: confirm `wrangler secret list --env production` shows `SUBMIT_SALT`. Also: apply D1 migration `0016_tip_ready.sql` before deploying.
 
 How zaps behave: the metadata string is Primal's verbatim (`sats for majorbadger18@primal.net`), so plain payments'
 description_hash matches what the payer saw; zaps commit to the 9734 instead. `allowsNostr`/`nostrPubkey` are Primal's,

@@ -73,6 +73,9 @@ import {
   renderApp,
 } from "./render/pages";
 
+/** R12-005: production = ENVIRONMENT "production" or the klickymart.com origin. */
+export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
+export const saltRequiredButMissing = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string; SUBMIT_SALT?: string }) => isProduction(env) && !env.SUBMIT_SALT;
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
@@ -89,8 +92,10 @@ export interface Env {
   INGESTER?: DurableObjectNamespace;
   FACILITATOR_SK_HEX?: string;
   FACILITATE_ENABLED?: string;
-  /** Salt for submission rate-limit hashes (wrangler secret). */
+  /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
   SUBMIT_SALT?: string;
+  /** "production" in [env.production.vars]; with it, a missing SUBMIT_SALT makes rate-limited endpoints refuse (503). */
+  ENVIRONMENT?: string;
   /** HMAC key for login challenges and session cookies (wrangler secret); falls back to SUBMIT_SALT. Unset -> login 503. */
   AUTH_SECRET?: string;
   /** Value-for-value Lightning address for the site footer. Unset -> slot hidden. */
@@ -458,6 +463,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const items = await readFeed(env.DB, f.value, extra);
     return Response.json({ ...licenseMetaBlock(), count: items.length, items, verified: true, source: "klickymart-d1-index" }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30", "X-KM-Empty-OK": "1" } });
   }
+  // R12-005: in production, rate-limited endpoints refuse to run without the SUBMIT_SALT secret (otherwise every caller
+  // shares one "unsalted" bucket). Submissions and /facilitate already refuse on their own.
+  if (saltRequiredButMissing(env) && ((path === "/feed/list-check" && request.method === "POST") || (path === "/tip-ready.json" && request.method === "GET")
+    || (path.startsWith("/.well-known/lnurlp/") && request.method === "GET") || (path === "/tip/invoice" && request.method === "POST")))
+    return Response.json({ ok: false, status: "ERROR", error: { code: "not_configured", message: "rate-limit salt (SUBMIT_SALT) not configured" }, reason: "rate-limit salt not configured" }, { status: 503, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
   if (path === "/feed/list-check" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const r = await checkFeedList(env.DB, body, { salt: env.SUBMIT_SALT ?? "", ip: request.headers.get("cf-connecting-ip") });
