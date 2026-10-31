@@ -660,7 +660,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return parts.join(" ");
   };
   const offersFor = async (q: OfferQuery, live: boolean) => {
-    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
+    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-offers");
     const allOffers = parseOffers(EMBEDDED_OFFERS_NDJSON || "");
     addKnownBrands(allOffers.map((o) => (o.b ?? "").split(/\s+/)[0] ?? "").filter((w) => w.length >= 3 && !/gift|card|the/i.test(w)));
     const r = findOffers(allOffers, snap, origin, q);

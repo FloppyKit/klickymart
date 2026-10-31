@@ -224,7 +224,7 @@ export async function submitReport(db: D1Database, ev: { id: string; pubkey: str
 export async function buildFlagStatic(snap: { rows: { d: string; pay_online: number; pay_instore: number }[] }): Promise<FlagStatic> {
   const crawlPrices = new Map<string, { min: number; max: number; n: number }>();
   try {
-    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-data");
+    const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-offers");
     const { parseOffers } = await import("./offers");
     for (const o of parseOffers(EMBEDDED_OFFERS_NDJSON || "")) {
       const p = o.dn?.price_usd ?? o.p; if (!(p > 0) || (o.c && o.c !== "USD")) continue;
