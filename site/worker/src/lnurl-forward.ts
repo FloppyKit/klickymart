@@ -27,10 +27,12 @@ export function upstreamUrl(v: string | undefined): string | null {
   const m = /^([A-Za-z0-9._+-]{1,64})@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$/.exec((v ?? "").trim());
   return m && publicHost(m[2].toLowerCase()) ? `https://${m[2].toLowerCase()}/.well-known/lnurlp/${m[1]}` : null;
 }
-function parseMeta(text: string): UpstreamMeta | null {
+function parseMeta(text: string, upHost?: string): UpstreamMeta | null {
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
     if (j.tag !== "payRequest" || typeof j.callback !== "string" || !j.callback.startsWith("https://") || typeof j.metadata !== "string") return null;
+    // R9-003: the callback must stay on the configured upstream's host (or a subdomain of it).
+    if (upHost) { let h = ""; try { const cu = new URL(j.callback); if (cu.port || cu.username || cu.password) return null; h = cu.hostname.toLowerCase(); } catch { return null; } if (h !== upHost && !h.endsWith(`.${upHost}`)) return null; }
     if (typeof j.minSendable !== "number" || typeof j.maxSendable !== "number" || j.minSendable < 1 || j.maxSendable < j.minSendable) return null;
     JSON.parse(j.metadata);
     const nostr = j.allowsNostr === true && typeof j.nostrPubkey === "string" && /^[0-9a-f]{64}$/.test(j.nostrPubkey);
@@ -53,7 +55,7 @@ async function upstreamMeta(url: string, o: { fetcher?: F; doh?: F }, db: D1Data
   const c = cache.get(url); if (c && Date.now() - c.at < FORWARD_LIMITS.cacheTtlMs) return c.meta;
   const b = await spend(db, "m", ip, salt); if ("denied" in b) return b.denied;
   let meta: UpstreamMeta | null = null;
-  try { const r = await guardedFetch(url, o); meta = r.ok ? parseMeta(r.text) : null; } catch { meta = null; }
+  try { const r = await guardedFetch(url, o); meta = r.ok ? parseMeta(r.text, new URL(url).hostname.toLowerCase()) : null; } catch { meta = null; }
   if (!meta) { await b.refund(); return err("upstream wallet unavailable", 502); }
   cache.set(url, { at: Date.now(), meta });
   return meta;
@@ -65,7 +67,8 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   const name = m[1].toLowerCase(); const up = name === "zap" ? upstreamUrl(env.LNURL_FORWARD_ZAP) : null;
   if (!up) return err("unknown lightning address", 404);
   // R9-002: validate the caller's input BEFORE taking rate-limit budget (meta-dependent bounds are checked after).
-  const amount = Number(url.searchParams.get("amount"));
+  // R9-009: amount must be a plain decimal integer string (no 1e3, 0x10, spaces, signs or fractions).
+  const amtRaw = url.searchParams.get("amount") ?? ""; const amount = /^[1-9]\d{0,14}$/.test(amtRaw) ? Number(amtRaw) : NaN;
   const nostr = m[2] ? url.searchParams.get("nostr") : null; const comment = m[2] ? url.searchParams.get("comment") : null;
   if (m[2]) {
     if (!Number.isInteger(amount) || amount < 1) return err("amount must be a positive integer (msat)");
@@ -108,7 +111,7 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   let r: Awaited<ReturnType<typeof guardedFetch>>; try { r = await guardedFetch(cb.toString(), o); } catch { return fail("upstream wallet unavailable"); }
   if (!r.ok) return fail("upstream wallet unavailable");
   let inv: { pr?: unknown; reason?: unknown }; try { inv = JSON.parse(r.text); } catch { return fail("upstream returned no JSON"); }
-  if (typeof inv.pr !== "string") return fail(typeof inv.reason === "string" ? `upstream: ${inv.reason.slice(0, 200)}` : "upstream returned no invoice");
+  if (typeof inv.pr !== "string") return fail("upstream returned no invoice") // R9-008: never echo the upstream's reason text;
   const b = verifyBolt11(inv.pr);
   if (!b || b.amount_msat !== amount) return fail("upstream invoice amount mismatch");
   if (b.description_hash !== bytesToHex(sha256(utf8ToBytes(nostr ?? meta.metadata)))) return fail("upstream invoice description_hash mismatch");

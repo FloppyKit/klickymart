@@ -175,3 +175,22 @@ describe("R12-001 / R12-003: zap@ e/a and relays tags", () => {
     expect((await call(cb(withTags([], ["wss://relay.damus.io", "wss://nos.lol"])), u))!.status).toBe(200);
   });
 });
+
+describe("R9-003 / R9-008 / R9-009 zap@ hardening", () => {
+  it("amount must be a plain decimal integer", async () => {
+    const u = upstream();
+    for (const a of ["1e4", "0x2710", " 10000", "+10000", "10000.0", "-1", "", "0"]) expect((await call(`/.well-known/lnurlp/zap/callback?amount=${encodeURIComponent(a)}`, u))!.status, a).toBe(400);
+    expect(u.calls.length).toBe(0);
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=10000", u))!.status).toBe(200);
+  });
+  it("refuses an upstream whose callback points at another host; never echoes upstream reason text", async () => {
+    const off = { f: (async () => Response.json({ status: "OK", tag: "payRequest", callback: "https://evil.example/cb", metadata: META, minSendable: 1000, maxSendable: 11e9 })) as never, calls: [] as string[] };
+    expect((await call("/.well-known/lnurlp/zap", off))!.status).toBe(502);
+    resetForwardCache();
+    const u = upstream();
+    const chatty = { f: (async (url: string) => new URL(url).pathname.endsWith("/callback") ? Response.json({ status: "ERROR", reason: "<script>pwn</script> internal node 10.0.0.5" }) : (u.f as any)(url, { redirect: "manual" })) as never, calls: [] as string[] };
+    const r = await call("/.well-known/lnurlp/zap/callback?amount=5000", chatty);
+    expect(r!.status).toBe(502);
+    expect(JSON.stringify(await r!.json())).not.toMatch(/pwn|10\.0\.0\.5/);
+  });
+});

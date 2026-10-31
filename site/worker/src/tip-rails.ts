@@ -150,7 +150,7 @@ export async function getInvoice(db: D1Database | undefined, body: InvoiceInput,
   else if (comment && (meta.commentAllowed ?? 0) >= comment.length) cb.searchParams.set("comment", comment);
   const r2 = await guardedFetch(cb.toString(), o); if (!r2.ok) return bad("callback_failed", r2.reason, 502);
   let inv: { pr?: unknown; status?: unknown; reason?: unknown; verify?: unknown }; try { inv = JSON.parse(r2.text); } catch { return bad("callback_bad", "callback did not return JSON", 502); }
-  if (typeof inv.pr !== "string") return bad("callback_bad", typeof inv.reason === "string" ? `wallet said: ${inv.reason.slice(0, 200)}` : "no invoice returned", 502);
+  if (typeof inv.pr !== "string") return bad("callback_bad", "the wallet returned no invoice", 502); // R9-008: never echo upstream text
   const b = verifyBolt11(inv.pr);
   if (!b) return bad("bad_invoice", "invoice failed to decode or its signature is invalid", 502);
   if (b.amount_msat !== amount) return bad("bad_invoice", "invoice amount differs from the requested amount", 502);
