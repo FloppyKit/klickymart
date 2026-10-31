@@ -95,7 +95,22 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     await env.DB.prepare("INSERT INTO rate_limits (k, n, exp) VALUES (?, 1200, ?)").bind(`lnf:c:g:${hr}`, Math.floor(Date.now() / 1000) + 7200).run();
     expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u))!.status).toBe(429);
     expect((await env.DB.prepare("SELECT n FROM rate_limits WHERE k LIKE 'lnf:c:ip:%'").first<{ n: number }>())?.n ?? 0).toBe(0);
-    expect(u.calls.length).toBe(0);
+    expect(u.calls.filter((c) => c.includes("/callback")).length).toBe(0); // the callback was never called (meta fetch is billed to the meta budget)
+  });
+  it("R12-004: cache hits cost nothing; failed upstream calls are refunded", async () => {
+    const n = async (k: string) => (await env.DB.prepare("SELECT COALESCE(SUM(n),0) AS n FROM rate_limits WHERE k LIKE ?").bind(k).first<{ n: number }>())!.n;
+    const u = upstream();
+    for (let i = 0; i < 3; i++) expect((await call("/.well-known/lnurlp/zap", u))!.status).toBe(200);
+    expect(await n("lnf:m:g:%")).toBe(1); // one real upstream fetch, two cache hits
+    const down = { f: (async () => new Response("x", { status: 500 })) as never, calls: [] as string[] };
+    resetForwardCache();
+    expect((await call("/.well-known/lnurlp/zap", down))!.status).toBe(502);
+    expect(await n("lnf:m:g:%")).toBe(1); // refunded
+    const noInvoice = { f: (async (url: string) => new URL(url).pathname.endsWith("/callback") ? Response.json({ status: "ERROR", reason: "below min" }) : (u.f as any)(url, { redirect: "manual" })) as never, calls: [] as string[] };
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", noInvoice))!.status).toBe(502);
+    expect(await n("lnf:c:g:%")).toBe(0); // refunded
+    expect((await call("/.well-known/lnurlp/zap/callback?amount=5000", u))!.status).toBe(200);
+    expect(await n("lnf:c:g:%")).toBe(1);
   });
   it("R9-001: zap requests must name KlickyMart's own pubkey; fail closed when unset; plain pay unaffected", async () => {
     const z = (pt: string[][], e: Record<string, unknown> = E) => call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zapReq(21000, undefined, pt)))}`, upstream(), e);

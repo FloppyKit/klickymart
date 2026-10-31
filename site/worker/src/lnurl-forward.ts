@@ -10,7 +10,7 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { guardedFetch, verifyZapRequest, aCoordPubkey } from "./tip-rails";
 import { verifyBolt11 } from "./bolt11";
 import { ipHash } from "./submissions";
-import { takeAll, type Limit } from "./ratelimit";
+import { takeAll, give, type Limit } from "./ratelimit";
 import { publicHost } from "./nostr-app";
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
@@ -38,17 +38,24 @@ function parseMeta(text: string): UpstreamMeta | null {
       ...(nostr ? { allowsNostr: true, nostrPubkey: j.nostrPubkey as string } : {}) };
   } catch { return null; }
 }
-async function limited(db: D1Database | undefined, kind: "m" | "c", ip: string | null, salt: string): Promise<Response | null> {
-  if (!db) return null;
+/** R12-004: budget is spent only for a real upstream request and given back when that request fails. Fail closed: a
+ * rate-limit store error refuses the request. Returns the refusal, or a refund function to call on upstream failure. */
+async function spend(db: D1Database | undefined, kind: "m" | "c", ip: string | null, salt: string): Promise<{ denied: Response } | { refund: () => Promise<void> }> {
+  if (!db) return { refund: async () => {} };
   const hr = Math.floor(Date.now() / 3_600_000); const ipH = ipHash(ip, salt);
   const L = kind === "m" ? [FORWARD_LIMITS.metaPerNetPerHour, FORWARD_LIMITS.metaGlobalPerHour] : [FORWARD_LIMITS.cbPerNetPerHour, FORWARD_LIMITS.cbGlobalPerHour];
   const lim: Limit[] = [...(ipH ? [{ k: `lnf:${kind}:ip:${ipH}:${hr}`, limit: L[0], ttlS: 7200 }] : []), { k: `lnf:${kind}:g:${hr}`, limit: L[1], ttlS: 7200 }];
-  try { return (await takeAll(db, lim)) ? err("rate limited, try later", 429) : null; } catch { return err("temporary error", 503); }
+  try { if (await takeAll(db, lim)) return { denied: err("rate limited, try later", 429) }; } catch { return { denied: err("temporary error", 503) }; }
+  return { refund: async () => { for (const l of lim) { try { await give(db, l); } catch { /* best effort */ } } } };
 }
-async function upstreamMeta(url: string, o: { fetcher?: F; doh?: F }): Promise<UpstreamMeta | null> {
+/** Cached upstream payRequest; a cache hit costs no budget. A miss spends meta budget, refunded if the fetch fails. */
+async function upstreamMeta(url: string, o: { fetcher?: F; doh?: F }, db: D1Database | undefined, ip: string | null, salt: string): Promise<UpstreamMeta | Response> {
   const c = cache.get(url); if (c && Date.now() - c.at < FORWARD_LIMITS.cacheTtlMs) return c.meta;
-  const r = await guardedFetch(url, o); if (!r.ok) return null;
-  const meta = parseMeta(r.text); if (meta) cache.set(url, { at: Date.now(), meta });
+  const b = await spend(db, "m", ip, salt); if ("denied" in b) return b.denied;
+  let meta: UpstreamMeta | null = null;
+  try { const r = await guardedFetch(url, o); meta = r.ok ? parseMeta(r.text) : null; } catch { meta = null; }
+  if (!meta) { await b.refund(); return err("upstream wallet unavailable", 502); }
+  cache.set(url, { at: Date.now(), meta });
   return meta;
 }
 
@@ -84,8 +91,7 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
       }
     }
   }
-  const lim = await limited(env.DB, m[2] ? "c" : "m", ip, salt); if (lim) return lim;
-  const meta = await upstreamMeta(up, o); if (!meta) return err("upstream wallet unavailable", 502);
+  const meta = await upstreamMeta(up, o, env.DB, ip, salt); if (meta instanceof Response) return meta;
   if (!m[2]) {
     return Response.json({ status: "OK", tag: "payRequest", callback: `${origin}/.well-known/lnurlp/${name}/callback`, metadata: meta.metadata, minSendable: meta.minSendable, maxSendable: meta.maxSendable,
       ...(meta.commentAllowed !== undefined ? { commentAllowed: meta.commentAllowed } : {}), ...(meta.allowsNostr && /^[0-9a-f]{64}$/.test((env.SITE_ZAP_PUBKEY_HEX ?? "").trim().toLowerCase()) ? { allowsNostr: true, nostrPubkey: meta.nostrPubkey } : {}) }, { headers: { ...CORS, "Cache-Control": "public, max-age=60" } });
@@ -97,11 +103,14 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   if (nostr !== null) cb.searchParams.set("nostr", nostr);
   if (comment) cb.searchParams.set("comment", comment);
   const lnurl = url.searchParams.get("lnurl"); if (lnurl && /^lnurl1[02-9ac-hj-np-z]+$/i.test(lnurl)) cb.searchParams.set("lnurl", lnurl);
-  const r = await guardedFetch(cb.toString(), o); if (!r.ok) return err("upstream wallet unavailable", 502);
-  let inv: { pr?: unknown; reason?: unknown }; try { inv = JSON.parse(r.text); } catch { return err("upstream returned no JSON", 502); }
-  if (typeof inv.pr !== "string") return err(typeof inv.reason === "string" ? `upstream: ${inv.reason.slice(0, 200)}` : "upstream returned no invoice", 502);
+  const budget = await spend(env.DB, "c", ip, salt); if ("denied" in budget) return budget.denied;
+  const fail = async (reason: string) => { await budget.refund(); return err(reason, 502); };
+  let r: Awaited<ReturnType<typeof guardedFetch>>; try { r = await guardedFetch(cb.toString(), o); } catch { return fail("upstream wallet unavailable"); }
+  if (!r.ok) return fail("upstream wallet unavailable");
+  let inv: { pr?: unknown; reason?: unknown }; try { inv = JSON.parse(r.text); } catch { return fail("upstream returned no JSON"); }
+  if (typeof inv.pr !== "string") return fail(typeof inv.reason === "string" ? `upstream: ${inv.reason.slice(0, 200)}` : "upstream returned no invoice");
   const b = verifyBolt11(inv.pr);
-  if (!b || b.amount_msat !== amount) return err("upstream invoice amount mismatch", 502);
-  if (b.description_hash !== bytesToHex(sha256(utf8ToBytes(nostr ?? meta.metadata)))) return err("upstream invoice description_hash mismatch", 502);
+  if (!b || b.amount_msat !== amount) return fail("upstream invoice amount mismatch");
+  if (b.description_hash !== bytesToHex(sha256(utf8ToBytes(nostr ?? meta.metadata)))) return fail("upstream invoice description_hash mismatch");
   return Response.json({ status: "OK", pr: inv.pr, routes: [] }, { headers: CORS });
 }
