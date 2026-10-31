@@ -1,16 +1,16 @@
 name: site
 
+# One run per push: push covers PR heads too, so no pull_request trigger (it double-ran).
 on:
   push:
     paths:
       - "site/**"
       - "data/**"
       - ".github/workflows/site.yml"
-  pull_request:
-    paths:
-      - "site/**"
-      - "data/**"
-      - ".github/workflows/site.yml"
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   site:
