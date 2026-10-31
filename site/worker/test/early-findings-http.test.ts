@@ -77,3 +77,27 @@ describe("F9 site tip discoverable in read-only/API mode", () => {
     expect(wk0.site_tip).toBeUndefined();
   });
 });
+
+describe("F10 trust tiers are separated", () => {
+  it("/check carries trust_dimensions (merchant_legitimacy not-assessed) and a trust_scope note; verified != legitimacy", async () => {
+    const j = await (await SELF.fetch("https://example.com/check?domain=amazon.com")).json<any>();
+    expect(j.trust_dimensions.merchant_legitimacy).toBe("not-assessed");
+    expect(j.trust_dimensions).toHaveProperty("checkout_accessible");
+    expect(typeof j.trust_dimensions.protocol_verified).toBe("boolean");
+    expect(j.trust_scope).toMatch(/nothing about fulfillment or merchant legitimacy/);
+    const b = await (await SELF.fetch("https://example.com/check?domains=amazon.com,bestbuy.com")).json<any>();
+    for (const x of b.items) expect(x.trust_dimensions.merchant_legitimacy).toBe("not-assessed");
+  });
+  it("checkout_accessible follows the verdict and probe depth", async () => {
+    const { checkTrustFields } = await import("../src/check");
+    const tf = { trust_dimensions: { protocol_verified: true, checkout_accessible: null, merchant_legitimacy: "not-assessed" } };
+    expect((checkTrustFields({ verdict: "reachable", checkout_depth: { co: 3 } }, tf).trust_dimensions as any).checkout_accessible).toBe(true);
+    expect((checkTrustFields({ verdict: "reachable", checkout_depth: { co: null } }, tf).trust_dimensions as any).checkout_accessible).toBeNull();
+    expect((checkTrustFields({ verdict: "checkout-blocked", checkout_depth: { co: 0 } }, tf).trust_dimensions as any).checkout_accessible).toBe(false);
+  });
+  it("trustDimensions maps proofs to separate flags", async () => {
+    const { trustDimensions } = await import("../src/submissions");
+    const d = trustDimensions({ trust_tier: "verified", trust_proofs: ["protocol endpoint: x402 challenge"], trust_why: [], trust_label: "", src: "crawler" } as any);
+    expect(d).toMatchObject({ protocol_verified: true, ownership_verified: false, payment_proof: false, merchant_legitimacy: "not-assessed" });
+  });
+});

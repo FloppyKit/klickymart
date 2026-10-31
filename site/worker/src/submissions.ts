@@ -18,7 +18,7 @@ export const TIERS = ["flagged", "unverified", "seen", "verified"] as const;
 export type Tier = (typeof TIERS)[number];
 export const TIER_RANK: Record<Tier, number> = { flagged: 0, unverified: 1, seen: 2, verified: 3 };
 export const SEEN_RULE = { windowS: 60 * 86400, weighted: 3, realKeys: 2, newKeyWeight: 0.5, realAgeS: 30 * 86400, realOtherDomains: 2, sybilWindowS: 86400, dropFlaggedShare: 0.4 };
-export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = any ONE real proof, shown in trust_proofs[] and the label (seen is not required first): a payment proof (verified 422 from an unflagged key that is not the submitter), a store claim (DNS TXT at _klickymart.<domain> naming the npub plus a claim signed by that key, or a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count).";
+export const TRUST_RULES = "trust_tier ladder (never hides a store; each tier is a label): flagged = a strong abuse signal (spam, affiliate redirect, look-alike of an indexed domain, sub-domain stuffing), still listed with the reason. unverified = newly submitted (src=community) or crawler-indexed with no shopper basis yet. seen = at least 3 weighted distinct unflagged keys with visit-basis notes (kind 421 or 422 basis=visit) in 60 days, new or anonymous keys count 0.5, at least 2 real keys (age >= 30 days or unflagged notes on >= 2 other stores); the submitter's own key and keys first seen within 24 h of the submission do not count; drops back if > 40% of basis notes are flagged. verified = any ONE real proof, shown in trust_proofs[] and the label (seen is not required first): a payment proof (verified 422 from an unflagged key that is not the submitter), a store claim (DNS TXT at _klickymart.<domain> naming the npub plus a claim signed by that key, or a key verified by NIP-05 on the domain that also signed a 31420 for it), or a crawler-observed protocol endpoint (/.well-known/ucp present, or a real HTTP 402 challenge from our own probe; directory-claimed rails do not count). 'verified' is protocol/ownership/payment-proof only, NOT a fulfillment or legitimacy check; trust_dimensions {protocol_verified, ownership_verified, payment_proof, checkout_accessible, merchant_legitimacy: not-assessed} separates them.";
 
 export interface SubmitFlag { flag: string; strength: "weak" | "strong"; detail: string }
 const STRONG_TIER_FLAGS = new Set(["spam", "affiliate-redirect", "lookalike?", "subdomain-stuffing"]);
@@ -454,7 +454,26 @@ export function tierBadgeHtml(t: TrustInfo | undefined): string {
   const why = t.trust_why.map((w) => escH(w.detail)).join("; ");
   return `<p class="km-trust-tier" data-trust-tier="${t.trust_tier}"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${BADGE[t.trust_tier]}" title="${why}">${escH(t.trust_label)}</span> <a href="/llms.txt#trust" style="font-size:12px">trust ladder</a>${t.submitted_by ? ` <small>submitted by ${escH(t.submitted_by === "anonymous" ? "an anonymous agent" : t.submitted_by.slice(0, 16) + "…")} on ${escH(t.submitted_at?.slice(0, 10) ?? "")}</small>` : ""}</p>`;
 }
+export const TRUST_SCOPE_NOTE = "trust_tier 'verified' means ONE of: a crawler-observed protocol endpoint (UCP or a real HTTP 402), a store ownership claim (DNS TXT or NIP-05), or a verified payment proof. It says nothing about fulfillment or merchant legitimacy: anyone can own a domain and run a protocol endpoint. See trust_dimensions.";
+/**
+ * Separate the trust dimensions so 'verified' is not read as 'legitimate'. Non-breaking: trust_tier/label unchanged.
+ * checkout_accessible is filled by /check from the verdict and probe; merchant_legitimacy is never asserted by KlickyMart.
+ */
+export function trustDimensions(t: TrustInfo | undefined) {
+  const kinds = new Set((t?.trust_why ?? []).map((w) => w.kind));
+  const proofs = t?.trust_proofs ?? [];
+  return {
+    protocol_verified: proofs.some((p) => p.startsWith("protocol endpoint")) || kinds.has("protocol-endpoint"),
+    ownership_verified: proofs.some((p) => p.startsWith("store claim")) || kinds.has("store-claim"),
+    payment_proof: proofs.some((p) => p.startsWith("payment proof")) || kinds.has("payment-proof"),
+    checkout_accessible: null as boolean | null,
+    merchant_legitimacy: "not-assessed" as const,
+  };
+}
 export function tierFields(t: TrustInfo | undefined) {
+  return { ...tierFieldsBase(t), trust_dimensions: trustDimensions(t) };
+}
+function tierFieldsBase(t: TrustInfo | undefined) {
   return t ? { trust_tier: t.trust_tier, trust_proofs: t.trust_proofs, trust_label: t.trust_label, trust_why: t.trust_why, src: t.src, ...(t.submitted_by ? { submitted_by: t.submitted_by, submitted_at: t.submitted_at } : {}) } : { trust_tier: "unverified" as Tier, trust_label: "Unverified · crawler-indexed", trust_why: [], src: "crawler" as const };
 }
 

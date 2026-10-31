@@ -3,6 +3,7 @@ import { walletFacts, findRow } from "./store-card";
 import { storeFacts } from "./explain";
 import type { Snapshot } from "./index-mem";
 import { parseRaw, rowToCompact } from "./records-api";
+import { TRUST_SCOPE_NOTE } from "./submissions";
 import { checkExtras, checkoutOf, deriveVerdict } from "./explain";
 
 export type Verdict = "reachable" | "checkout-blocked" | "agents-not-welcome" | "blocked-tos" | "error" | "not-in-index";
@@ -70,4 +71,13 @@ export const PAY_NOT_OBSERVED = "payment methods not observed: our crawl did not
 export function payNotObserved(raw: Record<string, unknown>): boolean {
   const empty = (k: string) => !Array.isArray(raw[k]) || (raw[k] as unknown[]).length === 0;
   return empty("pay") && empty("pay_online") && empty("pay_instore") && empty("pay_unscoped") && !raw.pay_src;
+}
+
+/** /check trust: tier fields + trust_dimensions with checkout_accessible derived from the verdict and probe depth, plus the scope note. */
+export function checkTrustFields(body: Record<string, unknown>, tf: Record<string, unknown>): Record<string, unknown> {
+  const dims = { ...(tf.trust_dimensions as Record<string, unknown>) };
+  const co = (body.checkout_depth as { co?: number | null } | undefined)?.co ?? null;
+  const pr = (body.primary_reason as { source?: string } | undefined)?.source;
+  dims.checkout_accessible = body.verdict !== "reachable" || pr === "terms" ? false : co === null ? null : co >= 2;
+  return { ...tf, trust_dimensions: dims, trust_scope: TRUST_SCOPE_NOTE };
 }

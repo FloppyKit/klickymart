@@ -30,7 +30,7 @@ import { licenseMetaBlock, licenseResponseHeaders } from "./license-meta";
 import { buildKlickymartWellKnown, buildNostrWellKnown } from "./agent-capabilities";
 import { buildSummaryJson } from "./summary-json";
 import { buildLlmsTxt } from "./llms";
-import { checkDomain } from "./check";
+import { checkDomain, checkTrustFields } from "./check";
 import { findAlternatives } from "./alternatives";
 import { SELFTEST_DOMAIN } from "./experience";
 import { hostOf } from "./store-card";
@@ -773,7 +773,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         return c.body;
       });
       const tb = await tiersFor(items.map((x) => String((x as { domain?: unknown }).domain ?? "")));
-      for (const x of items as Record<string, unknown>[]) if (!x.error && x.verdict !== "not-in-index") Object.assign(x, tierFields(tb.get(String(x.domain))));
+      for (const x of items as Record<string, unknown>[]) if (!x.error && x.verdict !== "not-in-index") Object.assign(x, checkTrustFields(x, tierFields(tb.get(String(x.domain)))));
       return Response.json({ ...licenseMetaBlock(), count: items.length, items }, { headers: apiHeaders(snap.version, 0) });
     }
     const res0 = checkDomain(snap, url.searchParams.get("domain") ?? "", origin);
@@ -796,7 +796,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       res.body.community_experience = ex ? { ...ex, source: "Nostr shopping-experience notes", chart: `${origin}/chart`, flags_url: `${origin}/flags.json?domain=${res.body.domain}` } : { source: "Nostr shopping-experience notes", keys: 0, note: "No agent has posted a shopping-experience note for this store yet.", report: `${origin}/report` };
       res.body.reviews = { count: rv.count, avg_rating_5: rv.avg_rating_5, url: `${origin}/reviews?domain=${res.body.domain}`, review_a_tag: aTagFor(String(res.body.domain)) };
     }
-    if (res.body.verdict !== "not-in-index") Object.assign(res.body, tierFields((await tiersFor([String(res.body.domain)])).get(String(res.body.domain))));
+    if (res.body.verdict !== "not-in-index") Object.assign(res.body, checkTrustFields(res.body, tierFields((await tiersFor([String(res.body.domain)])).get(String(res.body.domain)))));
     else {
       const qs = await queuedStatus(env.DB, String(res.body.domain ?? url.searchParams.get("domain") ?? ""));
       if (qs.queued) Object.assign(res.body, { queued: true, trust_tier: "unverified", trust_label: "Unverified · community-submitted", src: "community", submission: `${origin}/submit/${qs.submission}`, crawl_state: qs.state });
@@ -1026,7 +1026,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) }));
         return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
       },
-      checkDomain: async (domain) => { const r = checkDomain(snap, domain, origin); if (r.ok && r.body.verdict !== "not-in-index") Object.assign(r.body, tierFields((await tiersFor([String(r.body.domain)])).get(String(r.body.domain)))); return r; },
+      checkDomain: async (domain) => { const r = checkDomain(snap, domain, origin); if (r.ok && r.body.verdict !== "not-in-index") Object.assign(r.body, checkTrustFields(r.body, tierFields((await tiersFor([String(r.body.domain)])).get(String(r.body.domain))))); return r; },
       findAlternatives: async (args) => {
         const r = findAlternatives(snap, origin, altParams(args));
         const z = args.zip ? String(args.zip) : null;
