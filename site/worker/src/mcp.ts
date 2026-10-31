@@ -111,6 +111,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/mcp": { post: { summary: "MCP (JSON-RPC 2.0, streamable HTTP): tools/list, tools/call", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/claim": { get: { summary: "Merchant claim page", responses: { "200": { description: "HTML or text" } } }, post: { summary: "Merchant claim submit", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/contribute": { get: { summary: "How to contribute observations", responses: { "200": { description: "HTML or text" } } } },
+      "/_admin/revoke-facilitated": { post: { summary: "Admin: revoke facilitator-signed 421s and demote notes citing them (bearer token; 404 when disabled)", responses: { "200": { description: "JSON {ids, revoked, demoted} or {dry_run, would_revoke}" }, "401": { description: "unauthorized" }, "404": { description: "disabled" } } } },
       "/_ingest": { post: { summary: "Internal relay ingest trigger (authenticated)", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/merchant/{domain}": { get: { summary: "Merchant page (HTML)", parameters: [{ name: "domain", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "HTML or text" } } } },
       "/llms.txt": { get: { summary: "Agent guide", responses: { "200": { description: "HTML or text" } } } },
