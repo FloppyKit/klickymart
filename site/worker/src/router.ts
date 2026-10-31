@@ -1,4 +1,5 @@
 import { WALLET_GUIDE } from "./wallet";
+import { APP_RELAYS, authSecret, checkFeedList, clearCookie, login, makeChallenge, parseFeedParams, readFeed, readSession, sessionCookie, tipReadyFor, TIP_LIMITS } from "./nostr-app";
 const TEMPLATE_HELP = {
   estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
   shipping_source: "policy | checkout | unknown (where the shipping figure came from)",
@@ -68,6 +69,7 @@ import {
   renderCheckResult,
   renderAlternatives,
   renderChart, renderReport, renderWallet, REPORT_RELAYS,
+  renderApp,
 } from "./render/pages";
 
 export interface Env {
@@ -88,6 +90,10 @@ export interface Env {
   FACILITATE_ENABLED?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). */
   SUBMIT_SALT?: string;
+  /** HMAC key for login challenges and session cookies (wrangler secret); falls back to SUBMIT_SALT. Unset -> login 503. */
+  AUTH_SECRET?: string;
+  /** Value-for-value Lightning address for the site footer. Unset -> slot hidden. */
+  SITE_TIP_LUD16?: string;
 }
 
 /** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
@@ -409,6 +415,50 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/facilitate" && request.method === "GET") {
     return Response.json({ facilitator_npub: FACILITATOR_NPUB, facilitator_pubkey: FACILITATOR_PUBKEY, limits: FACILITATE_LIMITS, note: FACILITATE_NOTE,
       usage: "POST JSON {domain, agent_pubkey, need_id?, proof:{type:'preimage',preimage,bolt11}|{type:'zap',receipt}|{type:'hash',sha256}}. Returns a signed 421 for you to publish. Refused once the store has claimed its listing." });
+  }
+  if (path === "/app" && request.method === "GET") {
+    return new Response(renderApp(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": `default-src 'none'; script-src 'self'; connect-src 'self' ${APP_RELAYS.join(" ")}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'` } });
+  }
+  if (path === "/auth/challenge" && request.method === "GET") {
+    const sec = authSecret(env);
+    if (!sec) return Response.json({ ok: false, error: { code: "auth_disabled", message: "login is not configured on this deployment" } }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, challenge: makeChallenge(sec), kind: 27235, u: `${origin}/auth/login`, method: "POST", expires_in_s: 120, note: "Sign a kind 27235 event with tags [u, method, challenge] and POST {event} to /auth/login. Never send a key." }, { headers: { "Cache-Control": "no-store" } });
+  }
+  const sameOrigin = () => { const o = request.headers.get("Origin"); return !o || o === origin || o === `${url.protocol}//${url.host}`; };
+  if ((path === "/auth/login" || path === "/auth/logout") && request.method === "POST" && !sameOrigin()) {
+    return Response.json({ ok: false, error: { code: "cross_origin", message: "login and logout are same-origin only" } }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+  if (path === "/auth/login" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const r = await login(env.DB, body, { origin, secret: authSecret(env), ip: request.headers.get("cf-connecting-ip") });
+    const h = new Headers({ "Cache-Control": "no-store" });
+    if (r.cookie) h.set("Set-Cookie", sessionCookie(r.cookie, url.protocol === "https:"));
+    return Response.json(r.body, { status: r.status, headers: h });
+  }
+  if (path === "/auth/me" && request.method === "GET") {
+    return Response.json({ pubkey: readSession(authSecret(env), request.headers.get("Cookie")) }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (path === "/auth/logout" && request.method === "POST") {
+    return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store", "Set-Cookie": clearCookie(url.protocol === "https:") } });
+  }
+  if (path === "/feed.json" && request.method === "GET") {
+    const f = parseFeedParams(url.searchParams);
+    if (!f.ok) return err400("filter", f.message);
+    const extra = snap.rows.map((r) => { try { const e = JSON.parse(r.raw_json) as { sig?: string }; return e && typeof e.sig === "string" ? e : null; } catch { return null; } }).filter(Boolean) as never[];
+    const items = await readFeed(env.DB, f.value, extra);
+    return Response.json({ ...licenseMetaBlock(), count: items.length, items, verified: true, source: "klickymart-d1-index" }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30", "X-KM-Empty-OK": "1" } });
+  }
+  if (path === "/feed/list-check" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const r = await checkFeedList(env.DB, body, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    return Response.json(r.body, { status: r.status, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (path === "/tip-ready.json" && request.method === "GET") {
+    const pks = [...new Set((url.searchParams.get("pubkeys") ?? "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean))];
+    if (!pks.length || pks.length > TIP_LIMITS.maxPubkeys || pks.some((p) => !/^[0-9a-f]{64}$/.test(p))) return err400("pubkeys", `1 to ${TIP_LIMITS.maxPubkeys} comma-separated 64-hex pubkeys`);
+    const items = await tipReadyFor(env.DB, pks, { salt: env.SUBMIT_SALT || ephemeralSalt(), ip: request.headers.get("cf-connecting-ip") });
+    return Response.json({ items, note: "Display only: tip-ready never adds ranking weight. KlickyMart never holds keys or funds.", wallet: `${origin}/wallet#tip-ready` }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
   }
   if (path === "/wallet" && request.method === "GET") {
     return new Response(renderWallet(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" } });

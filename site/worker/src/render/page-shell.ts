@@ -1,3 +1,4 @@
+import { siteTipAddress } from "../nostr-app";
 import type { Snapshot } from "../index-mem";
 import { computeStoryCounts, landscapeFromSnapshot, parseLandscapeOverride, type StoryCounts } from "../landscape-metrics";
 
@@ -10,6 +11,7 @@ export interface PageShell {
   story?: StoryCounts;
   /** Today's counted agent requests (from D1 aggregates); undefined when unknown. */
   agentVisitsToday?: number;
+  siteTip?: string | null;
 }
 
 export function isPreviewDataMode(env: { PREVIEW_DATA?: string }): boolean {
@@ -17,7 +19,7 @@ export function isPreviewDataMode(env: { PREVIEW_DATA?: string }): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-export function buildPageShell(snap: Snapshot, env: { PREVIEW_DATA?: string }, url?: URL): PageShell {
+export function buildPageShell(snap: Snapshot, env: { PREVIEW_DATA?: string; SITE_TIP_LUD16?: string }, url?: URL): PageShell {
   const metrics = landscapeFromSnapshot(snap);
   const override = url
     ? parseLandscapeOverride(url.searchParams.get("reach"), url.searchParams.get("btc"), url.searchParams.get("tier"))
@@ -30,5 +32,6 @@ export function buildPageShell(snap: Snapshot, env: { PREVIEW_DATA?: string }, u
     landscapeTier: override.tier,
     sceneOnly,
     story: computeStoryCounts(snap.rows),
+    siteTip: siteTipAddress(env),
   };
 }

@@ -33,6 +33,8 @@ export interface LayoutOpts {
   sceneOnly?: boolean;
   story?: { total: number; reachable: number; private_btc: number; private_btc_reachable: number };
   agentVisitsToday?: number;
+  /** Value-for-value Lightning address for the site itself (SITE_TIP_LUD16). Hidden when unset. */
+  siteTip?: string | null;
 }
 
 export function layout(o: LayoutOpts): string {
@@ -89,6 +91,7 @@ ${o.body}
 <footer class="km-footer" role="contentinfo">
   <p class="km-footer-signoff">Thank You, Come Again.</p>
   <p class="km-footer-tag">KlickyMart by FloppyKit. Records published as Nostr events (kind 31420). Code and data: <a href="https://github.com/FloppyKit/klickymart">GitHub</a>. Crawler: <a href="/bot">/bot</a>. Contact: <a href="mailto:bot@klickymart.com">bot@klickymart.com</a></p>
+  ${o.siteTip ? `<p class="km-footer-v4v" data-testid="km-site-tip">Value for value: if KlickyMart helped, tip <a href="lightning:${esc(o.siteTip)}" rel="nofollow">⚡ ${esc(o.siteTip)}</a>. Optional; nothing is unlocked by tipping.</p>` : ""}
   <p class="km-footer-meta">A signed map of where agents can shop. Records published as Nostr events. · Data version ${esc(o.version)} · Crawls ${esc(tsRange)}</p>
 </footer>
 <script src="/km.js" defer></script>

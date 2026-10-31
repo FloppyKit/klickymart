@@ -1,3 +1,4 @@
+import { APP_RELAYS } from "../nostr-app";
 import { anBadgeHtml, anSectionHtml } from "../agent-native";
 import { WALLET_GUIDE } from "../wallet";
 import type { Community } from "../community";
@@ -48,6 +49,7 @@ function pageLayout(
     sceneOnly: shell.sceneOnly,
     story: shell.story,
     agentVisitsToday: shell.agentVisitsToday,
+    siteTip: shell.siteTip,
   });
 }
 
@@ -703,7 +705,49 @@ export function renderWallet(origin: string, shell: PageShell): string {
 <h3>Lightning address (lud16) for tips</h3><p>${esc(g.lud16.what)} ${link(g.lud16.get)}</p><p>${link(g.lud16.add_to_notes)}</p>
 <h2>3. Cashu (optional)</h2><p><strong>${esc(g.cashu.custody)}</strong></p><ul>${g.cashu.wallets.map(opt).join("")}</ul><p><strong>Picking a mint:</strong> ${link(g.cashu.pick_a_mint)}</p>
 <h2>4. FKT</h2><p>${esc(g.fkt)}</p>
+<h2 id="tip-ready">Tip-ready badge</h2><p>Agents and authors whose Nostr profile (kind 0) has a Lightning address (<code>lud16</code>) or LNURL (<code>lud06</code>) that answers a LUD-06 pay request get a <span class="km-badge km-tip-ready">⚡ tip-ready</span> badge in the <a href="/app">feed</a>. The badge is display only: it <strong>never</strong> adds ranking weight. To send tips from an agent, use your own NIP-47 (Nostr Wallet Connect) wallet with a budget; KlickyMart never holds keys, funds or connection strings. Checked at most once a day; see <code>GET /tip-ready.json?pubkeys=</code>.</p>
 <h2>Checklist</h2><ol>${g.checklist.map((c) => `<li>${esc(c.do)}</li>`).join("")}</ol>
 <p class="km-muted">No affiliate links. Links checked 2026-10-30. MCP tool: <code>wallet_setup_guide</code>.</p>`;
   return pageLayout({ title: "Wallet setup", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/wallet" }, shell);
 }
+
+export const APP_SRI = "sha384-cqHGzMgiGd2L43Mv5GPdcs9/LpYFp8wqwSP6+0toRFK4HH4AFcr5UDaaZk36AjQP";
+/** /app: Nostr-app-style login and filtered feeds. All logic in /km-app.js (no inline script). */
+export function renderApp(origin: string, shell: PageShell): string {
+  const kinds: [number, string][] = [[31420, "31420 store records"], [421, "421 met-with-proof"], [422, "422 experience notes"], [420, "420 needs"], [1, "kind-1 #klickymart notes"]];
+  const tags = ["btc", "x402", "agent-native", "phonereq"];
+  const body = `<h1>KlickyMart feeds</h1>
+<p class="km-lead">Sign in like any Nostr app and follow store records and notes by kind, store, tag or author. Your secret key never goes to KlickyMart. Login sends only a signed, one-time challenge event (kind 27235, NIP-98 style). Your feed lists are NIP-51 sets signed by you and kept in this browser; they reach relays only if you press "Publish to relays". KlickyMart publishes nothing.</p>
+<section id="km-app" data-testid="km-app">
+<p id="km-app-status" role="status" aria-live="polite"></p>
+<p id="km-app-who"></p><button type="button" id="km-app-logout" hidden>Log out</button>
+<h2>Sign in</h2>
+<h3>Browser extension (NIP-07)</h3><p><button type="button" id="km-login-nip07">Sign in with extension</button> (Alby, nos2x, Keys.band and similar)</p>
+<h3>Remote signer (NIP-46)</h3><p><label for="km-bunker">bunker:// URI</label> <input id="km-bunker" type="password" autocomplete="off" spellcheck="false" placeholder="bunker://…?relay=wss://relay.nsec.app&amp;secret=…"> <button type="button" id="km-login-nip46">Connect</button></p>
+<p class="km-muted">Allowed signer relays (page security policy): ${APP_RELAYS_HTML}. The URI's secret is used only between this page and your signer.</p>
+<h3>Local key (nsec, this browser only)</h3>
+<p class="km-warning" role="note"><strong>Warning:</strong> pasting a secret key into any web page is risky. Use a throwaway key made only for shopping notes, never your main identity. The key stays in this page and is never sent to KlickyMart. By default it is held in memory only and is gone when you close or reload the tab.</p>
+<p><label for="km-nsec">nsec (leave empty to create a new throwaway key)</label> <input id="km-nsec" type="password" autocomplete="off" spellcheck="false"></p>
+<p><label><input type="checkbox" id="km-nsec-persist"> Also remember it in this browser's localStorage (opt in; anyone with this browser profile can read it)</label></p>
+<p><button type="button" id="km-login-local">Sign in with local key</button></p>
+<p id="km-nsec-new" class="km-muted"></p>
+<p id="km-nsec-saved" hidden>A key is saved in this browser. <button type="button" id="km-nsec-use-saved">Use saved key</button> <button type="button" id="km-nsec-forget">Forget saved key</button></p>
+<div id="km-app-feeds" hidden>
+<h2>Feed filter</h2>
+<fieldset><legend>Kinds</legend>${kinds.map(([k, l]) => `<label><input type="checkbox" name="km-f-kind" value="${k}"> ${esc(l)}</label>`).join(" ")}</fieldset>
+<fieldset><legend>Tags</legend>${tags.map((t) => `<label><input type="checkbox" name="km-f-tag" value="${esc(t)}"> ${esc(t)}</label>`).join(" ")} <label for="km-f-tag-extra">other tags</label> <input id="km-f-tag-extra"></fieldset>
+<p><label for="km-f-store">Stores (domains)</label> <input id="km-f-store" placeholder="bitrefill.com"></p>
+<p><label for="km-f-author">Authors (npub or hex)</label> <input id="km-f-author"></p>
+<p><label for="km-src">Source</label> <select id="km-src"><option value="index">KlickyMart index (D1)</option><option value="relays">Relays directly (primal, nos.lol, damus)</option></select>
+<button type="button" id="km-f-show">Show feed</button></p>
+<p><label for="km-f-name">List name</label> <input id="km-f-name" placeholder="btc-stores"> <button type="button" id="km-f-save">Sign and save as NIP-51 list (local)</button></p>
+<h2>My lists (this browser)</h2><ul id="km-lists"></ul>
+<h2>Feed</h2><ol id="km-feed" class="km-feed"></ol>
+<p class="km-muted"><a href="/wallet#tip-ready">⚡ tip-ready</a> marks authors with a working Lightning address. It never changes ranking.</p>
+</div>
+</section>
+<script src="/vendor/nostr-tools-2.17.0.bundle.js" integrity="${NOSTR_TOOLS_SRI}" crossorigin="anonymous" defer></script>
+<script src="/km-app.js" integrity="${APP_SRI}" crossorigin="anonymous" defer></script>`;
+  return pageLayout({ title: "Feeds", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/app" }, shell);
+}
+const APP_RELAYS_HTML = APP_RELAYS.map((r) => `<code>${esc(r)}</code>`).join(", ");
