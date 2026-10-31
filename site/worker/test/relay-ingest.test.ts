@@ -35,7 +35,7 @@ function fakeBolt11(hashHex: string, hrp = "lnbc10u"): string {
 }
 
 beforeEach(async () => {
-  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews", "claims"]) await env.DB.prepare(`DELETE FROM ${t}`).run();
+  for (const t of ["nostr_events", "site_records", "ingest_state", "reviews", "claims", "proof_uses"]) await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 
 describe("relay ingest: validation", () => {
@@ -104,6 +104,26 @@ describe("community view", () => {
 });
 
 describe("proof checks", () => {
+  it("R6-001 repro: one public preimage verifies only the first key; replays by sybil keys get no verified weight", async () => {
+    const pre = bytesToHex(secp.utils.randomSecretKey()); const hash = bytesToHex(sha256(hexToBytes(pre)));
+    const node = key(); const owner = key();
+    const ful = sign(owner, 421, [aTag(), ["r", DOM], ["bolt11", encodeBolt11ForTest(node, "lnbc10u", hash)]], "here you go");
+    await env.DB.prepare("INSERT INTO claims (d, pubkey, nip05, checked_at) VALUES (?,?,?,?)").bind(DOM, bytesToHex(secp.schnorr.getPublicKey(owner)), `_@${DOM}`, 1).run();
+    await ingestEvents(env.DB, [{ ev: sign(owner, 31420, [["d", DOM], ["ln_node", bytesToHex(secp.getPublicKey(node))]], JSON.stringify({ d: DOM })), relay: R1 }, { ev: ful, relay: R1 }], ctx());
+    const buyer = key(); const first = review(buyer, [["e", ful.id, R1, "fulfillment"], ["preimage", pre]]);
+    const sybils = Array.from({ length: 5 }, () => review(key(), [["e", ful.id, R1, "fulfillment"], ["preimage", pre]]));
+    const again = review(buyer, [["e", ful.id, R1, "fulfillment"], ["preimage", pre]], "update"); // same key, later note: still its proof
+    await ingestEvents(env.DB, [{ ev: first, relay: R1 }], ctx());
+    await ingestEvents(env.DB, [...sybils, again].map((ev) => ({ ev, relay: R1 })), ctx());
+    const st = await env.DB.prepare("SELECT id, pubkey, proof_status FROM reviews").all<{ id: string; pubkey: string; proof_status: string }>();
+    const by = Object.fromEntries((st.results ?? []).map((r) => [r.id, r.proof_status]));
+    expect(by[first.id]).toBe("verified-preimage"); expect(by[again.id]).toBe("verified-preimage");
+    for (const s of sybils) expect(by[s.id]).toBe("replayed-proof");
+    // same through POST /reviews
+    const late = review(key(), [["e", ful.id, R1, "fulfillment"], ["preimage", pre]]);
+    expect((await SELF.fetch("https://example.com/reviews", { method: "POST", body: JSON.stringify(late), headers: { "Content-Type": "application/json" } })).status).toBe(201);
+    expect((await env.DB.prepare("SELECT proof_status FROM reviews WHERE id = ?").bind(late.id).first<{ proof_status: string }>())?.proof_status).toBe("replayed-proof");
+  });
   it("KM-001 preimage: verified only when the invoice is node-signed by the claimed store's ln_node key", async () => {
     const pre = bytesToHex(secp.utils.randomSecretKey());
     const hash = bytesToHex(sha256(hexToBytes(pre)));

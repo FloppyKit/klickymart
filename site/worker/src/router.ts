@@ -42,7 +42,7 @@ import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
 import { getCommunity, ingestStats } from "./community";
-import { relayList, checkProof, type Ev } from "./relay-ingest";
+import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
 import { ephemeralSalt } from "./submissions";
 import { take, takeAll } from "./ratelimit";
@@ -290,7 +290,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };
       const ev = body as Ev;
-      try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1]), await storeBindings(env.DB, p.value.d), p.value.d); } catch { proof_status = "unverified-claim"; }
+      try { proof_status = checkProof(ev, await get(p.value.fulfillment), await get(ev.tags.find((t) => t[0] === "zap")?.[1]), await storeBindings(env.DB, p.value.d), p.value.d); proof_status = await bindProof(env.DB, proof_status, ev, Math.floor(Date.now() / 1000)); } catch { proof_status = "unverified-claim"; }
     }
     const st = await storeReview(env.DB, p.value, body, Date.now(), { source: "post", proof_status });
     if (x.ok) { try { await storeExperience(env.DB, x.value, body, { source: "post", proof_status }); } catch { /* migration pending */ } }

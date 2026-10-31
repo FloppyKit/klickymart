@@ -146,6 +146,20 @@ export function checkProof(review: Ev, fulfillment: Ev | null, zapReceipt: Ev | 
   return "unverified-claim";
 }
 
+/** R6-001: first key to use a checked payment proof wins it. Returns ps unchanged unless another key already holds one of
+ * this note's proof keys, in which case "replayed-proof" (plain-note weight, no proof bonus). Fails closed on DB error. */
+export async function bindProof(db: D1Database, ps: string | null, ev: Ev, nowS: number): Promise<string | null> {
+  if (!ps?.startsWith("verified")) return ps;
+  const keys: string[] = []; const ful = ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]; if (ful) keys.push("ful:" + ful);
+  const pre = tagv(ev.tags, "preimage"); if (ps === "verified-preimage" && pre && /^[0-9a-f]{64}$/i.test(pre)) keys.push("ph:" + bytesToHex(sha256(hexToBytes(pre.toLowerCase()))));
+  const zap = tagv(ev.tags, "zap"); if (ps === "verified-zap" && zap) keys.push("zap:" + zap.toLowerCase());
+  try {
+    await db.batch(keys.map((k) => db.prepare("INSERT OR IGNORE INTO proof_uses (proof_key, pubkey, note_id, first_seen) VALUES (?,?,?,?)").bind(k, ev.pubkey, ev.id, nowS)));
+    const { results } = await db.prepare(`SELECT pubkey FROM proof_uses WHERE proof_key IN (${keys.map(() => "?").join(",")})`).bind(...keys).all<{ pubkey: string }>();
+    return (results ?? []).length === keys.length && (results ?? []).every((r) => r.pubkey === ev.pubkey) ? ps : "replayed-proof";
+  } catch { return "replayed-proof"; }
+}
+
 export interface IngestResult { accepted: number; duplicate: number; rejected: number; reasons: Record<string, number>; maxCreated: number }
 
 async function getEvent(db: D1Database, id: string | undefined): Promise<Ev | null> {
@@ -275,7 +289,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), now, { maxAgeS: RELAY_NOTE_MAX_AGE_S });
     if (!x.ok) continue;
     let ps: string | null = null;
-    if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap")), await storeBindings(db, x.value.d), x.value.d); } catch { ps = null; } }
+    if (ev.kind === NOSTR_KIND_ACCEPTANCE && x.value.proof) { try { ps = checkProof(ev, await getEvent(db, ev.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]), await getEvent(db, tagv(ev.tags, "zap")), await storeBindings(db, x.value.d), x.value.d); ps = await bindProof(db, ps, ev, Math.floor(now / 1000)); } catch { ps = null; } }
     try { await storeExperience(db, x.value, ev, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: ps ?? (x.value.proof ? "proof-attached" : null) }, now); } catch { /* migration pending */ }
   }
   for (const ev of suggestions) {
@@ -290,7 +304,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     if (!p.ok) continue;
     const ful = await getEvent(db, p.value.fulfillment ?? undefined);
     const zap = await getEvent(db, tagv(ev.tags, "zap"));
-    await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: checkProof(ev, ful, zap, await storeBindings(db, p.value.d), p.value.d) });
+    await storeReview(db, p.value, ev, now, { source: "relay", relays: existing.get(ev.id) ?? null, proof_status: await bindProof(db, checkProof(ev, ful, zap, await storeBindings(db, p.value.d), p.value.d), ev, Math.floor(now / 1000)) });
   }
   // KM-003: resolve the zapped author's LNURL nostrPubkey (NIP-57) so tips can be checked against it. Bounded per batch.
   let lookups = 0;
