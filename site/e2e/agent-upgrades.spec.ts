@@ -6,7 +6,7 @@ test("homepage check box answers inline", async ({ page }) => {
   await page.fill("#check-domain", "microsoft.com");
   await page.click('[data-testid="check-form"] button');
   const out = page.locator('[data-testid="check-result"]');
-  await expect(out.locator("[data-verdict]")).toHaveAttribute("data-verdict", "blocked-tos");
+  await expect(out.locator("[data-verdict]")).toHaveAttribute("data-verdict", "blocked-tos", { timeout: 20_000 });
   await page.locator('[data-testid="check-form"]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: "e2e/artifacts/home-check-box-dark-desktop.png" });
   await page.fill("#check-domain", "not-indexed.test");

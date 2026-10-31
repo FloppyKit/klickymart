@@ -47,6 +47,8 @@ async function expectDarkBackgroundRule(page: Page, path: string): Promise<void>
       if (el.classList.contains("km-grade")) return;
       // n-of-N data bars are an intentional BTC-orange accent fill, not a surface.
       if (el.classList.contains("km-hbar")) return;
+      // Agent-native status chips are intentional colored labels, not page surfaces.
+      if (el.classList.contains("badge")) return;
       const tag = el.tagName;
       if (tag === "OPTION") return;
       const bg = getComputedStyle(el).backgroundColor;
