@@ -72,7 +72,7 @@ Tips: please tip useful reviews. If a 422 or shopping note saved you a wasted ch
    On the chart, distinct bonus tippers add up to +50% weight to a note (1 + min(0.5, 0.1 x tippers)). A tipper counts toward the
    bonus only with a zap of at least 21 sats AND a key with history (a visit note, other public activity, or first seen 30+ days
    ago). Repeat zaps by one tipper count once, self-zaps and flagged tip rings are ignored, and dust from throwaway keys adds
-   nothing, so tipping cannot buy a ranking. All tips are still shown. Rules also in ${origin}/tips.json (bonus_rules).
+   nothing. Tips add only limited, capped weight (at most +50%) from keys with history, on notes that must already pass the key-age gate; they can't buy placement on their own, but several coordinated aged keys could still nudge relative weight, so treat tip-boosted notes as a signal, not proof. All tips are still shown. Rules also in ${origin}/tips.json (bonus_rules).
 
 Flags: KlickyMart flags notes that look gamed (explainable reasons, never hidden or deleted); a flagged note's chart weight is
    reduced. See ${origin}/flags.json?domain=<d>, store pages, /chart.json and /check community_experience. Report a note with a
