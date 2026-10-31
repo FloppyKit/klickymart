@@ -32,7 +32,7 @@
 
 <h2>What it never does</h2>
 <ul>
-<li>Log in, create accounts, place orders, enter payment details, or submit forms (adding an item to a cart is the furthest it goes, and only where robots.txt allows the cart).</li>
+<li>Log in, create accounts, place orders, enter payment details, or pay. It may add an item to a cart (only where robots.txt allows the cart), start a guest checkout with a business ship-to name and address, or open a UCP checkout session with that address, only to read the shipping and tax totals. It stops before the payment step, never submits an order, and cancels UCP checkout sessions afterwards.</li>
 <li>Solve or bypass captchas, challenges or other bot protection. A block is recorded as a finding and the crawler stops.</li>
 <li>Disguise itself, rotate IP addresses or use proxies.</li>
 <li>Read customer reviews, questions or comments as facts about the store.</li>

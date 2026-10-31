@@ -48,7 +48,8 @@ describe("#5/#33 paid-API rail checks", () => {
   const q = (s: string) => { const v = validateQueryParams(new URLSearchParams(s)); if (!v.ok) throw new Error(v.message); return querySnapshot(snap, v.params); };
   it("bolt11_no_browser=1 keeps only stores our probe saw issue an L402 bolt11 invoice", () => {
     const ds = (q("bolt11_no_browser=1&limit=500") as any).items.map((x: any) => x.d);
-    expect(ds).toContain("satsdns.com");
+    // BN-1: satsdns.com's stored challenge has no invoice string, so it is no longer labelled bolt11.
+    expect(ds).not.toContain("satsdns.com");
     for (const d of ds) expect(railCheck(d)!.bolt11_no_browser.verified).toBe(true);
     expect(validateQueryParams(new URLSearchParams("bolt11_no_browser=yes")).ok).toBe(false);
   });
@@ -56,7 +57,7 @@ describe("#5/#33 paid-API rail checks", () => {
     expect(railCheck("sats4ai.com")?.listing_flag?.code).toBe("no-real-402");
     expect(railCheck("sats4ai.com")?.bolt11_no_browser.verified).toBe(false);
     expect(railCheck("arknode.ai")?.listing_flag?.code).toBe("no-endpoint");
-    expect((anJson("satsdns.com") as any).bolt11_no_browser.verified).toBe(true);
+    expect((anJson("satsdns.com") as any).bolt11_no_browser).toMatchObject({ verified: false, label: "L402 challenge (invoice not verified)" });
   });
 });
 describe("#33 newer unsigned probe results", () => {
