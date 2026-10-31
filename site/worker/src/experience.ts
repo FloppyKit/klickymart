@@ -1,4 +1,5 @@
 import { countsForRank, keyFirstSeen, MIN_RANK_KEY_AGE_S } from "./key-age";
+import { claimedKeys, storeBindings } from "./pay-binding";
 import { flagSummary, readFlagCache, type NoteFlag } from "./flags";
 import { loadTips, summarize, type Tip, type TipSummary } from "./tips";
 /** Structured shopping-experience notes on kind 422 (spec: NIP-DRAFT.md "422 as a shopping experience"), plus
@@ -147,7 +148,10 @@ export async function storeExperience(db: D1Database, x: Experience, raw: unknow
 export const MIN_KEYS = 2;
 const DEPTH_RANK: Record<string, number> = { browse: 0, product: 0.5, cart: 1, checkout: 2, shipping: 2.5, payment: 3, paid: 4, delivered: 5 };
 /** Weight of one key's evidence: 1 by default, 2 with a proof attached, 3 when the proof was checked. */
-export const proofWeight = (proof: string | null, status: string | null) => (status === "facilitated-history" || status === "facilitated-unverified" || status === "replayed-proof" ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
+/** K10-001: verified-preimage is evidence of a binding to the store's own node, NOT of a third-party payment (the owner knows
+ * every preimage), so it weighs the same as a plain note (1) and does not count as a purchase proof. */
+export const NO_PURCHASE_PROOF = new Set(["facilitated-history", "facilitated-unverified", "replayed-proof", "verified-preimage"]);
+export const proofWeight = (proof: string | null, status: string | null) => (status && NO_PURCHASE_PROOF.has(status) ? 1 : status?.startsWith("verified") ? 3 : proof ? 2 : 1);
 type Row = Experience & { proof_status: string | null; walls_json?: string };
 
 export interface StoreAggregate {
@@ -158,7 +162,7 @@ export interface StoreAggregate {
   guest_yes_keys: number; guest_no_keys: number; account_required_keys: number;
   tax_before: { yes: number; no: number }; ship_before: { yes: number; no: number };
   observed: { shipping_usd: { median: number | null; n: number; keys: number; corroborated: boolean }; tax_rate_pct: { median: number | null; n: number; keys: number; corroborated: boolean } };
-  verified_purchase_share: number; proof_keys: number; tips: TipSummary; flags: ReturnType<typeof flagSummary>; directory_notes_excluded?: number; young_key_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
+  verified_purchase_share: number; proof_keys: number; tips: TipSummary; flags: ReturnType<typeof flagSummary>; directory_notes_excluded?: number; owner_notes_excluded?: number; young_key_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
 }
 const med = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : Math.round(((s[m - 1]! + s[m]!) / 2) * 100) / 100; };
 
@@ -170,7 +174,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
   for (const r of sorted) if (r.structured && !latest.has(r.pubkey)) latest.set(r.pubkey, r);
   const per = [...latest.values()];
   const keysAll = new Set(rows.map((r) => r.pubkey));
-  const proofKeys = new Set(rows.filter((r) => r.proof && r.proof_status !== "facilitated-history" && r.proof_status !== "facilitated-unverified" && r.proof_status !== "replayed-proof").map((r) => r.pubkey));
+  const proofKeys = new Set(rows.filter((r) => r.proof && !(r.proof_status && NO_PURCHASE_PROOF.has(r.proof_status))).map((r) => r.pubkey));
   const wOf = new Map<string, number>(); for (const r of rows) wOf.set(r.pubkey, Math.max(wOf.get(r.pubkey) ?? 1, proofWeight(r.proof, r.proof_status) * (flags?.get(r.id)?.tip_weight ?? (tips ? summarize(tips.get(r.id) ?? []).weight : 1)) * (flags?.get(r.id)?.weight ?? 1)));
   const noteFlags = rows.map((r) => flags?.get(r.id)).filter((x): x is NoteFlag => !!x);
   const storeTips = summarize(rows.flatMap((r) => tips?.get(r.id) ?? []));
@@ -203,7 +207,7 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
     tips: storeTips, flags: flagSummary(noteFlags),
     avg_rating_5: rated.length ? Math.round((rated.reduce((a, r) => a + r.rating5!, 0) / rated.length) * 10) / 10 : null,
     latest_at: sorted[0]?.created_at ?? null, notes_30d: rows.filter((r) => r.created_at >= nowS - 30 * 86400).length,
-    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Keys count only once KlickyMart has seen them for 7+ days (ingest time, not created_at) or when the note carries a checked payment proof. Crawl data is never overwritten.`,
+    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, cashu, order_hash) weigh 2, checked zap proofs 3; verified-preimage weighs 1 (it shows a binding to the store's own node, not a third-party payment); every key must pass the 7-day key-age gate whatever its proof, and the store owner's own keys never count; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Keys count only once KlickyMart has seen them for 7+ days (ingest time, not created_at) or when the note carries a checked payment proof. Crawl data is never overwritten.`,
   };
 }
 
@@ -223,8 +227,10 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     // KM-007: notes from keys younger than MIN_RANK_KEY_AGE_S by ingest time (and without a checked payment proof) don't count.
     const seen = await keyFirstSeen(db); const nowS = Math.floor(now / 1000); const minAge = opts.minKeyAgeS ?? MIN_RANK_KEY_AGE_S;
     for (const [d, rows] of by) {
-      const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); const aged = visit.filter((r) => countsForRank(r.pubkey, r.proof_status, seen, nowS, minAge));
-      if (!aged.length) continue; const a = aggregate(d, aged, now, tips, flags); a.directory_notes_excluded = rows.length - visit.length; a.young_key_notes_excluded = visit.length - aged.length; out.set(d, a);
+      // K10-001(c): the store's own declared keys (claimants, and zap_pubkey keys in the owner's 31420) never count for rank.
+      const owners = await ownerKeys(db, d);
+      const visit = rows.filter((r) => (r.basis ?? "visit") === "visit" && !owners.has(r.pubkey)); const aged = visit.filter((r) => countsForRank(r.pubkey, r.proof_status, seen, nowS, minAge));
+      if (!aged.length) continue; const a = aggregate(d, aged, now, tips, flags); a.directory_notes_excluded = rows.filter((r) => (r.basis ?? "visit") !== "visit").length; a.owner_notes_excluded = rows.filter((r) => owners.has(r.pubkey)).length; a.young_key_notes_excluded = visit.length - aged.length; out.set(d, a);
     }
   } catch { /* migration pending */ }
   return out;
@@ -329,4 +335,11 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
     ],
     spec: "NIP-DRAFT.md#422-as-a-shopping-experience",
   } };
+}
+
+/** Keys tied to the store owner's declaration: active claimants and zap_pubkey keys from their own 31420 (pay-binding). */
+async function ownerKeys(db: D1Database, d: string): Promise<Set<string>> {
+  const out = new Set(await claimedKeys(db, d));
+  try { for (const k of (await storeBindings(db, d)).zapKeys) out.add(k); } catch { /* */ }
+  return out;
 }

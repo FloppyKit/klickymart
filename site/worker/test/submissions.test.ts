@@ -239,9 +239,11 @@ describe("trust ladder", () => {
   });
   it("verified by payment proof (not from the submitter, not flagged) or a protocol endpoint", async () => {
     const d = uniq("pv");
-    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage", flagged: 0 });
+    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-zap", flagged: 0 });
     expect((await tier(d)).trust_tier).toBe("unverified");
-    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage" });
+    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-preimage" }); // K10-001: owner-mintable, not a payment proof
+    expect((await tier(d)).trust_tier).not.toBe("verified");
+    await visit(d, pk(), { firstSeen: old(), proof_status: "verified-zap" });
     const t = await tier(d);
     expect(t.trust_tier).toBe("verified");
     expect(t.trust_label).toBe("Verified (payment proof: verified 422)");

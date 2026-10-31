@@ -388,7 +388,7 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     if (seen && share > SEEN_RULE.dropFlaggedShare) { seen = false; why.push({ kind: "basis-notes-flagged", detail: `${flaggedNotes.length} of ${list.length} basis notes are flagged (> 40%)`, ref: `/flags.json?domain=${d}` }); }
     if (seen) why.push({ kind: "shopper-notes", detail: `${perKey.size} distinct unflagged keys (weighted ${weighted}, ${real} real) posted visit-basis notes in 60 days`, ref: `/merchant/${d}#community` });
     const how: string[] = [];
-    const pay = (byD.get(d) ?? []).find((n) => n.proof_status?.startsWith("verified") && !flagW.has(n.id) && !strongKeys.has(n.pubkey) && n.pubkey !== sub?.submitter);
+    const pay = (byD.get(d) ?? []).find((n) => n.proof_status?.startsWith("verified") && n.proof_status !== "verified-preimage" /* K10-001: owner can mint these */ && !flagW.has(n.id) && !strongKeys.has(n.pubkey) && n.pubkey !== sub?.submitter);
     if (pay) { how.push("payment proof: verified 422"); why.push({ kind: "payment-proof", ref: pay.id, detail: "a 422 with a verified payment proof from an unflagged key that is not the submitter" }); }
     const claimKey = [...claims].find((c) => c.startsWith(d + "|"));
     if (claimKey) { how.push("store claim: NIP-05"); why.push({ kind: "store-claim", ref: claimKey.split("|")[1], detail: "a key verified by NIP-05 on this domain signed its own 31420 record" }); }

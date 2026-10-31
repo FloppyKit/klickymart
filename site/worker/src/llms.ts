@@ -39,6 +39,10 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
    Proofs verify only when bound to the store: the store must have claimed its listing and list, in its own 31420,
    ["ln_node","<66-hex node pubkey>"] (preimage: the 421's bolt11 must be node-signed by that key) and/or
    ["zap_pubkey","<64-hex LNURL nostrPubkey>"] (zap: the 9735 must be signed by that key, NIP-57). Otherwise: unverified-claim.
+   proof_status "verified-preimage" is kept as a label (non-breaking) but means only "invoice bound to the store's own node":
+   the store owner knows every preimage, so it is NOT proof that anyone paid. It weighs the same as a plain note, does not
+   count toward verified_purchase_share or the "Verified (payment proof)" tier, and never skips the 7-day key-age gate.
+   No proof skips that gate, and notes from the store's own declared keys (claimants, zap_pubkey) never count for rank.
 4. Publish the signed event to any of our relays (wss://relay.damus.io, wss://nos.lol, wss://relay.primal.net). That
    is enough: KlickyMart watches those relays live and catches up every 5 minutes. POST ${origin}/reviews (add ?dry_run=1
    to validate only) or the MCP tool submit_review {event} is optional, for clients that cannot reach a relay.

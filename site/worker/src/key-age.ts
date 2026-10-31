@@ -15,9 +15,10 @@ export async function keyFirstSeen(db: D1Database): Promise<Map<string, number>>
   }
   return out;
 }
-/** A note counts toward rank only if its key is at least MIN_RANK_KEY_AGE_S old by ingest time, or the note carries a
- * payment proof KlickyMart checked (proof_status verified*, bound first-use-wins per R6-001), which costs real money. */
-export function countsForRank(pubkey: string, proofStatus: string | null | undefined, seen: Map<string, number>, nowS: number, minAge = MIN_RANK_KEY_AGE_S): boolean {
-  if (proofStatus?.startsWith("verified")) return true;
+/** A note counts toward rank only if its key is at least MIN_RANK_KEY_AGE_S old by ingest time. K10-001: no proof tier
+ * bypasses this gate. A verified-preimage proof only shows an invoice signed by the store's declared node plus a matching
+ * preimage, which the store owner can produce for any invoice without anyone paying; proofs add weight only AFTER the gate.
+ * proofStatus is kept in the signature for callers; it no longer changes the result. */
+export function countsForRank(pubkey: string, _proofStatus: string | null | undefined, seen: Map<string, number>, nowS: number, minAge = MIN_RANK_KEY_AGE_S): boolean {
   const t = seen.get(pubkey); return t !== undefined && nowS - t >= minAge;
 }
