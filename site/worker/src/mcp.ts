@@ -235,7 +235,7 @@ export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
         description: "Where else can my agent buy this? Give a blocking domain and/or a category (electronics, gift-cards, groceries, apparel, hardware, books, travel, crypto-hardware, other, or a product word like headphones). Product words resolve to a finer sub (headphones -> audio). Returns in-map stores an agent can reach that sell that product family, ranked by checkout reached, major retailer, main product line, agent access, BTC grade, checkout ease, each with an evidence URL, plus turned_away stores with reasons. Index only; never crawls.",
         inputSchema: {
           type: "object",
-          properties: { include_indirect: { type: "boolean", description: "with pay=btc/lightning: also list stores where bitcoin works only through a third-party processor or gift card (labelled btc_route indirect). Default: native acceptance only." }, 
+          properties: { include_blocked: { type: "boolean", description: "also list stores whose checkout is blocked (bot wall or refusal); they rank last. Default false." }, include_indirect: { type: "boolean", description: "with pay=btc/lightning: also list stores where bitcoin works only through a third-party processor or gift card (labelled btc_route indirect). Default: native acceptance only." }, 
             domain: { type: "string" }, category: { type: "string", description: "coarse category or product word (headphones, laptop, gift card...)" },
             sub: { type: "string", enum: [...SUBCATEGORIES], description: "product family" },
             pay: { type: "string", enum: Object.keys(ALT_PAY_FILTERS) }, guest: { type: "boolean", description: "exclude stores known to require an account" },

@@ -1,7 +1,7 @@
 import { landedOptsFor } from "./offers";
 /** Store facts attached to every product result (indexed offers and live Shopify Catalog products). One source: storeFacts() + record. */
 import type { Snapshot } from "./index-mem";
-import { storeFacts, shipOf } from "./explain";
+import { storeFacts, shipOf, deriveVerdict } from "./explain";
 import { parseRaw } from "./records-api";
 import { landedFor, type OfferShip } from "./landed";
 
@@ -65,7 +65,7 @@ export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
   const sh = shipOf(raw);
   const cm = raw.checkout_map as { stage?: string; first_blocker?: { kind?: string } } | undefined;
   return {
-    domain: row.d, indexed: true, verdict: row.status === "crawled" ? "reachable" : row.status,
+    domain: row.d, indexed: true, verdict: deriveVerdict(row, raw).verdict,
     ...storeFacts(row),
     // Wallets are "false" only when the store's own wallet list was read (a Shopify product page's accelerated-checkout list); otherwise unknown.
     pay, ...walletFacts(raw, pay),

@@ -6,7 +6,7 @@ const pickAlt = (f: ReturnType<typeof storeFacts>) => ({ agent_access: f.agent_a
 import type { IndexRow, Snapshot } from "./index-mem";
 import { parseRaw } from "./records-api";
 import { CATEGORY_MAP } from "./category-map";
-import { whyOf } from "./explain";
+import { whyOf, deriveVerdict } from "./explain";
 import { AN_ALT_CATEGORIES, anCategories, anJson } from "./agent-native";
 
 /** GO 5.7 finer subcategories (signed in v3 records as `sub`). Product words map to a sub first, then a coarse category. */
@@ -64,7 +64,7 @@ export function resolveCategory(input: string): string | null {
   return null;
 }
 
-export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; limit?: number; include_indirect?: boolean }
+export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; limit?: number; include_indirect?: boolean; include_blocked?: boolean }
 
 export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   let cats: string[] = [];
@@ -93,7 +93,8 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   if (p.pay) p = { ...p, pay: p.pay.trim().toLowerCase() };
   if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: `pay must be one of ${Object.keys(ALT_PAY_FILTERS).join(", ")} (btc/onchain/btc-onchain = on-chain only; bitcoin = on-chain or Lightning)` };
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
-  const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number; indirect: boolean }[] = [];
+  const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number; indirect: boolean; blocked: boolean }[] = [];
+  const blockedExcluded: string[] = [];
   const wantsBtc = !!want && want.some((x) => ["btc", "ln", "lnurl", "bolt12"].includes(x));
   const indirectExcluded: string[] = [];
   const turnedAway: { d: string; name: string | null; status: string; reason: string | null; record: string }[] = [];
@@ -110,6 +111,9 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       turnedAway.push({ d: row.d, name: row.name, status: row.status, reason: whyOf(raw)?.msg ?? null, record: `${origin}/records/${encodeURIComponent(row.d)}` });
       continue;
     }
+    // R11-001: a crawled store whose checkout is blocked (bot wall, refused) is not an alternative unless include_blocked=1; then it ranks last.
+    const blocked = deriveVerdict(row, raw).verdict === "checkout-blocked";
+    if (blocked && !p.include_blocked) { blockedExcluded.push(row.d); continue; }
     const pays = [...new Set([...(raw.pay as string[] ?? []), ...(raw.pay_online as string[] ?? [])])];
     // Stores that take bitcoin only through a processor (btc_indirect) stay in bitcoin results, labelled and ranked after native ones.
     const indirect = wantsBtc && !pays.some((x) => want!.includes(x)) && Array.isArray(raw.btc_indirect) && (raw.btc_indirect as unknown[]).length > 0;
@@ -117,13 +121,14 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     // pay=btc means the store's own checkout takes bitcoin. Indirect-only stores appear only when asked for (include_indirect=1).
     if (indirect && !p.include_indirect) { indirectExcluded.push(row.d); continue; }
     if (p.guest && row.guest === 0) continue; // account required: excluded; unknown kept but ranked lower
-    rows.push({ row, raw, pays, subRank, indirect });
+    rows.push({ row, raw, pays, subRank, indirect, blocked });
   }
   const n = (v: number | null | undefined) => (v === null || v === undefined ? -1 : v);
   const maj = (d: string) => (MAJOR_RETAILERS.has(d) ? 1 : 0);
   const restricted = (raw: Record<string, unknown>) => (raw.agent_policy ? 1 : 0);
   rows.sort((a, b) =>
-    Number(a.indirect) - Number(b.indirect) // native bitcoin before processor-only
+    Number(a.blocked) - Number(b.blocked) // checkout-blocked last (only present with include_blocked=1)
+    || Number(a.indirect) - Number(b.indirect) // native bitcoin before processor-only
     || n(b.row.co) - n(a.row.co) // reaches checkout first
     || restricted(a.raw) - restricted(b.raw) // terms restrict agent orders: after equals
     || maj(b.row.d) - maj(a.row.d) // major retailers among equals
@@ -133,11 +138,11 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     || n(b.row.btc) - n(a.row.btc)
     || n(b.row.ease) - n(a.row.ease)
     || a.row.d.localeCompare(b.row.d));
-  const items = rows.slice(0, Math.min(50, p.limit ?? 10)).map(({ row, raw, pays, subRank, indirect }) => {
+  const items = rows.slice(0, Math.min(50, p.limit ?? 10)).map(({ row, raw, pays, subRank, indirect, blocked }) => {
     const pq = Array.isArray(raw.pay_q) ? (raw.pay_q as { c: string; url: string }[]) : [];
     const ev = (want && pq.find((q) => want.includes(q.c))?.url) || (Array.isArray(raw.evu) ? (raw.evu as string[])[0] : null) || `https://${row.d}/`;
     return {
-      d: row.d, name: row.name, url: `https://${row.d}/`, categories: categoriesFor(row.d, raw),
+      d: row.d, name: row.name, url: `https://${row.d}/`, verdict: blocked ? "checkout-blocked" : "reachable", categories: categoriesFor(row.d, raw),
       sub: subsFor(raw), sub_match: sub ? (subRank === 2 ? "main line" : subRank === 1 ? "carries it" : "unknown") : null, major_retailer: MAJOR_RETAILERS.has(row.d),
       agent_ordering: raw.agent_policy ? (raw.agent_policy as { v: string }).v : null,
       ...pickAlt(storeFacts(row)), ease: row.ease,
@@ -155,6 +160,8 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
       ranking: "checkout reached (co) desc, terms-restricted stores after equals, major retailer first among equals, product family is the store's main line, agent access (ag) desc, guest confirmed (if guest=1), BTC grade desc, ease desc",
       note: "Store-level, not product-level: a match means the store sells that product family (signed `sub` in v0.4 records), not that a specific item is in stock. guest=1 excludes stores known to require an account; unknown guest status is kept and marked null. B2B wholesale stores are excluded.",
       items,
+      include_blocked: !!p.include_blocked, blocked_excluded: p.include_blocked ? [] : blockedExcluded.slice(0, 20),
+      ...(blockedExcluded.length && !p.include_blocked ? { blocked_hint: `${blockedExcluded.length} store(s) in this category have checkout blocked (bot wall or refusal); add include_blocked=1 to list them last.` } : {}),
       turned_away: turnedAway.slice(0, 10),
       turned_away_note: "Stores in the same category/sub that refuse agents or could not be read; listed so you know they exist, not as options.",
     },

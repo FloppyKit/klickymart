@@ -6,6 +6,7 @@ const NOT_USABLE: Record<string, string> = {
   "blocked-tos": "the store's terms ban automated access: KlickyMart does not crawl it and an agent should not order there",
   "agents-not-welcome": "the store refuses agents (robots.txt or an explicit block)",
   "error": "the store could not be read (network or server error)",
+  "checkout-blocked": "pages load but checkout is blocked for agents (bot wall or refusal at the cart/checkout step)",
 };
 const BLOCKER_FLAGS: Record<string, string> = {
   "no-add-to-cart": "our guest probe found no add-to-cart button on this store's product page: an agent may not get past the product page",

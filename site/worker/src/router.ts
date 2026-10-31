@@ -535,7 +535,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const g = (k: string) => (sp instanceof URLSearchParams ? sp.get(k) : (sp[k] as string | undefined)) ?? undefined;
     const guest = g("guest");
     return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true,
-      include_indirect: ["1", "true"].includes(String(g("include_indirect") ?? g("btc_indirect") ?? "")) || (sp as Record<string, unknown>).include_indirect === true, limit: g("limit") ? Number(g("limit")) : undefined };
+      include_indirect: ["1", "true"].includes(String(g("include_indirect") ?? g("btc_indirect") ?? "")) || (sp as Record<string, unknown>).include_indirect === true,
+      include_blocked: ["1", "true"].includes(String(g("include_blocked") ?? "")) || (sp as Record<string, unknown>).include_blocked === true, limit: g("limit") ? Number(g("limit")) : undefined };
   };
 
   const addLanded = (body: { items: Record<string, unknown>[] }, zip: string, taxpreOnly = false) => {
