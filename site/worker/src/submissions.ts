@@ -404,7 +404,8 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
     if (dc) { how.push("store claim: DNS TXT"); why.push({ kind: "store-claim", ref: dc, detail: `_klickymart.${d} TXT names this key, and the key signed the claim` }); }
     const sflags = sub?.flags ?? [];
     let tier: Tier = how.length ? "verified" : seen ? "seen" : "unverified";
-    if (isTierFlagged(sflags) && !how.some((h) => h.startsWith("store claim"))) { tier = "flagged"; for (const f of sflags.filter((x) => x.strength === "strong")) why.unshift({ kind: f.flag, detail: f.detail }); }
+    // K11-001: no claim or proof overrides an abuse flag (look-alike, spam, affiliate redirect...). Flagged stays flagged with its reason.
+    if (isTierFlagged(sflags)) { tier = "flagged"; for (const f of sflags.filter((x) => x.strength === "strong")) why.unshift({ kind: f.flag, detail: f.detail }); }
     if (!why.length) why.push({ kind: src === "community" ? "community-submitted" : "crawler-indexed", detail: src === "community" ? "submitted by the community; facts come from the gated crawl only" : "indexed by the KlickyMart crawler; no shopper basis notes yet" });
     out.set(d, { trust_tier: tier, trust_proofs: how, trust_label: tierLabel(tier, { src, flags: sflags, n: list.length - flaggedNotes.length, how }), trust_why: why, src,
       ...(sub ? { submitted_by: sub.submitter_kind === "anon" ? "anonymous" : sub.submitter, submitted_at: new Date(sub.created_at * 1000).toISOString() } : {}),

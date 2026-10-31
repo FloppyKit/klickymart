@@ -400,3 +400,22 @@ describe("empty queue export (regression: 503 empty_response on queue.ndjson)", 
     expect((await SELF.fetch("https://km.test/submit/queue.ndjson?state=bogus")).status).toBe(400);
   });
 });
+
+describe("K11-001: a store claim never overrides an abuse flag", () => {
+  it("bestbuj.com (lookalike? of bestbuy.com) + DNS TXT claim stays flagged on every surface", async () => {
+    const { tierBadgeHtml, tierFields, meetsMinTrust } = await import("../src/submissions");
+    const r = await submitStore({ domain: "bestbuj.com" }, ctx({ ip: "198.51.100.77" }));
+    expect(r.body.trust_tier).toBe("flagged");
+    const sk = secp.utils.randomSecretKey(); const ev = sign1423([["r", "bestbuj.com"], ["claim", "dns"]], "", sk); const npub = hexToNpub(ev.pubkey);
+    expect((await handleDnsClaim(env.DB, { event: ev }, { lookup: async () => [`klickymart-claim=${npub}`] })).status).toBe(201);
+    const t = await tier("bestbuj.com");
+    expect(t.trust_tier).toBe("flagged"); // tier (used by /q, MCP search_merchants, /check, /records, badges)
+    expect(t.trust_label).toMatch(/Flagged: lookalike\?/);
+    expect(t.trust_why.some((w) => w.kind === "lookalike?")).toBe(true); // flag reason stays visible
+    expect(meetsMinTrust(t.trust_tier, "verified")).toBe(false); // min_trust=verified on /q and MCP
+    expect(meetsMinTrust(t.trust_tier, "seen")).toBe(false);
+    expect((tierFields(t) as any).trust_tier).toBe("flagged"); // /check and /q item fields
+    const badge = tierBadgeHtml(t);
+    expect(badge).toContain('data-trust-tier="flagged"'); expect(badge).not.toContain("#15803d"); expect(badge).not.toMatch(/Verified/);
+  });
+});
