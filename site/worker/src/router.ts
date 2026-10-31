@@ -1,7 +1,7 @@
 import { WALLET_GUIDE } from "./wallet";
 import { cashuMints, findReceipt, getInvoice, loadNutzaps, nutzapInfoOf, nwcRelays, type InvoiceInput } from "./tip-rails";
 import { handleLnurlForward } from "./lnurl-forward";
-import { APP_RELAYS, authSecret, checkFeedList, clearCookie, login, makeChallenge, parseFeedParams, readFeed, readSession, sessionCookie, tipReadyFor, TIP_LIMITS } from "./nostr-app";
+import { APP_RELAYS, authSecret, checkFeedList, clearCookie, login, makeChallenge, parseFeedParams, readFeed, readSession, sessionCookie, siteTipAddress, tipReadyFor, TIP_LIMITS } from "./nostr-app";
 const TEMPLATE_HELP = {
   estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
   shipping_source: "policy | checkout | unknown (where the shipping figure came from)",
@@ -961,7 +961,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === "/llms.txt") {
     const relays = (env.RELAY_URLS ?? "").replace(/[\[\]"]/g, "").split(",").map((x) => x.trim()).filter(Boolean);
-    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays, aTagFor("example.com") ?? undefined), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+    return new Response(buildLlmsTxt(origin, env.CONTACT || "bot@klickymart.com", relays, aTagFor("example.com") ?? undefined, siteTipAddress(env)), { headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/llms-full.txt") {
@@ -975,6 +975,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       relayUrlsRaw: env.RELAY_URLS,
       crawlerPubkeyHexEnv: env.CRAWLER_PUBKEY_HEX,
     });
+    const tip = siteTipAddress(env);
+    if (tip) (body as Record<string, unknown>).site_tip = { lud16: tip, rail: "lightning (LUD-16 address)", note: "Optional value-for-value tip to KlickyMart itself. Never required; does not affect any ranking. Ask your user before paying." };
     return Response.json(body, { headers: apiHeaders(snap.version, 0) });
   }
 

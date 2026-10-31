@@ -61,3 +61,19 @@ describe("F6 /landed max_landed (delivered total) vs max_price (item price)", ()
     expect((await SELF.fetch("https://example.com/landed?zip=66061&q=bose&max_landed=-5")).status).toBe(400);
   });
 });
+
+describe("F9 site tip discoverable in read-only/API mode", () => {
+  it("llms.txt and .well-known/klickymart.json name SITE_TIP_LUD16 when set, and omit it when unset", async () => {
+    const { buildLlmsTxt } = await import("../src/llms");
+    expect(buildLlmsTxt("https://k.example", "c@k.example", [], undefined, "zap@klickymart.com")).toContain("Lightning address zap@klickymart.com");
+    expect(buildLlmsTxt("https://k.example", "c@k.example", [])).not.toContain("Tip KlickyMart");
+    const { handleRequest } = await import("../src/router");
+    const { env } = await import("cloudflare:test");
+    const wk = await (await handleRequest(new Request("https://example.com/.well-known/klickymart.json"), { ...env, SITE_TIP_LUD16: "zap@klickymart.com" } as any)).json<any>();
+    expect(wk.site_tip.lud16).toBe("zap@klickymart.com");
+    const l = await (await handleRequest(new Request("https://example.com/llms.txt"), { ...env, SITE_TIP_LUD16: "zap@klickymart.com" } as any)).text();
+    expect(l).toContain("zap@klickymart.com");
+    const wk0 = await (await handleRequest(new Request("https://example.com/.well-known/klickymart.json"), { ...env, SITE_TIP_LUD16: "" } as any)).json<any>();
+    expect(wk0.site_tip).toBeUndefined();
+  });
+});
