@@ -99,6 +99,8 @@ export interface Env {
   INGESTER?: DurableObjectNamespace;
   /** "1"/"true" enables the live WebSocket ingester DO; default off (cron catch-up only). */
   LIVE_INGEST?: string;
+  CHECKOUT_QUOTES_ENABLED?: string;
+  PENDING_QUEUE_ENABLED?: string;
   FACILITATOR_SK_HEX?: string;
   FACILITATE_ENABLED?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -284,7 +286,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   // marked store_indexed:false, and the domain joins the pending-crawl queue (robots.txt first when KlickyBot gets to it).
   const x = parseExperience(body, (d) => known.has(d) || UNINDEXED_OK.test(d));
   const unindexed = x.ok && !known.has(x.value.d);
-  const pendingInfo = unindexed && x.ok ? await queuePending(env, x.value.d, dryRun) : null;
+  const pendingInfo = unindexed && x.ok && env.PENDING_QUEUE_ENABLED === "true" ? await queuePending(env, x.value.d, dryRun) : null;
   const ux = unindexed ? { store_indexed: false, pending_crawl: pendingInfo, store_note: UNINDEXED_NOTE } : {};
   if (env.DB && (p.ok || x.ok)) {
     const ev0 = body as Ev;
@@ -738,6 +740,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/pending.json" && request.method === "GET") {
     // Our own queue of store domains surfaced by live results that we haven't checked yet (domain + queue time only).
     const out: { domain: string; queued_at: string | null }[] = [];
+    if (env.PENDING_QUEUE_ENABLED !== "true") return Response.json({ count: 0, items: [], disabled: true, note: "Pending-crawl queue is disabled." }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
     try {
       const l = env.KV ? await env.KV.list({ prefix: "pending:", limit: 1000 }) : { keys: [] as { name: string }[] };
       for (const k of l.keys) { const d = k.name.slice(8); if (!snap.rows.some((x) => x.d === d || x.d === `www.${d}`)) out.push({ domain: d, queued_at: ((await env.KV.get<{ queued_at: string }>(k.name, "json")) ?? { queued_at: null }).queued_at }); }
@@ -755,6 +758,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   };
   const quoteSeeds = new Set([env.CRAWLER_PUBKEY_HEX].filter(Boolean) as string[]);
   const attachCheckoutQuotes = async (body: Record<string, unknown>, zip: string) => {
+    if (env.CHECKOUT_QUOTES_ENABLED !== "true") return;
     if (!/^\d{5}$/.test(zip)) return; const z3 = zip.slice(0, 3);
     const items = ((body.items as Record<string, unknown>[] | undefined) ?? []).filter((i) => i.landed);
     const ds = [...new Set(items.map((i) => String(i.d ?? i.domain ?? "")).filter(Boolean))].slice(0, 20);
@@ -762,6 +766,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     for (const i of items) { const d = String(i.d ?? i.domain ?? ""); applyCheckoutQuote(i.landed as Record<string, unknown>, aggs.get(d) ?? null, `${origin}/landed/notes?domain=${encodeURIComponent(d)}&zip3=${z3}`); }
   };
   if (path === "/landed/notes" && request.method === "GET") {
+    if (env.CHECKOUT_QUOTES_ENABLED !== "true") return Response.json({ ok: false, disabled: true, notes: [], note: "Checkout-quote corroboration is disabled." }, { status: 404, headers: apiHeaders(snap.version, 0) });
     const d = (url.searchParams.get("domain") ?? "").toLowerCase().replace(/^www\./, ""); const z3 = url.searchParams.get("zip3") ?? "";
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return err400("domain", "domain is required");
     if (!/^\d{3}$/.test(z3)) return err400("zip3", "zip3 must be 3 digits (KlickyMart never takes a full ZIP here)");

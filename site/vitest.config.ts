@@ -33,6 +33,9 @@ export default defineConfig(async () => {
             // R12-201: tests never dial real relays. The INGESTER DO (woken by /stats/ingest.json and others) connects to
             // RELAY_URLS; "none" parses to an empty relay list, so it connects to nothing.
             RELAY_URLS: "none",
+            // Existing tests exercise the on path; flags-off.test.ts overrides both to off.
+            CHECKOUT_QUOTES_ENABLED: "true",
+            PENDING_QUEUE_ENABLED: "true",
           },
         },
       }),
