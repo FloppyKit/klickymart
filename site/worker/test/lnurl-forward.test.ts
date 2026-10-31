@@ -97,9 +97,23 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     expect((await env.DB.prepare("SELECT n FROM rate_limits WHERE k LIKE 'lnf:c:ip:%'").first<{ n: number }>())?.n ?? 0).toBe(0);
     expect(u.calls.length).toBe(0);
   });
+  it("R9-001: zap requests must name KlickyMart's own pubkey; fail closed when unset; plain pay unaffected", async () => {
+    const z = (pt: string[][], e: Record<string, unknown> = E) => call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zapReq(21000, undefined, pt)))}`, upstream(), e);
+    expect((await z([["p", FOREIGN]]))!.status).toBe(403); // foreign recipient
+    expect((await z([]))!.status).toBe(400); // missing p
+    expect((await z([["p", OWN], ["p", FOREIGN]]))!.status).toBe(400); // multiple p
+    expect((await z([["p", OWN], ["p", OWN]]))!.status).toBe(400);
+    expect(((await (await z([["p", OWN]]))!.json()) as { status: string }).status).toBe("OK"); // our own p tag
+    const noKey = { DB: env.DB, LNURL_FORWARD_ZAP: "DrMattBrown@primal.net" };
+    expect((await z([["p", OWN]], noKey))!.status).toBe(403); // unset -> fail closed
+    const meta = await (await call("/.well-known/lnurlp/zap", upstream(), noKey))!.json() as Record<string, unknown>;
+    expect(meta.allowsNostr).toBeUndefined(); // do not advertise zaps we would refuse
+    expect(((await (await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream(), noKey))!.json()) as { status: string }).status).toBe("OK"); // plain pay works
+  });
   it("R9-002: invalid input is refused before any rate-limit budget is taken", async () => {
     const u = upstream();
     expect((await call("/.well-known/lnurlp/zap/callback?amount=abc", u))!.status).toBe(400);
+    expect((await call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zapReq(21000, undefined, [["p", FOREIGN]])))}`, u))!.status).toBe(403);
     expect((await call("/.well-known/lnurlp/zap/callback?amount=21000&nostr=notjson", u))!.status).toBe(400);
     expect((await env.DB.prepare("SELECT COUNT(*) AS c FROM rate_limits WHERE k LIKE 'lnf:%'").first<{ c: number }>())!.c).toBe(0);
     expect(u.calls.length).toBe(0);

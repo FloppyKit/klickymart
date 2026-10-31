@@ -53,7 +53,7 @@ async function upstreamMeta(url: string, o: { fetcher?: F; doh?: F }): Promise<U
 }
 
 /** GET /.well-known/lnurlp/<name> and GET /.well-known/lnurlp/<name>/callback. Returns null for other paths. */
-export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1Database; LNURL_FORWARD_ZAP?: string; SUBMIT_SALT?: string }, origin: string, ip: string | null, salt: string, o: { fetcher?: F; doh?: F } = {}): Promise<Response | null> {
+export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1Database; LNURL_FORWARD_ZAP?: string; SUBMIT_SALT?: string; SITE_ZAP_PUBKEY_HEX?: string }, origin: string, ip: string | null, salt: string, o: { fetcher?: F; doh?: F } = {}): Promise<Response | null> {
   const m = /^\/\.well-known\/lnurlp\/([^/]+)(\/callback)?$/.exec(path); if (!m) return null;
   const name = m[1].toLowerCase(); const up = name === "zap" ? upstreamUrl(env.LNURL_FORWARD_ZAP) : null;
   if (!up) return err("unknown lightning address", 404);
@@ -64,8 +64,13 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
     if (!Number.isInteger(amount) || amount < 1) return err("amount must be a positive integer (msat)");
     if (comment !== null && comment.length > 2000) return err("comment too long");
     if (nostr !== null) {
+      // R9-001: a zap request routed through zap@klickymart.com must zap KlickyMart itself. Otherwise sats land in our
+      // wallet while clients credit the pubkey named in the p tag. Fail closed when our zap pubkey is not configured.
+      const own = (env.SITE_ZAP_PUBKEY_HEX ?? "").trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(own)) return err("zaps are not enabled for this address (SITE_ZAP_PUBKEY_HEX unset); plain payments still work", 403);
       let ev: unknown; try { ev = JSON.parse(nostr); } catch { return err("nostr must be a JSON zap request"); }
-      const z = verifyZapRequest(ev); if (!z.ok) return err(z.message);
+      const z = verifyZapRequest(ev); if (!z.ok) return err(z.message); // kind 9734, signature, exactly one p tag, amount tag
+      if (z.recipient.toLowerCase() !== own) return err("zap request p tag must be KlickyMart's own pubkey; this address does not forward zaps for other recipients", 403);
       if (z.amount !== amount) return err("zap request amount differs from amount");
     }
   }
@@ -73,7 +78,7 @@ export async function handleLnurlForward(path: string, url: URL, env: { DB?: D1D
   const meta = await upstreamMeta(up, o); if (!meta) return err("upstream wallet unavailable", 502);
   if (!m[2]) {
     return Response.json({ status: "OK", tag: "payRequest", callback: `${origin}/.well-known/lnurlp/${name}/callback`, metadata: meta.metadata, minSendable: meta.minSendable, maxSendable: meta.maxSendable,
-      ...(meta.commentAllowed !== undefined ? { commentAllowed: meta.commentAllowed } : {}), ...(meta.allowsNostr ? { allowsNostr: true, nostrPubkey: meta.nostrPubkey } : {}) }, { headers: { ...CORS, "Cache-Control": "public, max-age=60" } });
+      ...(meta.commentAllowed !== undefined ? { commentAllowed: meta.commentAllowed } : {}), ...(meta.allowsNostr && /^[0-9a-f]{64}$/.test((env.SITE_ZAP_PUBKEY_HEX ?? "").trim().toLowerCase()) ? { allowsNostr: true, nostrPubkey: meta.nostrPubkey } : {}) }, { headers: { ...CORS, "Cache-Control": "public, max-age=60" } });
   }
   if (amount < meta.minSendable || amount > meta.maxSendable) return err(`amount must be an integer from ${meta.minSendable} to ${meta.maxSendable} msat`);
   if (nostr !== null && !meta.allowsNostr) return err("zaps not supported by the upstream wallet");

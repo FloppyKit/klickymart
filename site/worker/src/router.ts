@@ -95,6 +95,8 @@ export interface Env {
   AUTH_SECRET?: string;
   /** Value-for-value Lightning address for the site footer. Unset -> slot hidden. */
   SITE_TIP_LUD16?: string;
+  /** Public hex pubkey that zaps to zap@klickymart.com must name in their p tag (NIP-57). Unset = zap requests rejected (plain LNURL pay still works). */
+  SITE_ZAP_PUBKEY_HEX?: string;
   /** Comma list of Cashu mint origins the /app page may reach (CSP). Unset -> DEFAULT_CASHU_MINTS. */
   CASHU_MINTS?: string;
   /** Comma list of wss:// relays a browser NWC connection may use (CSP). Unset -> DEFAULT_NWC_RELAYS. */
