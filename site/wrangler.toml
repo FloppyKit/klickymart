@@ -32,7 +32,7 @@ new_sqlite_classes = ["RelayIngester"]
 
 # Relay catch-up (since = last seen per relay) and ingester keep-alive.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["15 6 * * *"]
 
 [vars]
 SITE_ORIGIN = "https://klickymart.com"
@@ -74,7 +74,7 @@ tag = "v1-ingester"
 new_sqlite_classes = ["RelayIngester"]
 
 [env.production.triggers]
-crons = ["*/5 * * * *"]
+crons = ["15 6 * * *"]
 
 [env.production.vars]
 SITE_ORIGIN = "https://klickymart.com"
