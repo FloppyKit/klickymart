@@ -1,5 +1,6 @@
 import { WALLET_GUIDE } from "./wallet";
 import { cashuMints, findReceipt, getInvoice, loadNutzaps, nutzapInfoOf, nwcRelays, type InvoiceInput } from "./tip-rails";
+import { handleLnurlForward } from "./lnurl-forward";
 import { APP_RELAYS, authSecret, checkFeedList, clearCookie, login, makeChallenge, parseFeedParams, readFeed, readSession, sessionCookie, tipReadyFor, TIP_LIMITS } from "./nostr-app";
 const TEMPLATE_HELP = {
   estimated: "true (all amounts you give are estimates) | false (none) | comma list of amount kinds: price,price_seen,price_paid,fee,shipping,tax,total",
@@ -99,6 +100,8 @@ export interface Env {
   CASHU_MINTS?: string;
   /** Comma list of wss:// relays a browser NWC connection may use (CSP). Unset -> DEFAULT_NWC_RELAYS. */
   NWC_RELAYS?: string;
+  /** Upstream Lightning address that zap@<site> forwards to (wrangler var, e.g. name@primal.net). Unset -> 404. */
+  LNURL_FORWARD_ZAP?: string;
 }
 
 /** JSON-RPC error for a thrown tool/handler error: bad input -> -32602 (not retryable), anything else -> -32603 with a retry hint. */
@@ -470,6 +473,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       return { ...t, tip_ready: t.tip_ready || !!cashu, rails: { lightning: t.tip_ready, cashu: !!cashu }, lightning: t.tip_ready ? { addr: t.addr } : null, cashu, ranking_weight: 0 as const };
     }));
     return Response.json({ items, note: "Display only: tip-ready never adds ranking weight. KlickyMart never holds keys or funds.", wallet: `${origin}/wallet#tip-ready` }, { headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
+  }
+  if (path.startsWith("/.well-known/lnurlp/") && request.method === "GET") {
+    const r = await handleLnurlForward(path, url, env, origin, request.headers.get("cf-connecting-ip"), env.SUBMIT_SALT || ephemeralSalt());
+    if (r) return r;
   }
   if (path === "/tip/invoice" && request.method === "POST") {
     const body = await request.json().catch(() => null) as InvoiceInput | null;
