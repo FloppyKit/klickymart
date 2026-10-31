@@ -33,8 +33,9 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   const limit = Math.min(Math.max(qy.limit ?? 20, 1), 100);
   const g = qy.gtin ? normGtin(qy.gtin) : null;
   const m = qy.mpn ? qy.mpn.toLowerCase().replace(/[^a-z0-9]/g, "") : null;
-  const qt = qy.q ? queryTokens(qy.q) : [];
-  if (!g && !m && !qt.length && !qy.domain) return { ok: false as const, message: "give gtin, mpn, q or domain" };
+  // Customer audit 2026-10-31 (Penny): type= alone (e.g. type=earbuds) searches by that product type.
+  const qt = qy.q ? queryTokens(qy.q) : qy.type ? queryTokens(qy.type) : [];
+  if (!g && !m && !qt.length && !qy.domain) return { ok: false as const, message: "give gtin, mpn, q, type or domain" };
   const exact = new Map(snap.rows.map((r) => [r.d, r]));
   const rows = { get: (d: string) => exact.get(d) ?? findRow(snap, d) ?? undefined };
   const scored: { o: Offer; conf: number; how: string }[] = [];

@@ -91,7 +91,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   }
   if (!cats.length) return { ok: false as const, message: "pass domain= or category=" };
   if (p.pay) p = { ...p, pay: p.pay.trim().toLowerCase() };
-  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: `pay must be one of ${Object.keys(ALT_PAY_FILTERS).join(", ")} (btc/onchain/btc-onchain = on-chain only; bitcoin = on-chain or Lightning)` };
+  if (p.pay && !PAY_FILTER[p.pay]) return { ok: false as const, message: `pay must be a pay code or alias (${Object.keys(ALT_PAY_FILTERS).join(", ")}); btc/onchain/btc-onchain = on-chain only; bitcoin = on-chain or Lightning` };
   const want = p.pay ? PAY_FILTER[p.pay]! : null;
   const rows: { row: IndexRow; raw: Record<string, unknown>; pays: string[]; subRank: number; indirect: boolean; blocked: boolean }[] = [];
   const blockedExcluded: string[] = [];

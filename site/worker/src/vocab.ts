@@ -14,7 +14,13 @@ export const PAY_ALIASES: Record<string, string> = {
   paypal: "pp", "gift-card": "gift", giftcard: "gift", "credit-card": "card", "debit-card": "card", "cash-app": "cashapp", ecash: "cashu", "stripe-link": "link", "link-by-stripe": "link",
 };
 /** /alternatives pay filter names (what each expands to). */
-export const ALT_PAY_FILTERS: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], "btc-onchain": ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"], ecash: ["cashu"] };
+const BTC_ALT_FILTERS: Record<string, string[]> = { lightning: ["ln", "lnurl", "bolt12"], btc: ["btc"], onchain: ["btc"], "btc-onchain": ["btc"], bitcoin: ["btc", "ln", "lnurl", "bolt12"], cashu: ["cashu"], ecash: ["cashu"] };
+/** Customer audit 2026-10-31 (Linkly): every pay code and friendly alias works too (card, link, stripe-link, paypal...), not only bitcoin. */
+export const ALT_PAY_FILTERS: Record<string, string[]> = {
+  ...Object.fromEntries((PAY_CODES as readonly string[]).map((c) => [c, [c]])),
+  ...Object.fromEntries(Object.entries(PAY_ALIASES).map(([a, c]) => [a, [c]])),
+  ...BTC_ALT_FILTERS,
+};
 /** What each first_blocker kind means (rendered in llms.txt and /vocab.json). */
 export const BLOCKER_DESCRIPTIONS: Record<string, string> = {
   none: "the probe reached the payment-method screen; nothing stopped it",
