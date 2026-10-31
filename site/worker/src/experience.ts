@@ -245,9 +245,11 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
 /** Unsigned event template for the agent to sign and publish itself. */
 export const TEMPLATE_PARAMS = ["domain", "depth", "attempt", "basis", "product", "product_url", "gtin", "steps", "steps_n", "blocker", "walls", "guest", "account_required", "pay_used", "pay_offered", "btc_route",
   "shown_before_payment", "tax_shown_before_payment", "shipping_shown_before_payment", "price", "shipping", "tax", "total", "currency", "region", "duration_s", "agent", "delivered", "delivery_days", "rating", "rating_max", "narrative", "lud16", ...PROOF_TAGS] as const;
-export const TEMPLATE_EXTRA = ["price_seen", "price_paid", "fee", "estimated", "shipping_source", "price_source", "strict"] as const;
+export const TEMPLATE_EXTRA = ["price_seen", "price_paid", "fee", "estimated", "shipping_source", "price_source", "strict", "preset"] as const;
 const REVIEW_ATTEMPT_OF: Record<string, string> = { browse: "browse", product: "browse", cart: "cart", checkout: "checkout", shipping: "checkout", payment: "checkout", paid: "paid", delivered: "paid" };
-export function experienceTemplate(a: Record<string, unknown>, aTag: string | null, nowS = Math.floor(Date.now() / 1000)): Res<Record<string, unknown>> {
+export function experienceTemplate(a0: Record<string, unknown>, aTag: string | null, nowS = Math.floor(Date.now() / 1000)): Res<Record<string, unknown>> {
+  const pre = checkoutPreset(a0); if (!pre.ok) return pre;
+  const a = pre.value;
   const s = (k: string) => (a[k] === undefined || a[k] === null || a[k] === "" ? undefined : String(a[k]));
   const list = (k: string) => (Array.isArray(a[k]) ? (a[k] as unknown[]).map(String) : s(k)?.split(",").map((x) => x.trim()).filter(Boolean) ?? []);
   const warnings: string[] = [];
@@ -283,6 +285,7 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   tags.push(["r", d], ["t", NOTE_HASHTAG], ["L", "klickymart.experience"], ["l", "shopping-experience", "klickymart.experience"]);
   const push = (...t: (string | undefined)[]) => { if (t.slice(1).every((x) => x !== undefined)) tags.push(t as string[]); };
   tags.push(["basis", basis ?? "unknown"]);
+  if (String(a0.preset ?? "").toLowerCase() === "checkout") tags.push(["preset", "checkout"]);
   // where the shipping figure and the price came from
   for (const [k, allowed] of [["shipping_source", ["policy", "checkout", "unknown"]], ["price_source", ["klickymart", "store"]]] as const) {
     const v = s(k)?.toLowerCase(); if (v === undefined) continue;
@@ -355,8 +358,39 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
 }
 
 /** Keys tied to the store owner's declaration: active claimants and zap_pubkey keys from their own 31420 (pay-binding). */
-async function ownerKeys(db: D1Database, d: string): Promise<Set<string>> {
+export async function ownerKeys(db: D1Database, d: string): Promise<Set<string>> {
   const out = new Set(await claimedKeys(db, d));
   try { for (const k of (await storeBindings(db, d)).zapKeys) out.add(k); } catch { /* */ }
   return out;
 }
+
+/** record_checkout (Matt 2026-10-31): preset=checkout on build_experience_note. One call at the payment screen, before paying.
+ * Forces basis=visit, depth=payment (or paid/delivered if given), shipping_source=checkout; requires ZIP3 (never a full ZIP),
+ * subtotal (price_seen or price), shipping and tax; checks total = subtotal + shipping + tax (+-$0.02). Returns args for the normal template. */
+export function checkoutPreset(a: Record<string, unknown>): Res<Record<string, unknown>> {
+  const p = a.preset === undefined || a.preset === null || a.preset === "" ? undefined : String(a.preset).toLowerCase();
+  if (p === undefined) return { ok: true, value: a };
+  if (p !== "checkout") return fail("bad_preset", 'preset must be "checkout"');
+  const b: Record<string, unknown> = { ...a }; delete b.preset;
+  const g = (k: string) => (b[k] === undefined || b[k] === null || b[k] === "" ? undefined : String(b[k]));
+  if (g("basis") && g("basis") !== "visit") return fail("bad_basis", "preset=checkout is for a checkout you are at yourself: basis must be visit");
+  b.basis = "visit";
+  const dep = g("depth") ?? "payment"; if (!CHECKOUT_PRESET_DEPTHS.includes(dep)) return fail("bad_depth", "preset=checkout: depth must be payment (default), paid or delivered");
+  b.depth = dep;
+  const reg = g("region");
+  if (!reg) return fail("missing_region", "preset=checkout needs region = the first 3 digits of the ship-to ZIP (e.g. 660). Never send the full ZIP");
+  if (!/^\d{3}$/.test(reg)) return fail("region_too_precise", /^\d{5}/.test(reg) ? "region must be ZIP3 (first 3 digits); a full ZIP is never accepted" : "preset=checkout: region must be a ZIP3 like 660");
+  if (g("price_seen") === undefined && g("price") !== undefined) { b.price_seen = b.price; delete b.price; }
+  for (const k of ["price_seen", "shipping", "tax"]) { const v = g(k); if (v === undefined || !Number.isFinite(Number(v)) || Number(v) < 0) return fail(`missing_${k === "price_seen" ? "subtotal" : k}`, `preset=checkout needs ${k === "price_seen" ? "price_seen (the subtotal)" : k} as a number read off the payment screen`); }
+  const tot = g("total");
+  if (tot !== undefined) {
+    if (!Number.isFinite(Number(tot))) return fail("bad_total", "total must be a number");
+    const sum = Number(g("price_seen")) + Number(g("shipping")) + Number(g("tax"));
+    if (Math.abs(sum - Number(tot)) > 0.02) return fail("arithmetic", `price_seen + shipping + tax = ${Math.round(sum * 100) / 100}, but total = ${tot} (allowed difference $0.02)`);
+  }
+  if (g("shipping_source") && g("shipping_source") !== "checkout") return fail("bad_shipping_source", "preset=checkout: shipping_source is checkout");
+  b.shipping_source = "checkout";
+  if (b.estimated !== undefined && !/^(false|no|0)$/i.test(String(b.estimated))) return fail("bad_estimated", "preset=checkout records figures shown by the store's checkout; do not mark them estimated");
+  return { ok: true, value: b };
+}
+const CHECKOUT_PRESET_DEPTHS = ["payment", "paid", "delivered"];
