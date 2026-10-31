@@ -1,4 +1,5 @@
 import { setCustodialZapperKeys } from "./tips";
+import { pendingKeyAllowance, loadKeyRecord } from "./pending-allowance";
 import { isSpecialUseHost } from "./special-names";
 import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
 import { WALLET_GUIDE } from "./wallet";
@@ -285,7 +286,7 @@ export function isQueueableHost(d: string): boolean {
 }
 const UNINDEXED_NOTE = "This store is not in KlickyMart's index yet. Your note is kept and shown on its pending page, but it does not count toward the chart until KlickyBot has checked the store (robots.txt first, then terms, then public pages only).";
 /** PQ-1 caps on new pending-crawl entries (counted per UTC day, only for accepted notes naming a new domain). */
-export const PENDING_LIMITS = { perKeyPerDay: 5, perIpPerDay: 10, globalPerDay: 200 } as const;
+export const PENDING_LIMITS = { perKeyPerDay: 5 /* PQ-4: base only; see pending-allowance.ts */, perIpPerDay: 10, globalPerDay: 200 } as const;
 type PendingInfo = { queued_at: string | null; status: "pending check" | "not queued"; reason?: string };
 async function pendingLookup(env: Env, d: string): Promise<PendingInfo> {
   let v: { queued_at: string } | null = null;
@@ -305,7 +306,7 @@ export async function enqueuePending(env: Env, d: string, pubkey: string | null,
   const day = new Date().toISOString().slice(0, 10);
   const keys = [`pq:g:${day}`, `pq:i:${day}:${await sha(`${env.SUBMIT_SALT ?? ""}|${ip ?? "unknown"}`)}`];
   const caps: number[] = [PENDING_LIMITS.globalPerDay, PENDING_LIMITS.perIpPerDay];
-  if (pubkey) { keys.push(`pq:k:${day}:${pubkey}`); caps.push(PENDING_LIMITS.perKeyPerDay); }
+  if (pubkey) { keys.push(`pq:k:${day}:${pubkey}`); caps.push(pendingKeyAllowance(await loadKeyRecord(env.DB, pubkey), Math.floor(Date.now() / 1000))); } // PQ-4
   const counts = await Promise.all(keys.map(async (k) => { try { return Number((await env.KV!.get(k)) ?? 0) || 0; } catch { return 0; } }));
   if (counts.some((n, i) => n >= caps[i])) return { queued_at: null, status: "not queued", reason: "pending-crawl queue daily cap reached" };
   const v = { queued_at: new Date().toISOString() };
