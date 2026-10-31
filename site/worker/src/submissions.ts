@@ -450,12 +450,19 @@ export async function queuedStatus(db: D1Database | undefined, domain: string): 
 }
 
 const BADGE: Record<Tier, string> = { flagged: "#6b7280", unverified: "#a16207", seen: "#1d4ed8", verified: "#15803d" };
+const PROTOCOL_ONLY_BADGE = "#6d28d9";
+export const PROTOCOL_ONLY_NOTE = "Protocol only: a payment endpoint answered correctly. This is not a legitimacy or fulfillment check.";
 const escH = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 /** Small tier badge for HTML pages (inline style; the CSP allows inline styles). */
 export function tierBadgeHtml(t: TrustInfo | undefined): string {
   if (!t) return "";
   const why = t.trust_why.map((w) => escH(w.detail)).join("; ");
-  return `<p class="km-trust-tier" data-trust-tier="${t.trust_tier}"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${BADGE[t.trust_tier]}" title="${why}">${escH(t.trust_label)}</span> <a href="/llms.txt#trust" style="font-size:12px">trust ladder</a>${t.submitted_by ? ` <small>submitted by ${escH(t.submitted_by === "anonymous" ? "an anonymous agent" : t.submitted_by.slice(0, 16) + "…")} on ${escH(t.submitted_at?.slice(0, 10) ?? "")}</small>` : ""}</p>`;
+  // K11-002: protocol-only 'verified' gets its own (non-green) style and its scope on the badge itself.
+  const protoOnly = t.trust_tier === "verified" && t.trust_proofs.length > 0 && t.trust_proofs.every((p) => p.startsWith("protocol endpoint"));
+  const bg = protoOnly ? PROTOCOL_ONLY_BADGE : BADGE[t.trust_tier];
+  const label = protoOnly ? `Verified: protocol endpoint only (${t.trust_proofs.map((p) => p.replace(/^protocol endpoint: /, "")).join("; ")})` : t.trust_label;
+  const title = protoOnly ? `${escH(PROTOCOL_ONLY_NOTE)} ${why}` : why;
+  return `<p class="km-trust-tier" data-trust-tier="${t.trust_tier}"${protoOnly ? ' data-trust-scope="protocol-only"' : ""}><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${bg}" title="${title}">${escH(label)}</span>${protoOnly ? ` <small class="km-muted">${escH(PROTOCOL_ONLY_NOTE)}</small>` : ""} <a href="/llms.txt#trust" style="font-size:12px">trust ladder</a>${t.submitted_by ? ` <small>submitted by ${escH(t.submitted_by === "anonymous" ? "an anonymous agent" : t.submitted_by.slice(0, 16) + "…")} on ${escH(t.submitted_at?.slice(0, 10) ?? "")}</small>` : ""}</p>`;
 }
 export const PAYMENT_PROOF_STATUSES = new Set<string>();
 export const PAYMENT_PROOF_NOTE = "No proof type currently earns the payment-proof tier: verified-preimage and verified-zap can both be produced by the store owner without anyone paying, so they count as plain notes. payment_proof is always false until an independent payment proof exists.";

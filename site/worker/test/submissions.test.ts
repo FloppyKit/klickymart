@@ -419,3 +419,16 @@ describe("K11-001: a store claim never overrides an abuse flag", () => {
     expect(badge).toContain('data-trust-tier="flagged"'); expect(badge).not.toContain("#15803d"); expect(badge).not.toMatch(/Verified/);
   });
 });
+
+describe("K11-002: protocol-only Verified badge shows its scope", () => {
+  it("UCP/402-only verified uses a non-green style and says it is not a legitimacy check; claims keep the green badge", async () => {
+    const { tierBadgeHtml } = await import("../src/submissions");
+    const u = await tier(uniq("ucp2"), { ucp: { present: true, endpoint: "https://x.myshopify.com/api/ucp/mcp", src: "https://x/.well-known/ucp" } });
+    const b = tierBadgeHtml(u);
+    expect(b).toContain('data-trust-scope="protocol-only"'); expect(b).toContain("Verified: protocol endpoint only (UCP)");
+    expect(b).toMatch(/not a legitimacy or fulfillment check/); expect(b).not.toContain("#15803d");
+    const d = uniq("dns2"); const sk = secp.utils.randomSecretKey(); const ev = sign1423([["r", d], ["claim", "dns"]], "", sk);
+    await handleDnsClaim(env.DB, { event: ev }, { lookup: async () => [`klickymart-claim=${hexToNpub(ev.pubkey)}`] });
+    const c = tierBadgeHtml(await tier(d)); expect(c).toContain("#15803d"); expect(c).not.toContain("protocol-only");
+  });
+});
