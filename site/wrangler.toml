@@ -80,7 +80,7 @@ crons = ["*/5 * * * *"]
 SITE_ORIGIN = "https://klickymart.com"
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).
 SITE_TIP_LUD16 = "zap@klickymart.com"
-LNURL_FORWARD_ZAP = "DrMattBrown@primal.net"
+LNURL_FORWARD_ZAP = "majorbadger18@primal.net"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
 RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"
