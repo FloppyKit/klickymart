@@ -102,7 +102,9 @@ describe("r3 note fixes", () => {
   });
   it("validates guest; same boolean on web and MCP", async () => {
     expect(T({ depth: "cart", guest: "1" })).toMatchObject({ ok: false, code: "bad_guest" });
-    expect(T({ depth: "cart", guest: "yes" })).toMatchObject({ ok: false, code: "bad_guest" }); // r5: only true|false|unknown, as documented
+    // early shopper F5: yes/no are accepted aliases (the docs example used guest=yes)
+    const y = T({ depth: "cart", guest: "yes" }); expect(y.ok && (y.value.fields as { guest: boolean }).guest).toBe(true);
+    const n = T({ depth: "cart", guest: "No" }); expect(n.ok && (n.value.fields as { guest: boolean }).guest).toBe(false);
     const r = T({ depth: "cart", guest: "true" }); expect(r.ok && (r.value.fields as { guest: boolean }).guest).toBe(true);
     expect(tagsOf(r)).toContainEqual(["guest", "true"]);
     const web = await SELF.fetch(`https://example.com/report/template?domain=${D}&depth=cart&guest=1`);

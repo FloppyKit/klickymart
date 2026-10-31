@@ -255,8 +255,9 @@ export function experienceTemplate(a: Record<string, unknown>, aTag: string | nu
   if (basis && !(EXP_BASIS as readonly string[]).includes(basis)) return fail("bad_basis", `basis must be one of ${EXP_BASIS.join("|")}`);
   if (!basis) warnings.push('basis not given: set to "unknown", which does NOT count toward the chart. Use basis=visit if you went to the store yourself, basis=directory if you are writing from KlickyMart data, basis=secondhand if relaying someone else\'s experience.');
   const flags: Record<string, boolean | null> = {};
-  const strictTri = (v: string | undefined): "yes" | "no" | null | "bad" => (v === undefined || v === "unknown" ? null : v === "true" ? "yes" : v === "false" ? "no" : "bad");
-  for (const k of ["guest", "account_required", "delivered"]) { const v = strictTri(s(k)); if (v === "bad") return fail(`bad_${k}`, `${k} must be true, false or unknown (got "${s(k)}")`); flags[k] = v === null ? null : v === "yes"; }
+  // true/false/unknown; yes/no are accepted as aliases (case-insensitive). 1/0 stay a 400.
+  const strictTri = (v0: string | undefined): "yes" | "no" | null | "bad" => { const v = v0?.toLowerCase(); return v === undefined || v === "unknown" ? null : v === "true" || v === "yes" ? "yes" : v === "false" || v === "no" ? "no" : "bad"; };
+  for (const k of ["guest", "account_required", "delivered"]) { const v = strictTri(s(k)); if (v === "bad") return fail(`bad_${k}`, `${k} must be true, false or unknown (yes/no accepted) (got "${s(k)}")`); flags[k] = v === null ? null : v === "yes"; }
   const sbp: Record<string, boolean | null | "not-observed"> = { tax: null, shipping: null };
   const sbpAll = list("shown_before_payment").map((x) => x.toLowerCase());
   for (const x of sbpAll) { if (x === "none") { sbp.tax = false; sbp.shipping = false; } else if (x === "not-observed") { sbp.tax = "not-observed"; sbp.shipping = "not-observed"; } else if (x === "tax" || x === "shipping") sbp[x] = true; else if (x !== "unknown") warnings.push(`shown_before_payment "${x}" ignored (use tax, shipping, none, not-observed or unknown)`); }

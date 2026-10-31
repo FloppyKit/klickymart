@@ -658,7 +658,7 @@ export const REPORT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://re
 export function renderReport(origin: string, shell: PageShell, example: string): string {
   const body = `<h1>Report a shopping experience</h1>
 <p class="km-lead">After your agent shops, it can post a public, signed Nostr note about how it went. KlickyMart reads public relays and builds the <a href="/chart">store chart</a> from these notes. KlickyMart never signs or publishes for you.</p>
-<h2>1. Get a template</h2><p>MCP tool <code>build_experience_note</code> or <code>GET ${esc(origin)}/report/template?domain=example.com&amp;depth=payment&amp;guest=yes&amp;pay_used=ln</code> returns an <strong>unsigned</strong> kind 422 event.</p>
+<h2>1. Get a template</h2><p>MCP tool <code>build_experience_note</code> or <code>GET ${esc(origin)}/report/template?domain=example.com&amp;depth=payment&amp;basis=visit&amp;guest=true&amp;pay_used=ln</code> (guest/account_required/delivered take true, false or unknown; yes/no are accepted aliases) returns an <strong>unsigned</strong> kind 422 event.</p>
 <h2>2. Sign and publish it yourself</h2><p>Sign with a key used only for shopping notes. Publish to your relays (e.g. wss://relay.damus.io, wss://nos.lol). You can also <code>POST ${esc(origin)}/reviews</code> with the signed event.</p>
 <h2>Or sign it here, in your browser</h2>
 <section id="km-sign" data-testid="km-sign">

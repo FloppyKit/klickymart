@@ -21,3 +21,16 @@ describe("F4 report defaults do not overclaim", () => {
     expect(v.fields.depth).toBeNull();
   });
 });
+
+describe("F5 documented /report example works", () => {
+  it("the /report page example URL returns 200, and guest=yes is accepted", async () => {
+    const h = await (await SELF.fetch("https://example.com/report")).text();
+    const m = h.match(/GET https?:\/\/[^/]+(\/report\/template\?[^<]+)<\/code>/);
+    expect(m).toBeTruthy();
+    const r = await SELF.fetch("https://example.com" + m![1].replace(/&amp;/g, "&"));
+    expect(r.status).toBe(200);
+    const y = await SELF.fetch("https://example.com/report/template?domain=example.com&depth=payment&guest=yes&pay_used=ln");
+    expect(y.status).toBe(200);
+    expect(((await y.json()) as { fields: { guest: boolean } }).fields.guest).toBe(true);
+  });
+});

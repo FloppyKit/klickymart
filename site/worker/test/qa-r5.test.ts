@@ -118,9 +118,11 @@ describe("r5 notes", () => {
     expect(t.value.fields.basis).toBe("unknown"); expect(t.value.fields.counts_toward_chart).toBe(false);
     expect(t.value.unsigned_event.tags).toContainEqual(["basis", "unknown"]);
   });
-  it("guest=yes is a 400 (only true|false|unknown)", () => {
+  it("guest=yes is an accepted alias for true; guest=maybe is a 400", () => {
     const t = experienceTemplate({ domain: "bitrefill.com", depth: "checkout", guest: "yes" }, A) as any;
-    expect(t.ok).toBe(false); expect(t.code).toBe("bad_guest");
+    expect(t.ok).toBe(true); expect(t.value.fields.guest).toBe(true);
+    const b = experienceTemplate({ domain: "bitrefill.com", depth: "checkout", guest: "maybe" }, A) as any;
+    expect(b.ok).toBe(false); expect(b.code).toBe("bad_guest");
   });
   it("not-observed, price seen vs paid, fee, estimated, none-observed pay list", () => {
     const t = experienceTemplate({ domain: "bitrefill.com", depth: "paid", basis: "visit", shown_before_payment: "not-observed", price_seen: "25", price_paid: "26.55", fee: "1.55", tax: "0", estimated: "tax", pay_offered: [] }, A) as any;
