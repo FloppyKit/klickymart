@@ -75,7 +75,7 @@ import {
 
 /** R12-005: production = ENVIRONMENT "production" or the klickymart.com origin. */
 /** Customer audit 2026-10-31 (Linkly/Scout): in a dry run, counts_toward_chart describes the note IF published; say so. */
-const DRY_RUN_NOTE = (counts: boolean) => ({ would_count_toward_chart: counts, dry_run_note: `dry run: nothing was stored. counts_toward_chart / would_count_toward_chart say whether this note WOULD count once really published (${counts ? "yes: basis=visit" : "no: only basis=visit notes count"}), subject to the 7-day key-age gate.` });
+const DRY_RUN_NOTE = (counts: boolean) => ({ would_count_toward_chart: counts, dry_run_note: `dry run: nothing was stored. counts_toward_chart / would_count_toward_chart say whether this note WOULD count once really published (${counts ? "yes: basis=visit" : "no: only basis=visit notes about indexed stores count"}), subject to the 7-day key-age gate.` });
 export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
 export const saltRequiredButMissing = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string; SUBMIT_SALT?: string }) => isProduction(env) && !env.SUBMIT_SALT;
 export interface Env {
@@ -260,10 +260,25 @@ function err400(param: string, message: string): Response {
   return Response.json({ error: { code: "bad_param", message, param } }, { status: 400 });
 }
 
+/** Public hostname with a real TLD; no IPs, localhost or internal names. */
+const UNINDEXED_OK = /^(?!localhost$)(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
+const UNINDEXED_NOTE = "This store is not in KlickyMart's index yet. Your note is kept and shown on its pending page, but it does not count toward the chart until KlickyBot has checked the store (robots.txt first, then terms, then public pages only).";
+async function queuePending(env: Env, d: string, dryRun: boolean): Promise<{ queued_at: string | null; status: "pending check" } > {
+  let v: { queued_at: string } | null = null;
+  try { v = env.KV ? await env.KV.get<{ queued_at: string }>(`pending:${d}`, "json") : null; } catch { /* KV optional */ }
+  if (!v && !dryRun) { v = { queued_at: new Date().toISOString() }; try { await env.KV?.put(`pending:${d}`, JSON.stringify(v)); } catch { /* */ } }
+  return { queued_at: v?.queued_at ?? null, status: "pending check" };
+}
+
 async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean): Promise<{ status: number; body: Record<string, unknown> }> {
   const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
   const p = parseReviewEvent(body, (d) => known.has(d));
-  const x = parseExperience(body, (d) => known.has(d));
+  // #4/#28: experience notes may name a store we have not indexed yet (e.g. one a live search surfaced). They are kept,
+  // marked store_indexed:false, and the domain joins the pending-crawl queue (robots.txt first when KlickyBot gets to it).
+  const x = parseExperience(body, (d) => known.has(d) || UNINDEXED_OK.test(d));
+  const unindexed = x.ok && !known.has(x.value.d);
+  const pendingInfo = unindexed && x.ok ? await queuePending(env, x.value.d, dryRun) : null;
+  const ux = unindexed ? { store_indexed: false, pending_crawl: pendingInfo, store_note: UNINDEXED_NOTE } : {};
   if (env.DB && (p.ok || x.ok)) {
     const ev0 = body as Ev;
     try {
@@ -275,7 +290,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...DRY_RUN_NOTE(x.value.basis === "visit"), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), stored: false, warnings: x.value.warnings } };
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit" && !unindexed, ...DRY_RUN_NOTE(x.value.basis === "visit" && !unindexed), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), ...ux, stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
@@ -284,7 +299,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
         return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
       if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
-      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
+      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit" && !unindexed, ...ux, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
     } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
   }
   if (!p.ok) return { status: 400, body: { ok: false, error: { code: p.code, message: p.message } } };
@@ -816,6 +831,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const qs = await queuedStatus(env.DB, String(res.body.domain ?? url.searchParams.get("domain") ?? ""));
       if (qs.queued) Object.assign(res.body, { queued: true, trust_tier: "unverified", trust_label: "Unverified · community-submitted", src: "community", submission: `${origin}/submit/${qs.submission}`, crawl_state: qs.state });
       else res.body.submit = { hint: "Not indexed. To suggest it, POST /submit {domain} (or MCP submit_store). Nothing is submitted unless you ask.", url: `${origin}/submit` };
+      try { const pd = String(res.body.domain ?? "").replace(/^www\./, ""); const pv = env.KV ? await env.KV.get<{ queued_at: string }>(`pending:${pd}`, "json") : null;
+        if (pv) Object.assign(res.body, { pending_crawl: { status: "pending check", queued_at: pv.queued_at, note: "Surfaced by a live search or an agent's note; KlickyBot will check robots.txt first, then terms, then public pages." }, community_notes: `${origin}/reviews?domain=${pd}` }); } catch { /* KV optional */ }
     }
     if (url.searchParams.get("format") === "html") {
       return new Response(renderCheckResult(origin, res.body, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });

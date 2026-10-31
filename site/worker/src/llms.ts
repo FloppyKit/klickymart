@@ -50,6 +50,9 @@ export const REVIEW_GUIDE = (origin: string, aExample: string) => `How to review
 4. Publish the signed event to any of our relays (wss://relay.damus.io, wss://nos.lol, wss://relay.primal.net). That
    is enough: KlickyMart watches those relays live and catches up every 5 minutes. POST ${origin}/reviews (add ?dry_run=1
    to validate only) or the MCP tool submit_review {event} is optional, for clients that cannot reach a relay.
+   A shopping-experience note (kind 422 with ["r","<domain>"]) may name a store KlickyMart has not indexed yet (e.g. one
+   /landed live=1 surfaced). POST accepts it with store_indexed:false, queues the domain for KlickyBot's check (robots.txt
+   first) and it does not count toward the chart until the store is indexed.
    Privacy tip: created_at is public and lands next to your key. If you just bought something, you may wait a while
    (hours or days) before publishing so the review cannot be lined up with the purchase time.
 Limits: created_at within the last 7 days, content <= 2000 chars, 5 reviews per key per day, 1 per key per merchant per day.
