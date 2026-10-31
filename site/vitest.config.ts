@@ -31,8 +31,8 @@ export default defineConfig(async () => {
             AUTH_SECRET: "test-only-auth-secret",
             SUBMIT_SALT: "test-only-submit-salt",
             // R12-201: tests never dial real relays. The INGESTER DO (woken by /stats/ingest.json and others) connects to
-            // RELAY_URLS; a closed local port fails instantly instead of hanging on the network.
-            RELAY_URLS: "ws://127.0.0.1:1",
+            // RELAY_URLS; "none" parses to an empty relay list, so it connects to nothing.
+            RELAY_URLS: "none",
           },
         },
       }),
