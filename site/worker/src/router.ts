@@ -97,6 +97,8 @@ export interface Env {
   RELAY_URLS?: string;
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
+  /** "1"/"true" enables the live WebSocket ingester DO; default off (cron catch-up only). */
+  LIVE_INGEST?: string;
   FACILITATOR_SK_HEX?: string;
   FACILITATE_ENABLED?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -864,10 +866,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (path === "/stats/ingest.json" && request.method === "GET") {
     const body = await ingestStats(env.DB, crawlerHex, relayList(env.RELAY_URLS)) as Record<string, unknown>;
-    if (env.INGESTER) {
+    if (!(env.LIVE_INGEST === "1" || env.LIVE_INGEST === "true")) body.live = { disabled: true };
+    else if (env.INGESTER) {
       try { body.live = await (await env.INGESTER.get(env.INGESTER.idFromName("main")).fetch("https://ingester/status")).json(); } catch { body.live = null; }
     }
-    body.note = "Live WebSocket subscriptions (Durable Object) plus a 5-minute since-based catch-up. Events are signature- and schema-checked; nothing about the sender's network is stored.";
+    body.note = "5-minute since-based relay catch-up (live WebSocket subscriptions only when LIVE_INGEST is on). Events are signature- and schema-checked; nothing about the sender's network is stored.";
     return Response.json(body, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "no-store" } });
   }
 

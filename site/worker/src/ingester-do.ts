@@ -19,6 +19,11 @@ export async function ingestCtx(env: Env): Promise<IngestCtx> {
 
 interface RelayLive { ws: SocketLike | null; state: "connecting" | "open" | "down"; attempts: number; nextTry: number; since: number; opened_at: number | null; events: number; last_error: string | null }
 
+/** Live WebSocket ingest is opt-in (LIVE_INGEST="1"/"true"); off by default so the DO is never kept awake. The 5-minute cron catch-up covers ingest. */
+export function liveIngestEnabled(env: { LIVE_INGEST?: string }): boolean {
+  return env.LIVE_INGEST === "1" || env.LIVE_INGEST === "true";
+}
+
 export class RelayIngester {
   private live = new Map<string, RelayLive>();
   private buffer: { ev: unknown; relay: string; bytes: number }[] = [];
@@ -28,13 +33,23 @@ export class RelayIngester {
   constructor(private state: DurableObjectState, private env: Env) {}
 
   async fetch(_req: Request): Promise<Response> {
+    if (!liveIngestEnabled(this.env as { LIVE_INGEST?: string })) { await this.shutdown(); return Response.json({ disabled: true }); }
     await this.ensure();
     if (!(await this.state.storage.getAlarm())) await this.state.storage.setAlarm(Date.now() + ALARM_MS);
     return Response.json(this.status());
   }
 
   async alarm(): Promise<void> {
+    if (!liveIngestEnabled(this.env as { LIVE_INGEST?: string })) { await this.shutdown(); return; }
     try { await this.ensure(); await this.flush(); } finally { await this.state.storage.setAlarm(Date.now() + ALARM_MS); }
+  }
+
+  /** LIVE_INGEST off: close sockets, drop the alarm, do not re-arm. */
+  private async shutdown(): Promise<void> {
+    for (const r of this.live.values()) { const ws = r.ws; r.ws = null; r.state = "down"; try { ws?.close(1000, "live ingest disabled"); } catch { /* */ } }
+    this.live.clear();
+    try { await this.flush(); } catch { /* catch-up recovers */ }
+    await this.state.storage.deleteAlarm();
   }
 
   status() {

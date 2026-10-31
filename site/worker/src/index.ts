@@ -1,6 +1,6 @@
 import { handleRequest, mcpErrorFor, type Env as RouterEnv } from "./router";
 import { catchUp, relayList } from "./relay-ingest";
-import { ingestCtx } from "./ingester-do";
+import { ingestCtx, liveIngestEnabled } from "./ingester-do";
 import { HTML_CSP } from "./render/layout";
 export { RelayIngester } from "./ingester-do";
 
@@ -44,7 +44,7 @@ export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const e = env as unknown as RouterEnv;
     ctx.waitUntil((async () => {
-      if (env.INGESTER) {
+      if (env.INGESTER && liveIngestEnabled(e)) {
         try { await env.INGESTER.get(env.INGESTER.idFromName("main")).fetch("https://ingester/ensure"); } catch { /* reported via ingest_state */ }
       }
       if (env.DB) await catchUp(env.DB, relayList(env.RELAY_URLS), await ingestCtx(e));
@@ -66,6 +66,7 @@ interface Env {
   USE_TEST_FIXTURES?: string;
   PREVIEW_DATA?: string;
   RELAY_URLS?: string;
+  LIVE_INGEST?: string;
   CRAWLER_PUBKEY_HEX?: string;
   INGESTER?: DurableObjectNamespace;
   FACILITATOR_SK_HEX?: string;
