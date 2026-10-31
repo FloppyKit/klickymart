@@ -270,24 +270,59 @@ function err400(param: string, message: string): Response {
 }
 
 /** Public hostname with a real TLD; no IPs, localhost or internal names. */
-const UNINDEXED_OK = /^(?!localhost$)(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
+const UNINDEXED_OK = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
+const JUNK_SUFFIXES = ["internal", "local", "localhost", "onion", "invalid", "test", "example", "lan", "home", "corp", "intranet", "arpa"];
+/** PQ-2: only public multi-label DNS names may be noted as unindexed stores or queued for a crawl. */
+export function isQueueableHost(d: string): boolean {
+  if (typeof d !== "string" || !UNINDEXED_OK.test(d)) return false;
+  const labels = d.split(".");
+  if (labels.length < 2) return false;
+  if (JUNK_SUFFIXES.includes(labels[labels.length - 1])) return false;
+  if (labels.every((l) => /^(?:0x[0-9a-f]+|[0-9]+)$/.test(l))) return false; // IPv4 literal forms
+  return true;
+}
 const UNINDEXED_NOTE = "This store is not in KlickyMart's index yet. Your note is kept and shown on its pending page, but it does not count toward the chart until KlickyBot has checked the store (robots.txt first, then terms, then public pages only).";
-async function queuePending(env: Env, d: string, dryRun: boolean): Promise<{ queued_at: string | null; status: "pending check" } > {
+/** PQ-1 caps on new pending-crawl entries (counted per UTC day, only for accepted notes naming a new domain). */
+export const PENDING_LIMITS = { perKeyPerDay: 5, perIpPerDay: 10, globalPerDay: 200 } as const;
+type PendingInfo = { queued_at: string | null; status: "pending check" | "not queued"; reason?: string };
+async function pendingLookup(env: Env, d: string): Promise<PendingInfo> {
   let v: { queued_at: string } | null = null;
   try { v = env.KV ? await env.KV.get<{ queued_at: string }>(`pending:${d}`, "json") : null; } catch { /* KV optional */ }
-  if (!v && !dryRun) { v = { queued_at: new Date().toISOString() }; try { await env.KV?.put(`pending:${d}`, JSON.stringify(v)); } catch { /* */ } }
   return { queued_at: v?.queued_at ?? null, status: "pending check" };
 }
+async function sha(s: string): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(h)].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** Called only after a note is accepted (201). Dedupes by domain; enforces PENDING_LIMITS; one KV write per new domain plus counters (TTL 2 days). */
+async function enqueuePending(env: Env, d: string, pubkey: string, ip: string | null): Promise<PendingInfo> {
+  if (!env.KV || !isQueueableHost(d)) return { queued_at: null, status: "not queued", reason: "not queueable" };
+  const existing = await pendingLookup(env, d);
+  if (existing.queued_at) return existing;
+  const day = new Date().toISOString().slice(0, 10);
+  const keys = [`pq:g:${day}`, `pq:k:${day}:${pubkey}`, `pq:i:${day}:${await sha(`${env.SUBMIT_SALT ?? ""}|${ip ?? "unknown"}`)}`];
+  const caps = [PENDING_LIMITS.globalPerDay, PENDING_LIMITS.perKeyPerDay, PENDING_LIMITS.perIpPerDay];
+  const counts = await Promise.all(keys.map(async (k) => { try { return Number((await env.KV!.get(k)) ?? 0) || 0; } catch { return 0; } }));
+  if (counts.some((n, i) => n >= caps[i])) return { queued_at: null, status: "not queued", reason: "pending-crawl queue daily cap reached" };
+  const v = { queued_at: new Date().toISOString() };
+  try {
+    await env.KV.put(`pending:${d}`, JSON.stringify(v));
+    await Promise.all(keys.map((k, i) => env.KV!.put(k, String(counts[i] + 1), { expirationTtl: 172800 })));
+  } catch { return { queued_at: null, status: "not queued", reason: "kv error" }; }
+  return { queued_at: v.queued_at, status: "pending check" };
+}
 
-async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean): Promise<{ status: number; body: Record<string, unknown> }> {
+async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean, ip: string | null = null): Promise<{ status: number; body: Record<string, unknown> }> {
   const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
   const p = parseReviewEvent(body, (d) => known.has(d));
   // #4/#28: experience notes may name a store we have not indexed yet (e.g. one a live search surfaced). They are kept,
   // marked store_indexed:false, and the domain joins the pending-crawl queue (robots.txt first when KlickyBot gets to it).
-  const x = parseExperience(body, (d) => known.has(d) || UNINDEXED_OK.test(d));
+  const x = parseExperience(body, (d) => known.has(d) || isQueueableHost(d));
   const unindexed = x.ok && !known.has(x.value.d);
-  const pendingInfo = unindexed && x.ok && env.PENDING_QUEUE_ENABLED === "true" ? await queuePending(env, x.value.d, dryRun) : null;
-  const ux = unindexed ? { store_indexed: false, pending_crawl: pendingInfo, store_note: UNINDEXED_NOTE } : {};
+  const queueOn = unindexed && x.ok && env.PENDING_QUEUE_ENABLED === "true";
+  // PQ-1: read-only here; the queue entry is written only on the accepted (201) path below.
+  const pendingInfo: PendingInfo | null = queueOn && x.ok ? await pendingLookup(env, x.value.d) : null;
+  const ux: Record<string, unknown> = unindexed ? { store_indexed: false, pending_crawl: pendingInfo, store_note: UNINDEXED_NOTE } : {};
   if (env.DB && (p.ok || x.ok)) {
     const ev0 = body as Ev;
     try {
@@ -308,6 +343,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
         return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
       if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
+      if (st === "stored" && queueOn) ux.pending_crawl = await enqueuePending(env, x.value.d, x.value.pubkey, ip);
       return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit" && !unindexed, ...ux, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
     } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
   }
@@ -433,7 +469,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     let ev: unknown;
     try { ev = JSON.parse(text); } catch { return Response.json({ ok: false, error: { code: "bad_json", message: "body must be JSON" } }, { status: 400 }); }
     const dry = url.searchParams.get("dry_run") === "1";
-    const r = await submitReview(env, snap, ev, dry);
+    const r = await submitReview(env, snap, ev, dry, request.headers.get("cf-connecting-ip"));
     return Response.json(r.body, { status: r.status, headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
@@ -1170,7 +1206,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (r.ok && zip && validZip(zip)) { const row = snap.rows.find((x) => x.d === r.body.domain); if (row) r.body.landed = landedFor(parseRaw(row.raw_json), zip); }
         return r;
       },
-      submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun),
+      submitReview: async (event, dryRun) => submitReview(env, snap, event, dryRun, request.headers.get("cf-connecting-ip")),
       submitStore: async (args: Record<string, unknown>) => handleSubmit({ ...args, submitter: args.agent_name ? { agent_name: args.agent_name } : (args.submitter as never) }, "mcp", args.dry_run === true),
       facilitate: !facilitationEnabled(env) ? undefined : async (args) => { const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]); return facilitate(env, args as FacilitateInput, (d) => known.has(d), request.headers.get("cf-connecting-ip") ?? "mcp"); },
       getReviews: async (domain) => ({ domain, a: aTagFor(domain.toLowerCase()), reviews: await getReviews(env.DB, domain.toLowerCase()), community: await getCommunity(env.DB, domain.toLowerCase(), crawlerHex, inStoreOnly(snap)) }),
