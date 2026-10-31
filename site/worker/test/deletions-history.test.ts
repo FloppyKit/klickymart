@@ -49,7 +49,7 @@ describe("NIP-09 deletions", () => {
     await ing([sign(a, 5, [["e", n.id], ["k", "422"]], "deleting")]);
     for (const t of ["nostr_events", "experiences", "reviews"]) expect(await count(t, n.id)).toBe(0);
     expect((await loadTips(env.DB, DOM)).byNote.size).toBe(0);
-    expect((await loadAggregates(env.DB, [DOM])).get(DOM)).toBeUndefined();
+    expect((await loadAggregates(env.DB, [DOM], Date.now(), { minKeyAgeS: 0 })).get(DOM)).toBeUndefined();
     const again = await ing([n]);
     expect(again.reasons["deleted by author (tombstone)"]).toBe(1);
     expect(await count("experiences", n.id)).toBe(0);
@@ -106,7 +106,7 @@ describe("facilitated 421s become history once the store claims", () => {
     await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind(ful.id, 421, FACILITATOR_PUBKEY, ful.created_at, DOM, JSON.stringify(facEv), 1, R).run();
     const rv = note(buyerSk, [["e", ful.id, R, "fulfillment"], ["preimage", pre]]);
     await ing([rv, note(other)]);
-    const before = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
+    const before = (await loadAggregates(env.DB, [DOM], Date.now(), { minKeyAgeS: 0 })).get(DOM)!;
     expect(((await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id) as any)?.proof_status).toBe("facilitated-unverified");
     expect(before.proof_keys).toBe(0);
     await env.DB.prepare("INSERT INTO claims (d,pubkey,nip05,checked_at) VALUES (?,?,?,?)").bind(DOM, pk(key()), "_", Math.floor(Date.now() / 1000)).run();
@@ -114,7 +114,7 @@ describe("facilitated 421s become history once the store claims", () => {
     const item = (await getReviews(env.DB, DOM)).items.find((x) => x.id === rv.id)!;
     expect((item as any).proof_status).toBe("facilitated-history");
     expect(item.verified).toMatch(/history only.*not store-confirmed/);
-    const after = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
+    const after = (await loadAggregates(env.DB, [DOM], Date.now(), { minKeyAgeS: 0 })).get(DOM)!;
     expect(after.proof_keys).toBe(0);
     const c = await getCommunity(env.DB, DOM, null);
     expect(c.verified_payments).toBe(0);

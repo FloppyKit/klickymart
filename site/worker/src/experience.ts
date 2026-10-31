@@ -1,3 +1,4 @@
+import { countsForRank, keyFirstSeen, MIN_RANK_KEY_AGE_S } from "./key-age";
 import { flagSummary, readFlagCache, type NoteFlag } from "./flags";
 import { loadTips, summarize, type Tip, type TipSummary } from "./tips";
 /** Structured shopping-experience notes on kind 422 (spec: NIP-DRAFT.md "422 as a shopping experience"), plus
@@ -157,7 +158,7 @@ export interface StoreAggregate {
   guest_yes_keys: number; guest_no_keys: number; account_required_keys: number;
   tax_before: { yes: number; no: number }; ship_before: { yes: number; no: number };
   observed: { shipping_usd: { median: number | null; n: number; keys: number; corroborated: boolean }; tax_rate_pct: { median: number | null; n: number; keys: number; corroborated: boolean } };
-  verified_purchase_share: number; proof_keys: number; tips: TipSummary; flags: ReturnType<typeof flagSummary>; directory_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
+  verified_purchase_share: number; proof_keys: number; tips: TipSummary; flags: ReturnType<typeof flagSummary>; directory_notes_excluded?: number; young_key_notes_excluded?: number; avg_rating_5: number | null; latest_at: number | null; notes_30d: number; rules: string;
 }
 const med = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : Math.round(((s[m - 1]! + s[m]!) / 2) * 100) / 100; };
 
@@ -202,13 +203,13 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
     tips: storeTips, flags: flagSummary(noteFlags),
     avg_rating_5: rated.length ? Math.round((rated.reduce((a, r) => a + r.rating5!, 0) / rated.length) * 10) / 10 : null,
     latest_at: sorted[0]?.created_at ?? null, notes_30d: rows.filter((r) => r.created_at >= nowS - 30 * 86400).length,
-    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Crawl data is never overwritten.`,
+    rules: `Distinct keys; each key's latest structured note counts once. ${MIN_KEYS}+ keys before a value is 'corroborated'. Proof tags (zap, preimage, cashu, order_hash) weigh 2, checked proofs 3; a key's weight is multiplied by 1 + min(0.5, 0.1 x distinct validated tippers) on its notes (self-zaps ignored). Unstructured kind-1 notes count toward 'notes' only. Keys count only once KlickyMart has seen them for 7+ days (ingest time, not created_at) or when the note carries a checked payment proof. Crawl data is never overwritten.`,
   };
 }
 
 const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
 const fromDb = (r: Record<string, any>): Row => ({ ...r, structured: r.structured === 1, pay_offered: JSON.parse(r.pay_offered || "[]"), walls: JSON.parse(r.walls || "[]") }) as Row;
-export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string> } = {}): Promise<Map<string, StoreAggregate>> {
+export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string>; minKeyAgeS?: number } = {}): Promise<Map<string, StoreAggregate>> {
   const out = new Map<string, StoreAggregate>();
   if (!db) return out;
   try {
@@ -219,7 +220,12 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
-    for (const [d, rows] of by) { const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); if (!visit.length) continue; const a = aggregate(d, visit, now, tips, flags); a.directory_notes_excluded = rows.length - visit.length; out.set(d, a); }
+    // KM-007: notes from keys younger than MIN_RANK_KEY_AGE_S by ingest time (and without a checked payment proof) don't count.
+    const seen = await keyFirstSeen(db); const nowS = Math.floor(now / 1000); const minAge = opts.minKeyAgeS ?? MIN_RANK_KEY_AGE_S;
+    for (const [d, rows] of by) {
+      const visit = rows.filter((r) => (r.basis ?? "visit") === "visit"); const aged = visit.filter((r) => countsForRank(r.pubkey, r.proof_status, seen, nowS, minAge));
+      if (!aged.length) continue; const a = aggregate(d, aged, now, tips, flags); a.directory_notes_excluded = rows.length - visit.length; a.young_key_notes_excluded = visit.length - aged.length; out.set(d, a);
+    }
   } catch { /* migration pending */ }
   return out;
 }

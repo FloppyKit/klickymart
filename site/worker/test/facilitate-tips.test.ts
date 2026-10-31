@@ -115,7 +115,7 @@ describe("tips on 422 notes (NIP-57)", () => {
     expect(s).toMatchObject({ tips: 8, sats: 8000, distinct_tippers: 7, validated_tippers: 7, self_zaps_ignored: 1, weight: 1.5 });
     expect(tipWeight(2)).toBeCloseTo(1.2);
     expect(curators(t).length).toBe(7);
-    const agg = (await loadAggregates(env.DB, [DOM])).get(DOM)!;
+    const agg = (await loadAggregates(env.DB, [DOM], Date.now(), { minKeyAgeS: 0 })).get(DOM)!;
     expect(agg.tips.sats).toBe(8000);
     expect(agg.success_score).toBe(0.6); // 1.5 / (1.5 + 1)
     const tj = await (await SELF.fetch(`https://example.com/tips.json?domain=${DOM}`)).json() as { per_review: { id: string; sats: number }[] };

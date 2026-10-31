@@ -1,3 +1,4 @@
+import { keyFirstSeen } from "./key-age";
 import { takeAll, utcDayOf } from "./ratelimit";
 /** Explainable anti-gaming scorer for agent notes (422 / kind-1 shopping experiences).
  * It FLAGS, never hides or deletes: flagged notes stay public with their reasons, and only their chart weight drops
@@ -18,7 +19,7 @@ export const FLAG_RULES = "Flags are explainable: each lists the public signals 
 export interface FNote { id: string; d: string; pubkey: string; created_at: number; content: string; depth: string | null; price: number | null; currency: string | null; duration_s: number | null; steps_n: number | null; blocker: string | null; shipping: number | null; tax: number | null; tags: string[][] }
 export interface Report { id: string; pubkey: string; created_at: number; target: string; reason: string }
 export interface FlagCtx {
-  firstSeen: Map<string, number>;          // pubkey -> earliest created_at of any event we hold from it
+  firstSeen: Map<string, number>;          // pubkey -> when KlickyMart first saw the key (ingest time)
   active: Set<string>;                     // pubkeys with any non-report, non-zap-request activity (notes, 42x, 31420, receipts signed)
   tips: Map<string, Tip[]>;                // note id -> tips
   reports: Report[];
@@ -160,10 +161,7 @@ type Row = Record<string, any>;
 export async function loadFlagContext(db: D1Database, notes: FNote[], st?: Partial<FlagStatic>): Promise<FlagCtx> {
   const ctx: FlagCtx = { firstSeen: new Map(), active: new Set(), tips: new Map(), reports: [], fulfillmentMsat: new Map(), inStoreOnly: st?.inStoreOnly, crawlPrices: st?.crawlPrices, nip05: await verifiedNip05(db) };
   try {
-    for (const q of ["SELECT pubkey, MIN(created_at) AS t FROM nostr_events GROUP BY pubkey", "SELECT pubkey, MIN(created_at) AS t FROM experiences GROUP BY pubkey"]) {
-      const { results } = await db.prepare(q).all<{ pubkey: string; t: number }>();
-      for (const r of results ?? []) ctx.firstSeen.set(r.pubkey, Math.min(ctx.firstSeen.get(r.pubkey) ?? Infinity, r.t));
-    }
+    ctx.firstSeen = await keyFirstSeen(db); // KM-007 / R6-004: ingest time, not author-set created_at
     const act = await db.prepare("SELECT DISTINCT pubkey FROM nostr_events WHERE kind != ? UNION SELECT DISTINCT pubkey FROM experiences").bind(REPORT_KIND).all<{ pubkey: string }>();
     for (const r of act.results ?? []) ctx.active.add(r.pubkey);
     ctx.tips = (await loadTips(db)).byNote;

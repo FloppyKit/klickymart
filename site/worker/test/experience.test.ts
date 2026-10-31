@@ -68,6 +68,8 @@ describe("routes", () => {
     expect((await post(sign(422, exp([["preimage", "c".repeat(64)]])))).status).toBe(201);
     expect((await post(sign(1, [["t", "klickymart"], ["r", D], ["basis", "visit"]], "smooth"))).status).toBe(201);
     expect((await post(sign(422, exp().filter((t) => t[0] !== "region").concat([["region", "66044"]])))).status).toBe(400);
+    expect((await loadAggregates(env.DB, [D])).get(D)).toBeUndefined(); // KM-007: keys seen < 7 days ago don't count yet
+    await env.DB.batch(["UPDATE experiences SET received_day = '2026-01-01'", "UPDATE nostr_events SET first_seen = 1", "UPDATE reviews SET received_day = '2026-01-01'"].map((q) => env.DB.prepare(q)));
     const aggs = await loadAggregates(env.DB, [D]);
     expect(aggs.get(D)?.keys).toBe(3);
     const ch = await (await SELF.fetch("https://example.com/chart.json?limit=500")).json<{ items: { d: string; score_source: string; values: Record<string, { source: string }> }[] }>();
