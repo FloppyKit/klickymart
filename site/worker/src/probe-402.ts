@@ -77,10 +77,10 @@ export const PROBE_402: Probe402[] = [
     "result": "not-probed",
     "http": null,
     "proto": null,
-    "endpoint": null,
+    "endpoint": "https://api.sms4sats.com/v2/l402",
     "challenge": null,
     "ts": null,
-    "why": "no endpoint in data"
+    "why": "gate: no ok terms verdict (tos=None)"
   },
   {
     "d": "lightningfaucet.com",
@@ -464,13 +464,13 @@ export const PROBE_402: Probe402[] = [
   },
   {
     "d": "agent402.tools",
-    "result": "not-probed",
-    "http": null,
-    "proto": null,
-    "endpoint": null,
-    "challenge": null,
-    "ts": null,
-    "why": "no endpoint in data"
+    "result": "verified-402",
+    "http": 402,
+    "proto": "x402",
+    "endpoint": "https://agent402.tools/api/answer",
+    "challenge": "PAYMENT-REQUIRED header",
+    "ts": 1793428173,
+    "why": null
   },
   {
     "d": "lightningenable.com",

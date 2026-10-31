@@ -59,3 +59,13 @@ describe("#5/#33 paid-API rail checks", () => {
     expect((anJson("satsdns.com") as any).bolt11_no_browser.verified).toBe(true);
   });
 });
+describe("#33 newer unsigned probe results", () => {
+  it("agent402.tools: x402 verified 402 is not a bolt11 rail", async () => {
+    const { ingestFromNdjsonText: ing } = await import("../src/ingest");
+    const main = await ing(REAL as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t" });
+    const an = await ing(AN as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t-an" });
+    clearAgentNative(); mergeAgentNative(main.rows, an.rows);
+    const rc = railCheck("agent402.tools");
+    if (rc) { expect(rc.listing_flag).toBeNull(); expect(rc.bolt11_no_browser.verified).toBe(false); expect(String(rc.bolt11_no_browser.reason)).toMatch(/x402|no Lightning/); }
+  });
+});

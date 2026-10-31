@@ -59,9 +59,9 @@
  {
   "d": "sms4sats.com",
   "cat": "l402",
-  "endpoint": null,
+  "endpoint": "https://api.sms4sats.com/v2/l402",
   "result": "not-probed",
-  "why": "no endpoint in data"
+  "why": "gate: no ok terms verdict (tos=None)"
  },
  {
   "d": "lightningfaucet.com",
@@ -407,9 +407,21 @@
  {
   "d": "agent402.tools",
   "cat": "x402",
-  "endpoint": null,
-  "result": "not-probed",
-  "why": "no endpoint in data"
+  "endpoint": "https://agent402.tools/api/answer",
+  "http": 402,
+  "challenge": "PAYMENT-REQUIRED header",
+  "proto": "x402",
+  "x402Version": 2,
+  "price_seen": {
+   "amount": "80000",
+   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "network": "eip155:8453",
+   "scheme": "exact",
+   "extra": "USD Coin",
+   "n_accepts": 16
+  },
+  "result": "verified-402",
+  "ts": 1793428173
  },
  {
   "d": "lightningenable.com",

@@ -25,9 +25,11 @@ const PROBE_BY_D = new Map(PROBE_402.map((x) => [x.d, x]));
 export function railCheck(d: string): { bolt11_no_browser: Record<string, unknown>; listing_flag: { code: string; message: string } | null } | null {
   const a = overlay.get(d); if (!a) return null;
   const pr = PROBE_BY_D.get(d);
-  const r = a.an_402?.result ?? (pr?.result as RailState | undefined) ?? null;
-  const proto = a.an_402?.proto ?? pr?.proto ?? null, ep = a.an_402?.endpoint ?? pr?.endpoint ?? null;
-  const http = a.an_402?.http ?? pr?.http ?? null, ts = a.an_402?.ts ?? pr?.ts ?? null;
+  // The signed record's an_402 and our later unsigned probe file (probe-402.ts): use whichever definitive result is newer.
+  const def = (x: { result?: string } | null | undefined) => !!x && ["verified-402", "no-402", "unreachable"].includes(String(x.result));
+  const usePr = !!pr && def(pr) && (!def(a.an_402) || (pr.ts ?? 0) > (a.an_402?.ts ?? 0));
+  const src = usePr ? { result: pr!.result as RailState, proto: pr!.proto, endpoint: pr!.endpoint, http: pr!.http, ts: pr!.ts } : a.an_402 ?? (pr ? { result: pr.result as RailState, proto: pr.proto, endpoint: pr.endpoint, http: pr.http, ts: pr.ts } : null);
+  const r = src?.result ?? null, proto = src?.proto ?? null, ep = src?.endpoint ?? pr?.endpoint ?? null, http = src?.http ?? null, ts = src?.ts ?? null;
   const verified = r === "verified-402" && http === 402 && proto === "l402";
   const claimsLn = a.an_cat === "l402" || a.an_rails.some((x) => /^(l402|lightning|ln|ln_invoice_no_browser|bolt11)$/.test(x));
   const bolt11_no_browser = verified
