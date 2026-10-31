@@ -295,13 +295,15 @@ async function sha(s: string): Promise<string> {
   return [...new Uint8Array(h)].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 /** Called only after a note is accepted (201). Dedupes by domain; enforces PENDING_LIMITS; one KV write per new domain plus counters (TTL 2 days). */
-async function enqueuePending(env: Env, d: string, pubkey: string, ip: string | null): Promise<PendingInfo> {
+export async function enqueuePending(env: Env, d: string, pubkey: string | null, ip: string | null): Promise<PendingInfo> {
+  if (env.PENDING_QUEUE_ENABLED !== "true") return { queued_at: null, status: "not queued", reason: "queue disabled" };
   if (!env.KV || !isQueueableHost(d)) return { queued_at: null, status: "not queued", reason: "not queueable" };
   const existing = await pendingLookup(env, d);
   if (existing.queued_at) return existing;
   const day = new Date().toISOString().slice(0, 10);
-  const keys = [`pq:g:${day}`, `pq:k:${day}:${pubkey}`, `pq:i:${day}:${await sha(`${env.SUBMIT_SALT ?? ""}|${ip ?? "unknown"}`)}`];
-  const caps = [PENDING_LIMITS.globalPerDay, PENDING_LIMITS.perKeyPerDay, PENDING_LIMITS.perIpPerDay];
+  const keys = [`pq:g:${day}`, `pq:i:${day}:${await sha(`${env.SUBMIT_SALT ?? ""}|${ip ?? "unknown"}`)}`];
+  const caps: number[] = [PENDING_LIMITS.globalPerDay, PENDING_LIMITS.perIpPerDay];
+  if (pubkey) { keys.push(`pq:k:${day}:${pubkey}`); caps.push(PENDING_LIMITS.perKeyPerDay); }
   const counts = await Promise.all(keys.map(async (k) => { try { return Number((await env.KV!.get(k)) ?? 0) || 0; } catch { return 0; } }));
   if (counts.some((n, i) => n >= caps[i])) return { queued_at: null, status: "not queued", reason: "pending-crawl queue daily cap reached" };
   const v = { queued_at: new Date().toISOString() };
@@ -631,10 +633,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const ds = [...new Set(items.filter((i) => i.store?.indexed === false && i.domain).map((i) => String(i.domain).replace(/^www\./, "")))];
     const st = new Map<string, { queued_at: string }>();
     for (const d of ds.slice(0, 30)) {
-      let v: { queued_at: string } | null = null;
-      try { v = env.KV ? await env.KV.get<{ queued_at: string }>(`pending:${d}`, "json") : null; } catch { /* KV optional */ }
-      if (!v) { v = { queued_at: new Date().toISOString() }; try { await env.KV?.put(`pending:${d}`, JSON.stringify(v)); } catch { /* */ } }
-      st.set(d, v);
+      // PQ-3: same flag, host filter and daily caps (per-IP + global) as the reviews path; read-only when the flag is off.
+      const info = env.PENDING_QUEUE_ENABLED === "true" ? await enqueuePending(env, d, null, request.headers.get("cf-connecting-ip")) : await pendingLookup(env, d);
+      if (info.queued_at) st.set(d, { queued_at: info.queued_at });
     }
     for (const i of items) {
       const d = String(i.domain ?? "").replace(/^www\./, ""); const v = st.get(d);
