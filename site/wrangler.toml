@@ -81,7 +81,7 @@ SITE_ORIGIN = "https://klickymart.com"
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).
 SITE_TIP_LUD16 = "zap@klickymart.com"
 LNURL_FORWARD_ZAP = "majorbadger18@primal.net"
-# SITE_ZAP_PUBKEY_HEX = "<KlickyMart's own public hex pubkey>"  # R9-001: unset = NIP-57 zap requests to zap@ are rejected (fail closed); plain LNURL pay still works.
+SITE_ZAP_PUBKEY_HEX = "8a9cdf5624acbed82094d5954137d7febc8f1c41f9cad1ce665bdf40236fd8e4"  # KlickyMart Nostr account npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqfz25ah (public). R9-001: zap requests to zap@ must p-tag this key; unset = zaps refused.
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
 RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"

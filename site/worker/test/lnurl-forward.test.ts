@@ -26,7 +26,7 @@ function upstream(o: { badHash?: boolean; badAmount?: boolean; nostr?: boolean }
   }) as never;
   return { f, calls };
 }
-const OWN = "f81611363554b64306467234d7396ec88455707633f54738f6c4683535098cd3"; // test-only stand-in for KlickyMart's zap pubkey
+const OWN = "8a9cdf5624acbed82094d5954137d7febc8f1c41f9cad1ce665bdf40236fd8e4"; // KlickyMart's Nostr account npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqfz25ah (SITE_ZAP_PUBKEY_HEX in production vars)
 const FOREIGN = "a".repeat(64);
 const E = { DB: env.DB, LNURL_FORWARD_ZAP: "DrMattBrown@primal.net", SITE_ZAP_PUBKEY_HEX: OWN };
 const call = (path: string, o: ReturnType<typeof upstream>, e: Record<string, unknown> = E, ip = "203.0.113.20") => handleLnurlForward(new URL(O + path).pathname, new URL(O + path), e as never, O, ip, "salt", { fetcher: o.f, doh: PUB });
@@ -109,6 +109,12 @@ describe("zap@klickymart.com LNURL forwarding", () => {
     const meta = await (await call("/.well-known/lnurlp/zap", upstream(), noKey))!.json() as Record<string, unknown>;
     expect(meta.allowsNostr).toBeUndefined(); // do not advertise zaps we would refuse
     expect(((await (await call("/.well-known/lnurlp/zap/callback?amount=5000", upstream(), noKey))!.json()) as { status: string }).status).toBe("OK"); // plain pay works
+  });
+  it("production SITE_ZAP_PUBKEY_HEX is KlickyMart's npub and accepts a zap p-tagging it", async () => {
+    const toml = (await import("../../wrangler.toml?raw")).default as string;
+    expect(toml).toMatch(new RegExp(`\\[env\\.production\\.vars\\][\\s\\S]*SITE_ZAP_PUBKEY_HEX = "${OWN}"`));
+    const ok = await call(`/.well-known/lnurlp/zap/callback?amount=21000&nostr=${encodeURIComponent(JSON.stringify(zapReq(21000, undefined, [["p", OWN]])))}`, upstream(), { ...E, SITE_ZAP_PUBKEY_HEX: OWN });
+    expect(((await ok!.json()) as { status: string }).status).toBe("OK");
   });
   it("R9-002: invalid input is refused before any rate-limit budget is taken", async () => {
     const u = upstream();

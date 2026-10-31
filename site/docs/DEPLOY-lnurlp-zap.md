@@ -6,6 +6,7 @@ Do not deploy until Klicky Audit signs off. Production values are public Lightni
 | var | production value | effect |
 |---|---|---|
 | `LNURL_FORWARD_ZAP` | `majorbadger18@primal.net` | `GET /.well-known/lnurlp/zap` re-serves `https://primal.net/.well-known/lnurlp/majorbadger18`; callback is proxied to Primal's callback. Unset = 404. |
+| `SITE_ZAP_PUBKEY_HEX` | `8a9cdf5624acbed82094d5954137d7febc8f1c41f9cad1ce665bdf40236fd8e4` | KlickyMart's own Nostr account, `npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqfz25ah` (public key). NIP-57 zap requests sent to zap@klickymart.com must have exactly one `p` tag equal to this key (R9-001); zaps for any other recipient get 403. Unset = all zap requests refused and `allowsNostr` not advertised; plain LNURL pay still works. |
 | `SITE_TIP_LUD16` | `zap@klickymart.com` | footer value-for-value slot (hidden when unset). |
 | `CASHU_MINTS` | unset (uses defaults in tip-rails.ts) | CSP allowlist of mints for in-browser nutzaps. |
 | `NWC_RELAYS` | unset (uses defaults) | CSP allowlist of NWC relays. |
