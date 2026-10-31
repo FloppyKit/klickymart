@@ -1,3 +1,4 @@
+import { PROBE_402 } from "./probe-402";
 /** Agent-native stores (2026-10-30): L402/x402 paid APIs, VPN, eSIM, VPS, gift cards, nostr-native, agent-commerce.
  * Source: data/events.agent-native.ndjson (signed kind 31420, built in nostr-market/crawler). For domains already in the
  * main index the signed main record is kept and only the agent-native fields are overlaid (never re-written into its content).
@@ -19,6 +20,26 @@ export const AN_ALT_CATEGORIES: Record<string, string[]> = {
 export const AN_CATS = ["l402", "x402", "vpn", "esim", "vps-hosting", "gift-cards", "nostr-native", "agent-commerce", "btcmap-online"];
 
 const overlay = new Map<string, AgentNative>();
+const PROBE_BY_D = new Map(PROBE_402.map((x) => [x.d, x]));
+/** #5/#33: what our own probe says about a listed paid-API rail, and whether a bolt11 invoice comes back without a browser. */
+export function railCheck(d: string): { bolt11_no_browser: Record<string, unknown>; listing_flag: { code: string; message: string } | null } | null {
+  const a = overlay.get(d); if (!a) return null;
+  const pr = PROBE_BY_D.get(d);
+  const r = a.an_402?.result ?? (pr?.result as RailState | undefined) ?? null;
+  const proto = a.an_402?.proto ?? pr?.proto ?? null, ep = a.an_402?.endpoint ?? pr?.endpoint ?? null;
+  const http = a.an_402?.http ?? pr?.http ?? null, ts = a.an_402?.ts ?? pr?.ts ?? null;
+  const verified = r === "verified-402" && http === 402 && proto === "l402";
+  const claimsLn = a.an_cat === "l402" || a.an_rails.some((x) => /^(l402|lightning|ln|ln_invoice_no_browser|bolt11)$/.test(x));
+  const bolt11_no_browser = verified
+    ? { verified: true, endpoint: ep, checked_at: ts ? new Date(ts * 1000).toISOString() : null, evidence: "one unauthenticated request returned HTTP 402 with WWW-Authenticate L402 and a bolt11 invoice (not paid)" }
+    : { verified: false, claimed: claimsLn, reason: !claimsLn ? "no Lightning rail listed" : r === "no-402" ? `listed endpoint answered HTTP ${http ?? "?"} without a 402 challenge` : !ep ? "no public endpoint known to probe" : r === "unreachable" ? "endpoint unreachable when probed" : r === "verified-402" ? `402 challenge is ${proto ?? "not L402"}, not a bolt11 invoice` : `not probed yet${pr?.why ? ` (${pr.why})` : ""}` };
+  let listing_flag: { code: string; message: string } | null = null;
+  if (a.an_cat === "l402" || a.an_cat === "x402") {
+    if (r === "no-402") listing_flag = { code: "no-real-402", message: `Listed as ${a.an_cat.toUpperCase()}, but its listed endpoint answered HTTP ${http ?? "?"} with no payment challenge when we checked. Don't rely on it as a paid API until it is rechecked.` };
+    else if (!ep && r !== "verified-402") listing_flag = { code: "no-endpoint", message: `Listed as ${a.an_cat.toUpperCase()}, but no public endpoint is known (none in the directory listing or on its own docs pages), so the rail is unchecked.` };
+  }
+  return { bolt11_no_browser, listing_flag };
+}
 export function clearAgentNative(): void { overlay.clear(); }
 export function anOf(d: string): AgentNative | null { return overlay.get(d) ?? null; }
 export function anCount(): number { return overlay.size; }
@@ -49,7 +70,9 @@ export function anCategories(d: string): string[] {
 /** JSON block for API responses. */
 export function anJson(d: string): Record<string, unknown> | null {
   const a = overlay.get(d); if (!a) return null;
+  const rc = railCheck(d);
   return { agent_native: true, category: a.an_cat, label: a.label, rails: a.an_rails, rails_status: a.an_rails_v, probe_402: a.an_402, agent_api: a.agent_api, source: a.an_src,
+    bolt11_no_browser: rc?.bolt11_no_browser ?? null, ...(rc?.listing_flag ? { listing_flag: rc.listing_flag } : {}),
     note: "rails_status: verified-402 = our one unauthenticated request got a real HTTP 402 with the expected challenge (price_seen is what it asked; we never paid); no-402 = it did not; claimed = listed by a directory, not checked by us." };
 }
 export function anBadgeHtml(d: string): string {

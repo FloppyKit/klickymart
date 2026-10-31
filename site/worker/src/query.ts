@@ -1,4 +1,4 @@
-import { AN_ALT_CATEGORIES, AN_CATS, anOf } from "./agent-native";
+import { AN_ALT_CATEGORIES, AN_CATS, anOf, railCheck } from "./agent-native";
 import { canonPay, PAY_ALIASES, PAY_GROUP_NAMES, Q_CATEGORIES } from "./vocab";
 import { queryTokens } from "./search-terms";
 import { CATEGORY_MAP } from "./category-map";
@@ -57,6 +57,7 @@ export interface QueryParams {
   agent_native?: number;
   an_cat?: string;
   rail_status?: string;
+  bolt11_no_browser?: 1;
   sort?: string[];
   limit?: number;
   cursor?: string;
@@ -74,7 +75,7 @@ const DEFAULT_SORT = ["-btc", "-ag", "d"];
 const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
-  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "sort", "limit", "cursor", "fields", "format",
+  "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "bolt11_no_browser", "sort", "limit", "cursor", "fields", "format",
 ]);
 
 export function validateQueryParams(searchParams: URLSearchParams): { ok: true; params: QueryParams } | { ok: false; param: string; message: string } {
@@ -279,6 +280,11 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
     if (rs !== "verified-402" && rs !== "claimed") return { ok: false, param: "rail_status", message: "rail_status must be verified-402 or claimed" };
     params.rail_status = rs;
   }
+  const bnb = searchParams.get("bolt11_no_browser");
+  if (bnb !== null) {
+    if (bnb !== "1") return { ok: false, param: "bolt11_no_browser", message: "bolt11_no_browser must be 1 (stores where our probe got a bolt11 invoice from a plain HTTP request, never paid)" };
+    params.bolt11_no_browser = 1;
+  }
 
   const sort = searchParams.get("sort");
   params.sort = sort ? sort.split(",").map((s) => s.trim()) : DEFAULT_SORT;
@@ -432,6 +438,7 @@ function matches(row: IndexRow, p: QueryParams): boolean {
     if (!any) return false;
   }
 
+  if (p.bolt11_no_browser && railCheck(row.d)?.bolt11_no_browser.verified !== true) return false;
   if (p.agent_native !== undefined || p.an_cat || p.rail_status) {
     const a = anOf(row.d);
     if (p.agent_native !== undefined && (a !== null) !== (p.agent_native === 1)) return false;

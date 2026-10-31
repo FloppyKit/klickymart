@@ -4,6 +4,13 @@ import { SELF } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { nostrEventId } from "../src/nostr-verify";
+import { beforeAll } from "vitest";
+import { ingestFromNdjsonText } from "../src/ingest";
+import { rowsToSnapshot, type Snapshot } from "../src/index-mem";
+import { anJson, clearAgentNative, mergeAgentNative, railCheck } from "../src/agent-native";
+import { querySnapshot, validateQueryParams } from "../src/query";
+import REAL from "../../../data/events.ndjson?raw";
+import AN from "../../../data/events.agent-native.ndjson?raw";
 
 function sign(tags: string[][], kind = 422, content = "reached payment") {
   const sk = secp.utils.randomSecretKey();
@@ -27,5 +34,28 @@ describe("#4/#28 notes about unindexed stores", () => {
       const b = await (await post(sign([["r", h], ["depth", "browse"]]))).json<any>();
       expect(b.ok, h).toBe(false);
     }
+  });
+});
+
+describe("#5/#33 paid-API rail checks", () => {
+  let snap: Snapshot;
+  beforeAll(async () => {
+    const main = await ingestFromNdjsonText(REAL as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t" });
+    const an = await ingestFromNdjsonText(AN as string, { allowSynthetic: false, verifyEvents: false, sourceLabel: "t-an" });
+    clearAgentNative(); mergeAgentNative(main.rows, an.rows);
+    snap = rowsToSnapshot([...main.rows.values()], main.report.version, main.report.source);
+  });
+  const q = (s: string) => { const v = validateQueryParams(new URLSearchParams(s)); if (!v.ok) throw new Error(v.message); return querySnapshot(snap, v.params); };
+  it("bolt11_no_browser=1 keeps only stores our probe saw issue an L402 bolt11 invoice", () => {
+    const ds = (q("bolt11_no_browser=1&limit=500") as any).items.map((x: any) => x.d);
+    expect(ds).toContain("satsdns.com");
+    for (const d of ds) expect(railCheck(d)!.bolt11_no_browser.verified).toBe(true);
+    expect(validateQueryParams(new URLSearchParams("bolt11_no_browser=yes")).ok).toBe(false);
+  });
+  it("flags a listed L402 with no real 402 and one with no endpoint", () => {
+    expect(railCheck("sats4ai.com")?.listing_flag?.code).toBe("no-real-402");
+    expect(railCheck("sats4ai.com")?.bolt11_no_browser.verified).toBe(false);
+    expect(railCheck("arknode.ai")?.listing_flag?.code).toBe("no-endpoint");
+    expect((anJson("satsdns.com") as any).bolt11_no_browser.verified).toBe(true);
   });
 });
