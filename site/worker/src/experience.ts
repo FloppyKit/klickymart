@@ -9,6 +9,7 @@ import { NOSTR_KIND_ACCEPTANCE, NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
 import { verifyNostrEvent } from "./nostr-verify";
 import { utcDay } from "./agent-visits";
 import { canonPay, isPayCode } from "./vocab";
+import { parseMoney, MAX_SHIPPING_USD, MAX_SUBTOTAL_USD } from "./checkout-quotes";
 
 /** Depth stages, aligned with the checkout-map stages (home/category -> browse, product, cart, checkout, shipform -> shipping, paypage -> payment). */
 export const EXP_DEPTHS = ["browse", "product", "cart", "checkout", "shipping", "payment", "paid", "delivered"] as const;
@@ -381,10 +382,12 @@ export function checkoutPreset(a: Record<string, unknown>): Res<Record<string, u
   if (!reg) return fail("missing_region", "preset=checkout needs region = the first 3 digits of the ship-to ZIP (e.g. 660). Never send the full ZIP");
   if (!/^\d{3}$/.test(reg)) return fail("region_too_precise", /^\d{5}/.test(reg) ? "region must be ZIP3 (first 3 digits); a full ZIP is never accepted" : "preset=checkout: region must be a ZIP3 like 660");
   if (g("price_seen") === undefined && g("price") !== undefined) { b.price_seen = b.price; delete b.price; }
-  for (const k of ["price_seen", "shipping", "tax"]) { const v = g(k); if (v === undefined || !Number.isFinite(Number(v)) || Number(v) < 0) return fail(`missing_${k === "price_seen" ? "subtotal" : k}`, `preset=checkout needs ${k === "price_seen" ? "price_seen (the subtotal)" : k} as a number read off the payment screen`); }
+  // CK-2: strict money (plain decimal, max 2 dp, caps); no exponents, hex, NaN, Infinity or negatives.
+  const cap = (k: string) => (k === "shipping" ? MAX_SHIPPING_USD : MAX_SUBTOTAL_USD);
+  for (const k of ["price_seen", "shipping", "tax"]) { const v = g(k); if (v === undefined || parseMoney(v, cap(k)) === null) return fail(`missing_${k === "price_seen" ? "subtotal" : k}`, `preset=checkout needs ${k === "price_seen" ? "price_seen (the subtotal)" : k} as a plain decimal (max 2 decimals${k === "shipping" ? `, at most $${MAX_SHIPPING_USD}` : ""}) read off the payment screen`); }
   const tot = g("total");
   if (tot !== undefined) {
-    if (!Number.isFinite(Number(tot))) return fail("bad_total", "total must be a number");
+    if (parseMoney(tot, 2 * MAX_SUBTOTAL_USD + MAX_SHIPPING_USD) === null) return fail("bad_total", "total must be a plain decimal (max 2 decimals)");
     const sum = Number(g("price_seen")) + Number(g("shipping")) + Number(g("tax"));
     if (Math.abs(sum - Number(tot)) > 0.02) return fail("arithmetic", `price_seen + shipping + tax = ${Math.round(sum * 100) / 100}, but total = ${tot} (allowed difference $0.02)`);
   }
