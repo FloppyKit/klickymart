@@ -89,3 +89,30 @@ def test_r8_2_non_ancestor_before_fails_closed(repo):
     assert r.returncode == 2, r.stdout
     r = run(d, "--event", "pull_request", "--ref", "refs/pull/1/merge", "--pr-base", old)
     assert r.returncode == 2, r.stdout
+
+def test_r9_1_merge_reordering_second_parent_rows_fails(repo):
+    d, g = repo
+    before = g("rev-parse", "HEAD")
+    g("checkout", "-qb", "side")
+    env = dict(os.environ, GIT_COMMITTER_DATE="2026-10-20T12:00:00", GIT_AUTHOR_DATE="2026-10-20T12:00:00")  # throwaway repo
+    with open(d / F, "a") as f: f.write('{"r":"s1"}\n')
+    subprocess.run(["git", "-C", str(d), "commit", "-qam", "s1"], check=True, env=env)
+    app(d, g, '{"r":"s2"}', "s2"); g("checkout", "-q", "main"); app(d, g, '{"r":"m"}', "m")
+    subprocess.run(["git", "-C", str(d), "merge", "-q", "--no-commit", "side"], capture_output=True)
+    (d / F).write_text('{"r":"base"}\n{"r":"m"}\n{"r":"s2"}\n{"r":"s1"}\n')   # swaps s1/s2: blame would re-date s1
+    g("add", F); g("commit", "-qm", "swap merge"); bad = g("rev-parse", "HEAD")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 1 and bad[:12] in r.stdout, r.stdout
+
+def test_r9_1_criss_cross_union_merges_pass(repo):
+    d, g = repo
+    before = g("rev-parse", "HEAD")
+    g("checkout", "-qb", "side"); app(d, g, '{"r":"s1"}', "s1"); app(d, g, '{"r":"s2"}', "s2")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"m1"}', "m1")
+    g("merge", "-q", "--no-edit", "side")                       # main <- side
+    g("checkout", "-q", "side"); g("merge", "-q", "--no-edit", "main~1")   # side <- old main (criss-cross)
+    app(d, g, '{"r":"s3"}', "s3")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"m2"}', "m2")
+    g("merge", "-q", "--no-edit", "side")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 0, r.stdout + r.stderr
