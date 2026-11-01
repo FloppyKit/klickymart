@@ -1,4 +1,5 @@
 import { setCustodialZapperKeys } from "./tips";
+import { openStoreRoute, signedResultsEnabled } from "./open-store";
 import { pendingKeyAllowance, loadKeyRecord } from "./pending-allowance";
 import { isSpecialUseHost } from "./special-names";
 import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
@@ -110,6 +111,12 @@ export interface Env {
   FACILITATE_ENABLED?: string;
   /** M1 kill switch: "0"/"false"/"off" stops the 420/421/422 marks validator from running at ingest. Default on. */
   KM_HANDSHAKE_MARKS?: string;
+  /** M2 kill switch: "0"/"false"/"off" stops endpoint-binding ingest (kind, filter, storage). Default on. Observation only. */
+  KM_ENDPOINT_BINDINGS?: string;
+  /** M2 kill switch: "0"/"false"/"off" removes /open-store/* (signed results). Default on; 503 without key or fresh head. */
+  KM_SIGNED_RESULTS?: string;
+  /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
+  KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
   SUBMIT_SALT?: string;
   /** "production" in [env.production.vars]; with it, a missing SUBMIT_SALT makes rate-limited endpoints refuse (503). */
@@ -926,6 +933,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (path === "/stats/agents.json" && request.method === "GET") {
     return Response.json(await agentStats(env.DB), { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=30" } });
   }
+
+  if (path.startsWith("/open-store/") && request.method === "GET" && signedResultsEnabled(env)) return openStoreRoute(path, url, env);
 
   if (path === "/q" && request.method === "GET") {
     const qsp = new URLSearchParams(url.searchParams); qsp.delete("min_trust");

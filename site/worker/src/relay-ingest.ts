@@ -2,6 +2,8 @@ import { markFacilitatedHistory, revokeFacilitated, FACILITATOR_PUBKEY } from ".
 import { refreshFlagCache } from "./flags";
 import { nip05Pass } from "./nip05";
 import { recordHandshakeMarks } from "./handshake-marks";
+import { recordBindings, BINDING_D, type BEv } from "./endpoint-binding";
+import { NOSTR_KIND_ENDPOINT_BINDING } from "./nostr-kinds";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -40,6 +42,8 @@ export interface IngestCtx {
   handshakeMarks?: boolean;
   /** Test hook: replaces checkThreads. */
   handshakeChecker?: typeof import("./handshake").checkThreads;
+  /** M2 KM_ENDPOINT_BINDINGS kill switch (default on). false = the binding kind is not subscribed, validated or stored. */
+  endpointBindings?: boolean;
 }
 
 export type Ev = Required<Pick<NostrEventLine, "id" | "pubkey" | "sig" | "kind" | "created_at" | "tags" | "content">>;
@@ -71,6 +75,8 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   f.push({ kinds: [NOSTR_KIND_ACCEPTANCE, KIND_NOTE], "#t": [NOTE_HASHTAG], since });
   // Community store suggestions (Path 3): signed kind 1423 with an r tag; queued for the gated crawl, never trusted for facts.
   f.push({ kinds: [NOSTR_KIND_STORE_SUGGESTION], since });
+  // M2 endpoint bindings (observation only; never ranking).
+  if (ctx.endpointBindings !== false) f.push({ kinds: [NOSTR_KIND_ENDPOINT_BINDING], "#d": [BINDING_D], since });
   return f;
 }
 
@@ -99,6 +105,10 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
+  if (ev.kind === NOSTR_KIND_ENDPOINT_BINDING && ctx.endpointBindings !== false) {
+    const v = verifyNostrEvent(ev, ev.kind);
+    return v.ok ? { ok: true, d: null } : { ok: false, reason: v.reason }; // content rules + future skew: endpoint-binding.ts
+  }
   if (![NOSTR_KIND_CRAWL_RECORD, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE, ZAP_RECEIPT_KIND, NUTZAP_KIND, NUTZAP_INFO_KIND, KIND_NOTE, DELETION_KIND, 1984, 0, NOSTR_KIND_STORE_SUGGESTION].includes(ev.kind)) return { ok: false, reason: "kind not followed" };
   if (ev.kind === KIND_NOTE) {
     const x = parseExperience(ev, (dd) => ctx.domains.has(dd), ctx.now ?? Date.now(), { maxAgeS: RELAY_NOTE_MAX_AGE_S });
@@ -211,6 +221,14 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     if (!v.ok) { reject(v.reason); continue; }
     valid.push({ ev: raw as Ev, relay, d: v.d });
     res.maxCreated = Math.max(res.maxCreated, (raw as Ev).created_at);
+  }
+  if (ctx.endpointBindings !== false && valid.some((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING)) {
+    const bevs = valid.filter((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING).map((x) => x.ev as BEv);
+    const c = await recordBindings(db, bevs, nowS);
+    res.accepted += (c.accepted ?? 0) + (c.conflict ?? 0) + (c.revoked ?? 0) + (c.stale ?? 0);
+    res.duplicate += c.duplicate ?? 0;
+    for (const [k, n] of Object.entries(c)) if (!["accepted", "conflict", "revoked", "stale", "duplicate"].includes(k)) { res.rejected += n; res.reasons[`binding ${k}`] = (res.reasons[`binding ${k}`] ?? 0) + n; }
+    for (let k = valid.length - 1; k >= 0; k--) if (valid[k]!.ev.kind === NOSTR_KIND_ENDPOINT_BINDING) valid.splice(k, 1);
   }
   const dels = valid.filter((x) => x.ev.kind === DELETION_KIND);
   if (dels.length) {

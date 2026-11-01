@@ -6,6 +6,7 @@ import { SELFTEST_DOMAIN } from "./experience";
 import { BUFFER_LIMITS, buildFilters, ingestEvents, parseFrame, relayList, saveState, workerConnect, type IngestCtx, type SocketLike } from "./relay-ingest";
 import { loadSnapshot, type Env } from "./router";
 import { handshakeMarksEnabled } from "./handshake-marks";
+import { bindingsEnabled } from "./endpoint-binding";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 
 const FLUSH_AT = 50;
@@ -14,7 +15,7 @@ export async function ingestCtx(env: Env): Promise<IngestCtx> {
   const snap = await loadSnapshot(env);
   const status = new Map(snap.rows.map((r) => [r.d, r.status]));
   return { domains: new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]), ourPubkey: crawlerPubkeyHexFromSnapshot(snap, env.CRAWLER_PUBKEY_HEX),
-    flagStatic: await buildFlagStatic(snap), indexStatus: (d: string) => status.get(d), handshakeMarks: handshakeMarksEnabled(env) };
+    flagStatic: await buildFlagStatic(snap), indexStatus: (d: string) => status.get(d), handshakeMarks: handshakeMarksEnabled(env), endpointBindings: bindingsEnabled(env) };
 }
 
 interface RelayLive { ws: SocketLike | null; state: "connecting" | "open" | "down"; attempts: number; nextTry: number; since: number; opened_at: number | null; events: number; last_error: string | null }

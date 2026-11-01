@@ -12,3 +12,7 @@ export const NOSTR_KIND_ACCEPTANCE = 422;
 
 /** Community "store suggestion" (Path 3). 1423 is unassigned in the NIP kind index (checked 2026-10-30); see NIP-DRAFT.md. */
 export const NOSTR_KIND_STORE_SUGGESTION = 1423;
+
+/** M2 endpoint binding (v9.2 §2): addressable, one per store key, fixed d tag. PROVISIONAL: v9.2 picks no number (not
+ * 30078); 31421 is a placeholder pending the kind-collision check and Satoshi/Matt sign-off. Change here only. */
+export const NOSTR_KIND_ENDPOINT_BINDING = 31421;

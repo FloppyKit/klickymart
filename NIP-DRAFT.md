@@ -541,6 +541,35 @@ Indexers SHOULD label, never hide. KlickyMart publishes `trust_tier`, `trust_why
 
 Submitter reputation = submissions whose store reached `seen` or `verified`, minus 2 x flagged submissions.
 
+## Endpoint binding (provisional kind 31421) and signed results (KlickyMart M2)
+
+**Status: draft, kind number provisional** (the design picks no number and rules out 30078; 31421 is a placeholder until
+the kind-collision check). Implemented in `site/worker/src/endpoint-binding.ts` and `site/worker/src/signed-result.ts`.
+
+- **Binding event.** Addressable, one per store key, `["d","klickymart-endpoints"]`. Content is canonical JSON (keys
+  sorted, no whitespace): `{"endpoints":{...},"expires_at":<unix>,"version":<int>}` with endpoints from `bolt12_offer`,
+  `node_id` (66 hex), `lud16`, `lnurl`, `cashu_mints` (https URLs), or `{"revoked":true,"version":<int>}`. Payment strings
+  are data: shape-checked, never fetched.
+- **Versioning.** A new state needs both `version` and `created_at` strictly higher, else `conflict`. `created_at` more than
+  skew S ahead is rejected. A version jump above a threshold is `conflict`. Same version with different content is
+  `conflict`, and the conflict carries both signed events. Revocation is terminal for the store key and beats any version,
+  `created_at` and S; recovery is a new store key with no inherited history.
+- **Status** (observed): `matches_observed_binding`, `url_only`, `mismatch`, `conflict`, `expired`, `revoked`, `none`,
+  `unknown`. Expired, revoked and `url_only` are never a match. The strongest claim is "matches the latest binding
+  KlickyMart saw". A signature gives accountability, not truth.
+- **Signed results.** `GET /open-store/head` and `GET /open-store/binding?pubkey=&nonce=` return payloads signed (BIP-340
+  over `sha256("klickymart-result-v1\n" + canonical JSON)`, heads with `klickymart-head-v1`) by the KlickyMart result key.
+  A result names its snapshot id and sequence, echoes the nonce, carries the binding hash and the raw signed events, and
+  types every field with a provenance; `payment_bound_to_order` and `settlement_mode_verified` are always `unknown`.
+  Nothing in a result is a score, rank or weight, and nothing that ranks reads bindings.
+- **Harness checks** (reference: `verifyResult`): pinned signer, nonce echo, head unexpired and sequence ≥ high-water,
+  result bound to the head, max age, TTL caps clamp signed expiries, harness-only fields `unknown`, raw events replayed
+  to confirm any `matches`/`url_only` claim. Acceptance ends at the earliest of result, head and binding expiry. When
+  cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
+- **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
+  by the daily snapshot step (M4).
+- **Kill switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` (`0`/`false`/`off`; default on).
+
 ## Numbering and kind checks (checked 2026-10-29)
 
 Checked against `https://raw.githubusercontent.com/nostr-protocol/nips/master/README.md` and open PRs (GitHub API, ~400 open PRs, titles; GitHub issue search for kind strings).
