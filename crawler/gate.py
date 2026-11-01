@@ -161,58 +161,74 @@ _installed = False
 def install():
     """Patch the fetch layers once per process. Idempotent."""
     global _installed
-    if _installed: return
-    _installed = True
-    orig_open = urllib.request.OpenerDirector.open
-    def gated_open(self, fullurl, *a, **k):
-        check(fullurl.full_url if isinstance(fullurl, urllib.request.Request) else fullurl)
-        return orig_open(self, fullurl, *a, **k)
-    urllib.request.OpenerDirector.open = gated_open
-    proxy = start_egress_proxy()  # R-C-001/002/003: every byte the crawler sends goes through the pinning proxy
+    with _lock:
+        if _installed: return
+        # d1: start the proxy first and mark installed only after every layer is patched, so a failure raises and the
+        # next install() retries (each patch is itself guarded against double-wrapping).
+        proxy = start_egress_proxy()  # R-C-001/002/003: every byte the crawler sends goes through the pinning proxy
+        if not getattr(urllib.request.OpenerDirector.open, "_km_gated", False):
+            orig_open = urllib.request.OpenerDirector.open
+            def gated_open(self, fullurl, *a, **k):
+                check(fullurl.full_url if isinstance(fullurl, urllib.request.Request) else fullurl)
+                return orig_open(self, fullurl, *a, **k)
+            gated_open._km_gated = True
+            urllib.request.OpenerDirector.open = gated_open
+        _install_playwright(proxy)
+        _installed = True
+
+def _install_playwright(proxy):
+    import importlib.util
     try:
         from playwright.sync_api._generated import Browser, BrowserContext, BrowserType, APIRequestContext
-        # Force the browser (and its contexts' APIRequestContext) through the proxy, loopback included.
-        def _proxied(k):
-            k = dict(k); k.setdefault("proxy", {"server": proxy})
-            k["args"] = list(k.get("args") or []) + ["--proxy-bypass-list=<-loopback>"]
-            return k
-        for name in ("launch", "launch_persistent_context"):
-            orig_l = getattr(BrowserType, name)
-            def wrap_l(self, *a, __orig=orig_l, **k): return __orig(self, *a, **_proxied(k))
-            setattr(BrowserType, name, wrap_l)
-        # R-C-001: ctx.request.* also runs the full gate (terms + egress) on the first URL; hops go via the proxy.
-        for name in ("get", "post", "head", "fetch", "put", "delete", "patch"):
-            orig_r = getattr(APIRequestContext, name, None)
-            if orig_r is None: continue
-            def wrap_r(self, url_or_request, *a, __orig=orig_r, **k):
-                check(url_or_request if isinstance(url_or_request, str) else getattr(url_or_request, "url", str(url_or_request)))
-                return __orig(self, url_or_request, *a, **k)
-            setattr(APIRequestContext, name, wrap_r)
-        def route_handler(route):
-            req = route.request
-            try:
-                if req.resource_type == "document" or req.is_navigation_request(): check(req.url)
-                else: egress_check(req.url)  # KIMI-007: subresources, XHR, websockets: public hosts only
-            except GateRefused: return route.abort("blockedbyclient")
-            return route.continue_()
-        def gate_ctx(ctx):
-            if not getattr(ctx, "_km_gated", False):
-                ctx.route("**/*", route_handler); ctx._km_gated = True
-            return ctx
-        for cls, name in ((Browser, "new_context"), (BrowserType, "launch_persistent_context")):
-            orig = getattr(cls, name)
-            def wrap(self, *a, __orig=orig, **k): return gate_ctx(__orig(self, *a, **k))
-            setattr(cls, name, wrap)
-        orig_np = Browser.new_page
-        def new_page(self, *a, **k):
-            p = orig_np(self, *a, **k); gate_ctx(p.context); return p
-        Browser.new_page = new_page
-        from playwright.sync_api._generated import Page
-        orig_goto = Page.goto
-        def goto(self, url, *a, **k):
-            check(url); r = orig_goto(self, url, *a, **k)
-            egress_check(self.url)  # KIMI-007: the final URL after redirects must be public too
-            return r
-        Page.goto = goto
     except ImportError:
-        pass
+        # d2: no playwright at all -> nothing to gate. Playwright present but its API failed to import -> refuse loudly
+        # rather than leave the browser ungated.
+        if importlib.util.find_spec("playwright") is None: return
+        raise
+    if getattr(BrowserType, "_km_gated", False): return
+    # Force the browser (and its contexts' APIRequestContext) through the proxy, loopback included.
+    def _proxied(k):
+        k = dict(k); k.setdefault("proxy", {"server": proxy})
+        k["args"] = list(k.get("args") or []) + ["--proxy-bypass-list=<-loopback>"]
+        return k
+    for name in ("launch", "launch_persistent_context"):
+        orig_l = getattr(BrowserType, name)
+        def wrap_l(self, *a, __orig=orig_l, **k): return __orig(self, *a, **_proxied(k))
+        setattr(BrowserType, name, wrap_l)
+    # R-C-001: ctx.request.* also runs the full gate (terms + egress) on the first URL; hops go via the proxy.
+    for name in ("get", "post", "head", "fetch", "put", "delete", "patch"):
+        orig_r = getattr(APIRequestContext, name, None)
+        if orig_r is None: continue
+        def wrap_r(self, url_or_request, *a, __orig=orig_r, **k):
+            check(url_or_request if isinstance(url_or_request, str) else getattr(url_or_request, "url", str(url_or_request)))
+            return __orig(self, url_or_request, *a, **k)
+        setattr(APIRequestContext, name, wrap_r)
+    def route_handler(route):
+        req = route.request
+        try:
+            if req.resource_type == "document" or req.is_navigation_request(): check(req.url)
+            else: egress_check(req.url)  # KIMI-007: subresources, XHR, websockets: public hosts only
+        except GateRefused: return route.abort("blockedbyclient")
+        return route.continue_()
+    def gate_ctx(ctx):
+        if not getattr(ctx, "_km_gated", False):
+            ctx.route("**/*", route_handler); ctx._km_gated = True
+        return ctx
+    for cls, name in ((Browser, "new_context"), (BrowserType, "launch_persistent_context")):
+        orig = getattr(cls, name)
+        def wrap(self, *a, __orig=orig, **k):
+            k.setdefault("service_workers", "block")   # d3: service workers would bypass ctx.route (robots/terms)
+            return gate_ctx(__orig(self, *a, **k))
+        setattr(cls, name, wrap)
+    orig_np = Browser.new_page
+    def new_page(self, *a, **k):
+        p = orig_np(self, *a, **k); gate_ctx(p.context); return p
+    Browser.new_page = new_page
+    from playwright.sync_api._generated import Page
+    orig_goto = Page.goto
+    def goto(self, url, *a, **k):
+        check(url); r = orig_goto(self, url, *a, **k)
+        egress_check(self.url)  # KIMI-007: the final URL after redirects must be public too
+        return r
+    Page.goto = goto
+    BrowserType._km_gated = True   # only after every playwright layer is patched
