@@ -147,28 +147,39 @@ class HandReviewByMerge(unittest.TestCase):
             self.assertEqual((over["btc"], over["btc_src"]), (g, "checkout-probe"))
             self.assertNotIn("btc_grade_conflict", over)
 
-class UndatedHandFailsOpen(unittest.TestCase):
+class UndatedHandFirstSeen(unittest.TestCase):
+    """Satoshi 2026-10-31: undated hand overrides are kept for 90 days from first-seen, flagged on a disagreeing probe."""
     PROBE0 = HandReviewBy.PROBE0
-    def undated(self, g):
-        return {"d": "x.example", "btc": g, "btc_src": "hand", "btc_grade_basis": "hand", "btc_grade_hand_evidence": "https://x.example/pay"}
-    def test_undated_disagreeing_probe_overwrites_and_keeps_old_hand(self):
-        from btc_grade import hand_protected
-        self.assertFalse(hand_protected(self.undated(2), today="2026-11-01"))
+    def undated(self, g, **kw):
+        r = {"d": "x.example", "btc": g, "btc_src": "hand", "btc_grade_basis": "hand", "btc_grade_hand_evidence": "https://x.example/pay"}
+        r.update(kw); return r
+    def test_first_seen_persisted_and_review_by(self):
+        out = apply(self.undated(2), today="2026-11-01")
+        self.assertEqual((out["btc_grade_hand_first_seen"], out["btc_grade_hand_review_by"]), ("2026-11-01", "2027-01-30"))
+        again = apply(out, today="2026-12-15")   # first-seen is not moved by later passes
+        self.assertEqual(again["btc_grade_hand_first_seen"], "2026-11-01")
+    def test_undated_disagreeing_probe_kept_conflict_and_flag(self):
         out = apply(self.undated(2), self.PROBE0, today="2026-11-01")
-        self.assertEqual((out["btc"], out["btc_src"], out["btc_grade_basis"]), (0, "agent-evidence", "claimed"))
+        self.assertEqual((out["btc"], out["btc_src"], out["btc_grade_basis"]), (2, "hand", "hand"))
         c = out["btc_grade_conflict"]
         self.assertEqual(c["hand"], {"grade": 2, "basis": "hand"})
         self.assertEqual((c["probe"]["grade"], c["probe"]["url"], c["seen_at"]), (0, "https://x.example/checkout", "2026-11-01"))
+        self.assertIs(out["btc_grade_needs_review"], True)
     def test_undated_agreeing_probe_no_conflict(self):
         out = apply(self.undated(0), self.PROBE0, today="2026-11-01")
-        self.assertEqual(out["btc"], 0); self.assertNotIn("btc_grade_conflict", out)
-    def test_undated_merge_fails_open(self):
+        self.assertEqual(out["btc"], 0); self.assertNotIn("btc_grade_conflict", out); self.assertNotIn("btc_grade_needs_review", out)
+    def test_undated_after_first_seen_review_normal_rules(self):
+        out = apply(self.undated(2, btc_grade_hand_first_seen="2026-08-01"), self.PROBE0, today="2026-11-01")
+        self.assertEqual((out["btc"], out["btc_src"]), (0, "agent-evidence")); self.assertNotIn("btc_grade_conflict", out)
+    def test_undated_merge_first_seen(self):
         from checkout_parse import merge
         p = HandReviewByMerge().probe(False)
         out = merge({"d": "x.example", "btc": 3, "btc_src": "hand"}, p, today="2026-11-01")
-        self.assertEqual((out["btc"], out["btc_src"]), (0, "checkout-probe"))
-        self.assertEqual(out["btc_grade_conflict"]["hand"], {"grade": 3, "basis": "hand"})
+        self.assertEqual((out["btc"], out["btc_src"], out["btc_grade_hand_first_seen"]), (3, "hand", "2026-11-01"))
+        self.assertEqual(out["btc_grade_conflict"]["probe"]["grade"], 0); self.assertIs(out["btc_grade_needs_review"], True)
         self.assertNotIn("btc_grade_conflict", merge({"d": "x.example", "btc": 0, "btc_src": "hand"}, p, today="2026-11-01"))
+        late = merge({"d": "x.example", "btc": 3, "btc_src": "hand", "btc_grade_hand_first_seen": "2026-01-01"}, p, today="2026-11-01")
+        self.assertEqual((late["btc"], late["btc_src"]), (0, "checkout-probe"))
 
 class ValidateHandOverride(unittest.TestCase):
     OK = {"btc": 0, "btc_src": "hand", "btc_grade_hand_at": "2026-10-30", "btc_grade_hand_evidence": "https://x.example/pay"}

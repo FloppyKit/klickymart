@@ -45,53 +45,90 @@ def grade_sort_key(grade, basis, hand_evidence=None):
 HAND_REVIEW_DAYS = 90       # a hand grade is protected until btc_grade_hand_review_by = hand_at + 90 days
 
 def _date(x):
-    if isinstance(x, datetime.datetime): return x.date()
-    if isinstance(x, datetime.date): return x
-    try: return datetime.date.fromisoformat(str(x)[:10])
-    except (TypeError, ValueError): return None
+    """UTC calendar date of x (date, datetime, or ISO string incl. offset/Z). Naive values are UTC. None if unreadable.
+    P2-6: the full string is parsed (no [:10] truncation), so an offset moves the date correctly."""
+    if x is None or x == "": return None
+    if isinstance(x, datetime.datetime): dt = x
+    elif isinstance(x, datetime.date): return x
+    else:
+        try: dt = datetime.datetime.fromisoformat(str(x).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError): return None
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc).date()
 
-def hand_review_by(r):
-    """ISO date hand_at + 90 days, or None when hand_at is missing/unparseable."""
+def _today(today=None):
+    """Injectable 'today'; defaults to the UTC date (not box-local)."""
+    return _date(today) or datetime.datetime.now(datetime.timezone.utc).date()
+
+def _hand_start(r, today=None):
+    """Start of the hand review window: hand_at clamped to today (a future hand_at never pins), else for an undated
+    override the first-seen date (btc_grade_hand_first_seen, else today)."""
+    t = _today(today)
+    seen = min(_date(r.get("btc_grade_hand_first_seen")) or t, t)
     at = _date(r.get("btc_grade_hand_at"))
-    return (at + datetime.timedelta(days=HAND_REVIEW_DAYS)).isoformat() if at else None
+    return min(at, seen) if at is not None else seen   # future hand_at clamps to first-seen (persisted), never re-clamps
+
+def hand_review_by(r, today=None):
+    """ISO date: (hand_at, clamped to today; or first-seen for undated overrides) + 90 days."""
+    return (_hand_start(r, today) + datetime.timedelta(days=HAND_REVIEW_DAYS)).isoformat()
 
 # Rule: protection is earned by a date and evidence, and a missing date never buys a permanent lock.
-# An undated hand override (no readable btc_grade_hand_at) FAILS OPEN: it counts as already past review_by.
+# Satoshi 2026-10-31: an undated hand override is KEPT but only for 90 days from when this code first saw it
+# (btc_grade_hand_first_seen); a disagreeing probe in that window flags btc_grade_needs_review. New undated overrides are
+# still refused at write time (validate_hand_override).
 def hand_protected(r, today=None):
-    """True while a hand grade may not be overwritten: before review_by. Undated hand grades are never protected."""
+    """True while a hand grade may not be overwritten: before review_by."""
     if r.get("btc_src") != "hand": return False
-    rb = hand_review_by(r)
-    if rb is None: return False
-    return _date(today or datetime.date.today()) < _date(rb)
+    return _today(today) < _date(hand_review_by(r, today))
+
+def mark_first_seen(out, today=None):
+    """Persist btc_grade_hand_first_seen (once) for an undated or future-dated hand override, so the clamp cannot
+    move forward on later passes. Returns True when undated."""
+    at = _date(out.get("btc_grade_hand_at"))
+    if at is not None and at <= _today(today): return False
+    if not _date(out.get("btc_grade_hand_first_seen")): out["btc_grade_hand_first_seen"] = _today(today).isoformat()
+    return at is None
+
+def _redact_url(u):
+    """P2-7: conflict urls are site-controlled; store them with userinfo/query stripped (egress.redact, the shared helper)."""
+    if not u: return u
+    try:
+        import egress; return egress.redact(u)
+    except Exception: return str(u).split("?", 1)[0].split("#", 1)[0]
 
 def _evidence_urls(ev):
     evs = ev if isinstance(ev, (list, tuple)) else [ev]
     return [e for e in evs if isinstance(e, str) and re.match(r"https?://\S+$", e)]
 
-def validate_hand_override(r):
+def validate_hand_override(r, today=None):
     """Write-time check for a new hand override: needs a readable btc_grade_hand_at and evidence URL(s). Raises ValueError."""
-    if _date(r.get("btc_grade_hand_at")) is None: raise ValueError("hand override needs a readable btc_grade_hand_at")
+    at = _date(r.get("btc_grade_hand_at"))
+    if at is None: raise ValueError("hand override needs a readable btc_grade_hand_at")
+    if at > _today(today): raise ValueError("hand override btc_grade_hand_at is in the future")   # P2-b
     ev = r.get("btc_grade_hand_evidence")
     if not ev or not _evidence_urls(ev) or len(_evidence_urls(ev)) != len(ev if isinstance(ev, (list, tuple)) else [ev]):
         raise ValueError("hand override needs evidence URL(s) in btc_grade_hand_evidence")
 
-def write_hand_override(r, log=print, **fields):
+def write_hand_override(r, log=print, today=None, **fields):
     """Apply a hand override to record r only if it validates; otherwise skip it with a logged reason (never raises).
     Returns True when written."""
     cand = dict(r); cand.update(fields, btc_src="hand", btc_grade_basis=BASIS_HAND)
-    try: validate_hand_override(cand)
+    try: validate_hand_override(cand, today)
     except ValueError as e:
         log(f"{r.get('d') or '?'}: hand override skipped: {e}"); return False
-    cand["btc_grade_hand_review_by"] = hand_review_by(cand)
+    cand["btc_grade_hand_review_by"] = hand_review_by(cand, today)
     r.update(cand); return True
 
-def note_conflict(out, probe_grade, probe_basis, probe_url, today=None):
-    """Keep the hand grade; record a disagreeing probe instead of dropping it. Agreement (or an inconclusive probe) clears it."""
-    if probe_grade is None or probe_grade == out.get("btc"):
+def note_conflict(out, probe_grade, probe_basis, probe_url, today=None, undated=False):
+    """Keep the hand grade; record a disagreeing concrete probe instead of dropping it (url redacted). Agreement clears it;
+    an inconclusive (None) probe leaves any existing record alone. Undated overrides also get btc_grade_needs_review."""
+    if probe_grade is None: return out
+    if probe_grade == out.get("btc"):
         out.pop("btc_grade_conflict", None); return out
     out["btc_grade_conflict"] = {"hand": {"grade": out.get("btc"), "basis": BASIS_HAND},
-                                 "probe": {"grade": probe_grade, "basis": probe_basis, "url": probe_url},
-                                 "seen_at": _date(today or datetime.date.today()).isoformat()}
+                                 "probe": {"grade": probe_grade, "basis": probe_basis, "url": _redact_url(probe_url)},
+                                 "seen_at": _today(today).isoformat()}
+    if undated: out["btc_grade_needs_review"] = True
     return out
 
 def grade_record(r, probe=None):
@@ -142,27 +179,20 @@ def _grade_text(r, probe=None):
     return None, {"quote": quote, "url": url, "range": "1-4", "reason": "bitcoin accepted; processor/custody and account requirement not evidenced"}
 
 def apply(r, probe=None, today=None):
-    """today (date or ISO str) is injectable for tests; defaults to date.today()."""
+    """today (date or ISO str) is injectable for tests; defaults to the UTC date."""
     out = dict(r)
     if r.get("btc_src") == "hand":
-        out["btc_grade_hand_review_by"] = hand_review_by(r)
-        if hand_protected(r, today):
+        undated = mark_first_seen(out, today)
+        out["btc_grade_hand_review_by"] = hand_review_by(out, today)
+        pg, pinfo = grade_record({k: v for k, v in r.items() if k != "btc_src"}, probe)
+        if hand_protected(out, today):
             out["btc_grade_basis"] = BASIS_HAND   # a hand grade is never 'observed', whatever the probe saw
             for k in ("btc_grade_hand_by", "btc_grade_hand_at", "btc_grade_hand_evidence"): out.setdefault(k, None)
-            pg, pinfo = grade_record({k: v for k, v in r.items() if k != "btc_src"}, probe)
-            return note_conflict(out, pg, pinfo.get("basis"), pinfo.get("url"), today)
-        undated = out["btc_grade_hand_review_by"] is None
-        old_hand = r.get("btc")
-        r = {k: v for k, v in r.items() if k != "btc_src"}   # review_by reached (or undated: fail open): grade normally
-        out.pop("btc_grade_conflict", None)
-        if undated:   # keep the old hand value next to the new one when the overwrite changes it
-            g, info = grade_record(r, probe)
-            res = _apply_graded(out, g, info)
-            if g != old_hand:
-                res["btc_grade_conflict"] = {"hand": {"grade": old_hand, "basis": BASIS_HAND},
-                                             "probe": {"grade": g, "basis": info.get("basis"), "url": info.get("url")},
-                                             "seen_at": _date(today or datetime.date.today()).isoformat()}
-            return res
+            return note_conflict(out, pg, pinfo.get("basis"), pinfo.get("url"), today, undated)
+        # review_by reached: normal rules, but an inconclusive (None) result never erases a hand grade (P2-a)
+        if pg is None: out["btc_grade_basis"] = BASIS_HAND; return out
+        out.pop("btc_grade_conflict", None); out.pop("btc_grade_needs_review", None)
+        return _apply_graded(out, pg, pinfo)
     g, info = grade_record(r, probe)
     return _apply_graded(out, g, info)
 

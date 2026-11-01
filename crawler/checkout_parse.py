@@ -103,15 +103,15 @@ def merge(record, probe, today=None):
     if not probe or probe.get("d") != r.get("d"): return r
     g = grade(probe)
     if probe.get("btc_offered") == "yes": r["btc_any"] = True
-    if r.get("btc_src") == "hand": r["btc_grade_hand_review_by"] = btc_grade.hand_review_by(r)
+    if r.get("btc_src") == "hand":
+        undated = btc_grade.mark_first_seen(r, today)
+        r["btc_grade_hand_review_by"] = btc_grade.hand_review_by(r, today)
     if r.get("btc_src") == "hand" and r.get("btc") is not None and btc_grade.hand_protected(r, today):
         url = (probe.get("path") or [[None, None]])[-1][-1]
-        btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today)
-    elif g is not None:
+        btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today, undated)
+    elif g is not None:   # only a concrete grade overwrites; None never erases a hand grade
         if r.get("btc_src") == "hand":
-            r.pop("btc_grade_conflict", None); r.pop("btc_grade_basis", None)
-            if r.get("btc_grade_hand_review_by") is None and r.get("btc") is not None and g != r.get("btc"):   # undated: fail open, keep old
-                btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), (probe.get("path") or [[None, None]])[-1][-1], today)
+            for k in ("btc_grade_conflict", "btc_grade_basis", "btc_grade_needs_review"): r.pop(k, None)
         r["btc"] = g; r["btc_src"] = "checkout-probe"
     priv = sorted(set(r.get("btc_priv") or []) | ({"noacct", "selfhosted", "ecash", "sp", "ark"} & set(probe.get("privacy") or [])
                   if probe.get("btc_offered") == "yes" else set()))
