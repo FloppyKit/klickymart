@@ -15,6 +15,7 @@
     "lint:openapi": "redocly lint openapi/openapi.json 2>/dev/null || node scripts/openapi-check.js",
     "predev": "node scripts/gen-submit-data.js && node scripts/embed-fixtures.js && node scripts/copy-vendor.js",
     "gen-submit-data": "node scripts/gen-submit-data.js",
+    "check:fixtures": "node scripts/embed-fixtures.js --check",
     "pretest": "node scripts/gen-submit-data.js"
   },
   "devDependencies": {

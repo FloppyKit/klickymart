@@ -1,4 +1,17 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync as fsWrite, existsSync } from "node:fs";
+// --check: write nothing; exit 1 if a generated file differs from what this script would write (drift guard).
+const CHECK = process.argv.includes("--check");
+const drift = [];
+function writeFileSync(path, data) {
+  if (!CHECK) return fsWrite(path, data);
+  const cur = existsSync(path) ? readFileSync(path, "utf8") : null;
+  if (cur !== data) drift.push(path);
+}
+process.on("exit", (code) => {
+  if (!CHECK || code !== 0) return;
+  if (drift.length) { console.error(`fixture drift: ${drift.join(", ")} (run: node site/scripts/embed-fixtures.js)`); process.exitCode = 1; }
+  else console.log("fixtures: no drift");
+});
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
