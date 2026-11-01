@@ -1,3 +1,4 @@
+import { keyRankStatus, MIN_RANK_KEY_AGE_S } from "./key-age";
 import { setCustodialZapperKeys } from "./tips";
 import { openStoreRoute, signedResultsEnabled } from "./open-store";
 import { pendingKeyAllowance, loadKeyRecord } from "./pending-allowance";
@@ -326,6 +327,15 @@ export async function enqueuePending(env: Env, d: string, pubkey: string | null,
   return { queued_at: v.queued_at, status: "pending check" };
 }
 
+/** Truthful chart status (KM-007 / K10-001): a basis=visit note about an indexed store still counts only once its key
+ * clears the key-age gate that loadAggregates() applies. counts_after says when. */
+async function keyAgeBody(db: D1Database | undefined, pubkey: string, eligible: boolean): Promise<{ counts_toward_chart: boolean; counts_after?: string; key_age_note?: string }> {
+  if (!eligible) return { counts_toward_chart: false };
+  const k = await keyRankStatus(db, pubkey.toLowerCase(), Math.floor(Date.now() / 1000));
+  if (k.key_counts_now) return { counts_toward_chart: true };
+  return { counts_toward_chart: false, counts_after: k.counts_after, key_age_note: `notes from keys KlickyMart first saw less than ${MIN_RANK_KEY_AGE_S / 86400} days ago are kept and shown but do not count toward the chart until counts_after` };
+}
+
 async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boolean, ip: string | null = null): Promise<{ status: number; body: Record<string, unknown> }> {
   const known = new Set([...snap.rows.map((r) => r.d), SELFTEST_DOMAIN]);
   const p = parseReviewEvent(body, (d) => known.has(d));
@@ -348,7 +358,8 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit" && !unindexed, ...DRY_RUN_NOTE(x.value.basis === "visit" && !unindexed), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), ...ux, stored: false, warnings: x.value.warnings } };
+    const ka = await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit" && !unindexed);
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, ...ka, ...DRY_RUN_NOTE(ka.counts_toward_chart), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), ...ux, stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
@@ -358,7 +369,7 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
       const st = await storeExperience(env.DB, x.value, body, { source: "post" });
       if (st === "stored") await refreshFlagCache(env.DB, await buildFlagStatic(snap));
       if (st === "stored" && queueOn) ux.pending_crawl = await enqueuePending(env, x.value.d, x.value.pubkey, ip);
-      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit" && !unindexed, ...ux, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
+      return { status: st === "stored" ? 201 : 200, body: { ok: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, ...ka, ...ux, stored: st === "stored", duplicate: st === "duplicate", chart_url: "/chart", warnings: x.value.warnings } };
     } catch { return { status: 503, body: { ok: false, error: { code: "storage_error", message: "experience storage not ready" } } }; }
   }
   if (!p.ok) return { status: 400, body: { ok: false, error: { code: p.code, message: p.message } } };
@@ -366,8 +377,8 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   try {
     const rl = await rateLimitCheck(env.DB, p.value);
     if (rl) return { status: 429, body: { ok: false, error: rl } };
-    const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, counts_toward_chart: x.value.basis === "visit", ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb, ...(x.ok ? DRY_RUN_NOTE(x.value.basis === "visit") : {}) } };
+    const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, ...(await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit")), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
+    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb, ...(x.ok ? DRY_RUN_NOTE(Boolean((xb as { counts_toward_chart?: boolean }).counts_toward_chart)) : {}) } };
     let proof_status: string | null = null;
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };

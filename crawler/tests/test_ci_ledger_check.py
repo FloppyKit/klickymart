@@ -105,7 +105,18 @@ def test_r9_1_merge_reordering_second_parent_rows_fails(repo):
     assert r.returncode == 1 and bad[:12] in r.stdout, r.stdout
 
 def test_r9_1_criss_cross_union_merges_pass(repo):
-    d, g = repo
+    # Deflake (2026-11-01): with a criss-cross, git builds a virtual merge base from two bases; when s2 and m1 share a
+    # commit second and the side<-main merge lands a second later, git's tie-break flips the virtual base and the union
+    # output reorders first-parent rows (checker correctly FAILs "first parent not an exact prefix"). Pin strictly
+    # increasing dates, only inside this throwaway repo, so the test exercises one fixed, known-good history.
+    d, _g = repo
+    t0 = int(subprocess.run(["git", "-C", str(d), "log", "-1", "--format=%ct"], capture_output=True, text=True).stdout) + 10
+    tick = iter(range(t0, t0 + 100))   # after the fixture's base commit
+    def g(*a):
+        if a and a[0] in ("commit", "merge"):
+            t = f"@{next(tick)} +0000"; e = dict(os.environ, GIT_COMMITTER_DATE=t, GIT_AUTHOR_DATE=t)
+            return subprocess.run(["git", "-C", str(d), *a], check=True, capture_output=True, text=True, env=e).stdout.strip()
+        return _g(*a)
     before = g("rev-parse", "HEAD")
     g("checkout", "-qb", "side"); app(d, g, '{"r":"s1"}', "s1"); app(d, g, '{"r":"s2"}', "s2")
     g("checkout", "-q", "main"); app(d, g, '{"r":"m1"}', "m1")
@@ -116,3 +127,28 @@ def test_r9_1_criss_cross_union_merges_pass(repo):
     g("merge", "-q", "--no-edit", "side")
     r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_r9_1_criss_cross_same_second_tie_reorders_and_fails_closed(repo):
+    """Documents the flake's root cause: git's own union output reorders first-parent rows for this date pattern, and
+    the checker refuses it (fail closed). A real criss-cross like this needs a hand-resolved merge, first-parent rows first."""
+    d, _g = repo
+    t0 = int(_g("log", "-1", "--format=%ct")) + 10
+    deltas = iter([0, 0, 0, 0, 1, 1, 1, 1])   # s1, s2, m1, merge M<-S same second; S<-M~1 merge one second later
+    def g(*a):
+        if a and a[0] in ("commit", "merge"):
+            t = f"@{t0 + next(deltas)} +0000"; e = dict(os.environ, GIT_COMMITTER_DATE=t, GIT_AUTHOR_DATE=t)
+            return subprocess.run(["git", "-C", str(d), *a], check=True, capture_output=True, text=True, env=e).stdout.strip()
+        return _g(*a)
+    before = g("rev-parse", "HEAD")
+    g("checkout", "-qb", "side"); app(d, g, '{"r":"s1"}', "s1"); app(d, g, '{"r":"s2"}', "s2")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"m1"}', "m1")
+    g("merge", "-q", "--no-edit", "side")
+    g("checkout", "-q", "side"); g("merge", "-q", "--no-edit", "main~1")
+    app(d, g, '{"r":"s3"}', "s3")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"m2"}', "m2")
+    g("merge", "-q", "--no-edit", "side")
+    first = _g("show", f"HEAD^1:{F}").splitlines(); merged = (d / F).read_text().splitlines()
+    if merged[:len(first)] == first: pytest.skip("this git version keeps first-parent order here; nothing to document")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 1 and "first parent not an exact prefix" in r.stdout, r.stdout + r.stderr
