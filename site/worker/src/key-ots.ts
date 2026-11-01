@@ -133,7 +133,9 @@ export function judgeOldKeyRevoke(ctx: OtsContext, rev: { hash: string; payload:
   if (aR !== null && aX !== null) return "valid";
   const tip = ctx.headers?.tip() ?? null;
   const nbs = [notBeforeOf(ctx, rev.payload.notbefore), notBeforeOf(ctx, rot.payload.notbefore)].filter((x): x is number => typeof x === "number");
-  if (tip !== null && nbs.length) {
+  // Every notbefore must be header-known before the deadline can fire: an unknown (possibly eclipsed) notbefore keeps it
+  // pending, and the first_seen_tip eclipse cap in evaluate resolves it as a tie (the revoke wins), never as stale.
+  if (tip !== null && nbs.length === 2) {
     if (tip >= Math.max(...nbs) + effectiveFreshK(ctx.freshK) + CONF) return aR === null ? "stale" : "valid";
   }
   return "pending";
