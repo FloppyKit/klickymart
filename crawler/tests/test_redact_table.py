@@ -18,6 +18,8 @@ CASES = [
     ("token-eq", "see token=tok_SECRET_445566 here", ["tok_SECRET_445566"]),
     ("url-path-b64", "https://api.example.com/api/sk-AbCdEfGhIjKlMnOpQrStUvWx/items", ["sk-AbCdEfGhIjKlMnOpQrStUvWx"]),
     ("url-path-hex", f"https://h.example/v1/{PRE}/x", [PRE]),
+    ("url-path-b64url-dash", "https://h.example/v1/AbCdEf01234-56789XyZ0123456qWeRtY/x", ["AbCdEf01234-56789XyZ0123456qWeRtY"]),
+    ("url-path-b64url-under", "https://h.example/dl/Zm9vYmFyQmF6_cXV4UXV1eDEyMzQ1Njc4OTA/x", ["Zm9vYmFyQmF6_cXV4UXV1eDEyMzQ1Njc4OTA"]),
     ("url-userinfo-query", "ftp://u:SECRETpw@x.com/a?macaroon=SECRETmac#frag", ["SECRETpw", "SECRETmac", "frag"]),
 ]
 
