@@ -5,7 +5,7 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { nostrEventId } from "../src/nostr-verify";
 import { NOSTR_KIND_ENDPOINT_BINDING as K } from "../src/nostr-kinds";
 import { applyBinding, bindingStatus, hashHex, bindingsEnabled, BINDING_D, canonicalJson, loadBindingState, matchEndpoint, type BEv, type BindingState } from "../src/endpoint-binding";
-import { buildResult, paymentGate, recordSnapshotHead, latestHead, signHead, signResult, signedResultsEnabled, typedFields, verifyResult, type HeadPayload, type ResultPayload, type Signed } from "../src/signed-result";
+import { HEAD_TTL_S, RESULT_TTL_S, buildResult, paymentGate, recordSnapshotHead, latestHead, signHead, signResult, signedResultsEnabled, typedFields, verifyResult, type HeadPayload, type ResultPayload, type Signed } from "../src/signed-result";
 import { openStoreRoute, writeDailyHead } from "../src/open-store";
 import { buildFilters, ingestEvents, type IngestCtx } from "../src/relay-ingest";
 import { handleRequest } from "../src/router";
@@ -14,6 +14,7 @@ import { handleRequest } from "../src/router";
 const key = () => secp.utils.randomSecretKey();
 const pk = (sk: Uint8Array) => bytesToHex(secp.schnorr.getPublicKey(sk));
 const NOW = 1_800_000_000;
+const DG = "d1".repeat(32); // stand-in snapshot_digest for heads that are allowed to be served
 const NODE = "02" + "ab".repeat(32), NODE2 = "03" + "cd".repeat(32);
 function ev(sk: Uint8Array, content: unknown, created_at = NOW - 100, opts: { kind?: number; d?: string; raw?: string } = {}): BEv {
   const base = { pubkey: pk(sk), created_at, kind: opts.kind ?? K, tags: [["d", opts.d ?? BINDING_D]], content: opts.raw ?? canonicalJson(content) };
@@ -121,7 +122,7 @@ describe("one operator with ten keys", () => {
     for (const s of states) expect(bindingStatus(s, NOW)).toBe("matches_observed_binding");
     // key_first_seen is KlickyMart's clock, not the (backdated) created_at
     for (const s of states) expect(s.first_seen).toBe(NOW);
-    const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: "s", sequence: 1, created_at: NOW, expires_at: NOW + 60, prev_head: null };
+    const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: "s", snapshot_digest: DG, sequence: 1, created_at: NOW, expires_at: NOW + 60, prev_head: null };
     const one = JSON.stringify(buildResult(states[0]!, keys.map(pk)[0]!, "nonce-123", head, NOW));
     const ten = states.map((s, i) => JSON.stringify(buildResult(s, pk(keys[i]!), "nonce-123", head, NOW)));
     for (const r of [one, ...ten]) expect(r).not.toMatch(/"(score|rank|ranking|weight|trust|tip)[a-z_]*"\s*:/i);
@@ -162,7 +163,7 @@ describe("Satoshi m2 answers", () => {
     const ids = new Set(evs.slice(0, 1).concat(c1, c2, rv, evs[39]!).map((e) => e.id));
     const evidence = new Set(run([...evs, c1, c2, rv]).s!.seen.map((x) => x.ev.id));
     for (const e of [evs[0]!, c1, c2, rv]) expect(evidence.has(e.id)).toBe(false); // they live outside the capped list...
-    const carried = new Set((buildResult(s!, pk(sk), "nonce-xyz-1", { type: "klickymart-head", v: 1, snapshot_id: "s", sequence: 1, created_at: NOW, expires_at: NOW + 60, prev_head: null }, NOW).raw_events).map((e) => e.id));
+    const carried = new Set((buildResult(s!, pk(sk), "nonce-xyz-1", { type: "klickymart-head", v: 1, snapshot_id: "s", snapshot_digest: DG, sequence: 1, created_at: NOW, expires_at: NOW + 60, prev_head: null }, NOW).raw_events).map((e) => e.id));
     for (const id of ids) expect(carried.has(id)).toBe(true);              // ...and are always carried as evidence
   });
   it("conflict is permanent for the key, and the current state is shown beside it", () => {
@@ -176,7 +177,7 @@ describe("Satoshi m2 answers", () => {
     expect(f.current_binding).toEqual({ value: "matches_observed_binding", provenance: "observed" });
     expect(s!.latest!.id).toBe(up.id);
     // and the harness accepts it, checking current_binding against the raw events too
-    const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: "snap-c", sequence: 3, created_at: NOW, expires_at: NOW + 3600, prev_head: null };
+    const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: "snap-c", snapshot_digest: DG, sequence: 3, created_at: NOW, expires_at: NOW + 3600, prev_head: null };
     const res = buildResult(s!, pk(sk), "nonce-abc-123", head, NOW);
     expect(verifyResult(signResult(res, KM_HEX), signHead(head, KM_HEX), { pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 1, highWater: 3 })).toMatchObject({ ok: true, status: "conflict" });
     const lie = structuredClone(res); lie.raw_events = lie.raw_events.filter((e) => e.id !== up.id && e.id !== a.id && e.id !== b.id);
@@ -188,7 +189,7 @@ describe("Satoshi m2 answers", () => {
 });
 
 describe("Satoshi follow-ups: permanent version index, terminal revoke", () => {
-  const H = (seq = 4): HeadPayload => ({ type: "klickymart-head", v: 1, snapshot_id: `snap-${seq}`, sequence: seq, created_at: NOW, expires_at: NOW + 3600, prev_head: null });
+  const H = (seq = 4): HeadPayload => ({ type: "klickymart-head", v: 1, snapshot_id: `snap-${seq}`, snapshot_digest: DG, sequence: seq, created_at: NOW, expires_at: NOW + 3600, prev_head: null });
   const check = (res: ResultPayload, head = H()) => verifyResult(signResult(res, KM_HEX), signHead(head, KM_HEX), { pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 1, highWater: head.sequence });
   it("the reported gap: equivocation on a version whose bytes left the 32-state history, with an OLDER created_at, is a conflict (hash-only old side, marked)", () => {
     const sk = key(); const evs: BEv[] = [];
@@ -285,7 +286,7 @@ describe("Satoshi follow-ups: permanent version index, terminal revoke", () => {
 const KM = key(); const KM_PK = pk(KM); const KM_HEX = bytesToHex(KM);
 function setup(evs: BEv[], storeSk: Uint8Array, nonce = "nonce-abc-123", now = NOW, seq = 7) {
   const s = run(evs, now).s ?? null;
-  const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: `snap-${seq}`, sequence: seq, created_at: now, expires_at: now + 3600, prev_head: null };
+  const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: `snap-${seq}`, snapshot_digest: DG, sequence: seq, created_at: now, expires_at: now + 3600, prev_head: null };
   return { head: signHead(head, KM_HEX), res: signResult(buildResult(s, pk(storeSk), nonce, head, now), KM_HEX), headP: head, s };
 }
 const opts = (o: Partial<Parameters<typeof verifyResult>[2]> = {}) => ({ pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 5, highWater: 7, ...o });
@@ -337,7 +338,7 @@ describe("signed results (v9.2 §1 acceptance)", () => {
     const long: ResultPayload = { ...buildResult(run(evs).s!, pk(store), "nonce-abc-123", headP, NOW), expires_at: NOW + 365 * 86400 };
     const longHead = signHead({ ...headP, expires_at: NOW + 365 * 86400 }, KM_HEX);
     expect(verifyResult(signResult(long, KM_HEX), longHead, opts({ nowS: NOW + 700, maxAgeS: 99999, resultTtlCapS: 600 }))).toMatchObject({ ok: false, reason: "result: expired" });
-    expect(verifyResult(signResult(long, KM_HEX), longHead, opts({ nowS: NOW + 3700, maxAgeS: 99999, resultTtlCapS: 99999 }))).toMatchObject({ ok: false, reason: "head: expired" });
+    expect(verifyResult(signResult(long, KM_HEX), longHead, opts({ nowS: NOW + HEAD_TTL_S + 100, maxAgeS: 99999, resultTtlCapS: 99999 }))).toMatchObject({ ok: false, reason: "head: expired" });
   });
   it("a signed claim of 'matches' that the raw events don't support is rejected", () => {
     const { headP } = setup(evs, store);
@@ -443,8 +444,8 @@ describe("open-store routes + KM_SIGNED_RESULTS kill switch", () => {
   });
   it("serves a signed head and a signed result that the reference harness accepts", async () => {
     const t = Math.floor(Date.now() / 1000);
-    expect(await recordSnapshotHead(env.DB, "snap-a", t - 10)).toBe(0);
-    expect(await recordSnapshotHead(env.DB, "snap-b", t)).toBe(1);
+    expect(await recordSnapshotHead(env.DB, "snap-a", t - 10, DG)).toBe(0);
+    expect(await recordSnapshotHead(env.DB, "snap-b", t, DG)).toBe(1);
     expect((await latestHead(env.DB, t))!.prev_head).toBe("0:snap-a");
     const sk = key();
     await ingestEvents(env.DB, [{ ev: ev(sk, { version: 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 100), relay: "wss://r.test" }], ctx());
@@ -457,7 +458,7 @@ describe("open-store routes + KM_SIGNED_RESULTS kill switch", () => {
     expect((await openStoreRoute("/open-store/binding", new URL(`https://x/open-store/binding?pubkey=${pk(sk)}`), e)).status).toBe(400);
   });
   it("off: the routes do not exist (same response as any unknown path)", async () => {
-    const t = Math.floor(Date.now() / 1000); await recordSnapshotHead(env.DB, "snap-z", t);
+    const t = Math.floor(Date.now() / 1000); await recordSnapshotHead(env.DB, "snap-z", t, DG);
     const off = await handleRequest(new Request("https://x/open-store/head"), { ...env, KM_SIGNED_RESULTS: "off", KM_RESULT_SK_HEX: KM_HEX } as never);
     const unknown = await handleRequest(new Request("https://x/open-store-nope"), { ...env } as never);
     expect(off.status).toBe(unknown.status);
@@ -530,13 +531,37 @@ describe("daily head write (cron path)", () => {
     expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t)).toBe(1);
     expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t)).toBeNull();
     const h = await latestHead(env.DB, t);
-    expect(h).toMatchObject({ sequence: 1, snapshot_id: `v1@${t}`, prev_head: `0:v1@${t - 86400}` });
-    const res = await handleRequest(new Request("https://x/open-store/head"), { ...env, KM_SIGNED_RESULTS: "on", KM_RESULT_SK_HEX: KM_HEX } as never);
-    expect(res.status).toBe(200);
+    expect(h).toMatchObject({ sequence: 1, snapshot_id: `v1@${t}`, snapshot_digest: null, prev_head: `0:v1@${t - 86400}` });
+    // Guard: the cron head is label-only (no digest source yet), so ON still serves nothing, with a clear reason.
+    const e = { ...env, KM_SIGNED_RESULTS: "on", KM_RESULT_SK_HEX: KM_HEX } as never;
+    for (const p of ["/open-store/head", `/open-store/binding?pubkey=${"a".repeat(64)}&nonce=nonce-1234`]) {
+      const res = await handleRequest(new Request("https://x" + p), e);
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { reason: string }).reason).toContain("no snapshot_digest");
+    }
   });
-  it("head is stale after HEAD_TTL_S (routes then 503; TTL vs daily write is an open design question)", async () => {
+  it("HEAD_TTL_S = 25h: a 24h-old head is still fresh, a missed day fails closed", async () => {
     const t = Math.floor(Date.now() / 1000);
-    await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t - 3601);
-    expect(await latestHead(env.DB, t)).toBeNull();
+    expect(HEAD_TTL_S).toBe(90000); expect(RESULT_TTL_S).toBe(600);
+    await recordSnapshotHead(env.DB, "day-1", t - 86400, DG);
+    expect((await latestHead(env.DB, t))!.expires_at).toBe(t - 86400 + 90000);
+    const e = { ...env, KM_SIGNED_RESULTS: "on", KM_RESULT_SK_HEX: KM_HEX } as never;
+    expect((await handleRequest(new Request("https://x/open-store/head"), e)).status).toBe(200);
+    expect(await latestHead(env.DB, t + 3601)).toBeNull(); // > 25h since the last write: missed day
+    await env.DB.prepare("DELETE FROM snapshot_heads").run();
+    await recordSnapshotHead(env.DB, "day-0", t - 90001, DG);
+    expect((await handleRequest(new Request("https://x/open-store/head"), e)).status).toBe(503);
+  });
+  it("snapshot_digest is signed inside the head; two datasets under one label are distinguishable", async () => {
+    const t = Math.floor(Date.now() / 1000);
+    const mk = (dg: string): HeadPayload => ({ type: "klickymart-head", v: 1, snapshot_id: "same-label", snapshot_digest: dg, sequence: 5, created_at: t, expires_at: t + 600, prev_head: null });
+    const a = signHead(mk("aa".repeat(32)), KM_HEX), b = signHead(mk("bb".repeat(32)), KM_HEX);
+    expect(a.id).not.toBe(b.id); // equivocation under one label is detectable: same label, different signed heads
+    const tampered = { ...a, payload: { ...a.payload, snapshot_digest: "bb".repeat(32) } };
+    const res = signResult(buildResult(null, "c".repeat(64), "nonce-xyz-1", a.payload, t), KM_HEX);
+    expect(verifyResult(res, tampered, { pinned: KM_PK, nonce: "nonce-xyz-1", nowS: t + 1, highWater: -1 }).ok).toBe(false);
+    const label = signHead(mk(null as never), KM_HEX);
+    const r2 = signResult(buildResult(null, "c".repeat(64), "nonce-xyz-1", label.payload, t), KM_HEX);
+    expect(verifyResult(r2, label, { pinned: KM_PK, nonce: "nonce-xyz-1", nowS: t + 1, highWater: -1 })).toMatchObject({ ok: false, reason: expect.stringContaining("snapshot_digest") });
   });
 });

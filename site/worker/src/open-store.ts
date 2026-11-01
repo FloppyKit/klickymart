@@ -18,6 +18,9 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   const nowS = Math.floor(Date.now() / 1000);
   const head = await latestHead(env.DB, nowS);
   if (!head) return unavailable("no fresh snapshot head");
+  // Guard (Satoshi 2026-11-01): a label-only head must never be public. Until the snapshot step can commit to the data
+  // (snapshot_digest; M4), KM_SIGNED_RESULTS=on still serves nothing.
+  if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (digest pending M4)");
   const sh = signHead(head, sk);
   if (path === "/open-store/head") return Response.json(sh, { headers: H });
   const pubkey = url.searchParams.get("pubkey") ?? "";

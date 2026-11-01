@@ -583,8 +583,15 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
 - **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
   by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
-  `snapshot_id` is `<snapshot data version>@<cron unix seconds>`: a label, not a content commitment (what a head commits to is
-  not yet specified; M4). Open question: `HEAD_TTL_S` = 3600 with a once-daily write leaves the routes 503 for ~23 h a day.
+  `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
+  on-demand writes, no extra cron; a missed day fails closed (503). Freeze-window tradeoff: a frozen or replayed head can
+  pass for up to 25 h, the same as the data cadence (cf. TUF's timestamp role: its expiry bounds how long a freeze attack
+  goes unnoticed; the harness's sequence high-water still blocks rollback to an older head).
+- **snapshot_digest (guard):** heads carry `snapshot_digest` (sha256 over the snapshot data) inside the signed payload, so
+  two datasets under one `snapshot_id` label yield different signed heads (equivocation is detectable). The Worker has no
+  snapshot data files to hash at head-write time (data comes from KV/D1/embedded fixtures), so M2 writes label-only heads
+  (`snapshot_digest` null) and **never serves them**: with `KM_SIGNED_RESULTS` on, `/open-store/*` answers 503 "head has no
+  snapshot_digest", and `verifyResult` rejects a head without one. The digest source and Merkle inclusion proofs are M4.
 - **Ignored counter:** counts each distinct ignored event id once (re-receipts are duplicates); stale replays (lower version,
   or known content re-signed with an earlier created_at) count. Only event ids are kept (capped), never content.
 - **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31431 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.

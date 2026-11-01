@@ -18,7 +18,8 @@ export const HEAD_DOMAIN = "klickymart-head-v1";
 export const DEFAULTS_VERSION = "v9.2-m2";
 /** Starting guesses. Results and heads are short-lived; the harness clamps anything longer to its own caps. */
 export const RESULT_TTL_S = 600;
-export const HEAD_TTL_S = 3600;
+/** 25 h = the daily head write + 1 h slack for cron jitter (Satoshi 2026-11-01). A missed day fails closed (503). */
+export const HEAD_TTL_S = 90000;
 
 export function signedResultsEnabled(env: { KM_SIGNED_RESULTS?: string }): boolean {
   const v = (env.KM_SIGNED_RESULTS ?? "").trim().toLowerCase();
@@ -62,7 +63,9 @@ export function typedFields(s: BindingState | null | "unknown", nowS: number, sn
   };
 }
 
-export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; sequence: number; created_at: number; expires_at: number; prev_head: string | null }
+/** snapshot_digest: sha256 commitment over the snapshot data, signed inside the head. null = label-only head, which is
+ * never served (no digest source exists in the Worker yet; M4). */
+export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; snapshot_digest: string | null; sequence: number; created_at: number; expires_at: number; prev_head: string | null }
 export interface ResultPayload {
   type: "klickymart-result"; v: 1; store_pubkey: string; nonce: string; snapshot_id: string; sequence: number;
   produced_at: number; expires_at: number; key_statement_hash: string | null; binding_hash: string | null;
@@ -120,6 +123,7 @@ export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayloa
   const he = verifySig(HEAD_DOMAIN, head, o.pinned); if (he) return { ok: false, reason: `head: ${he}` };
   const h = head.payload;
   if (h.type !== "klickymart-head" || !Number.isSafeInteger(h.sequence) || h.sequence < 0) return { ok: false, reason: "head: malformed" };
+  if (typeof h.snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(h.snapshot_digest)) return { ok: false, reason: "head: no snapshot_digest (label-only head)" };
   if (h.created_at > o.nowS + S) return { ok: false, reason: "head: future-dated" };
   const headUntil = Math.min(h.expires_at, h.created_at + hCap); // future-dated expires_at is clamped
   if (o.nowS > headUntil) return { ok: false, reason: "head: expired" };
@@ -182,19 +186,19 @@ export function paymentGate(cached: { acceptUntil: number } | null, nowS: number
 
 export async function latestHead(db: D1Database, nowS: number): Promise<HeadPayload | null> {
   try {
-    const r = await db.prepare("SELECT sequence, snapshot_id, created_at, prev_head FROM snapshot_heads ORDER BY sequence DESC LIMIT 1").first<{ sequence: number; snapshot_id: string; created_at: number; prev_head: string | null }>();
+    const r = await db.prepare("SELECT sequence, snapshot_id, snapshot_digest, created_at, prev_head FROM snapshot_heads ORDER BY sequence DESC LIMIT 1").first<{ sequence: number; snapshot_id: string; snapshot_digest: string | null; created_at: number; prev_head: string | null }>();
     if (!r) return null;
     const exp = r.created_at + HEAD_TTL_S;
     if (exp <= nowS) return null; // never serve an expired head; the snapshot step (M4) must publish a fresh one
-    return { type: "klickymart-head", v: 1, snapshot_id: r.snapshot_id, sequence: r.sequence, created_at: r.created_at, expires_at: exp, prev_head: r.prev_head };
+    return { type: "klickymart-head", v: 1, snapshot_id: r.snapshot_id, snapshot_digest: r.snapshot_digest ?? null, sequence: r.sequence, created_at: r.created_at, expires_at: exp, prev_head: r.prev_head };
   } catch { return null; }
 }
 
 /** Snapshot step helper. M2: the daily cron calls it via writeDailyHead (open-store.ts) when KM_SIGNED_RESULTS is on; M4 owns the real step. Sequence strictly increases; never reused. */
-export async function recordSnapshotHead(db: D1Database, snapshotId: string, nowS: number): Promise<number> {
+export async function recordSnapshotHead(db: D1Database, snapshotId: string, nowS: number, snapshotDigest: string | null = null): Promise<number> {
   const last = await db.prepare("SELECT sequence, snapshot_id FROM snapshot_heads ORDER BY sequence DESC LIMIT 1").first<{ sequence: number; snapshot_id: string }>();
   const seq = (last?.sequence ?? -1) + 1;
   if (!Number.isSafeInteger(seq)) throw new Error("sequence overflow");
-  await db.prepare("INSERT INTO snapshot_heads (sequence, snapshot_id, created_at, prev_head) VALUES (?,?,?,?)").bind(seq, snapshotId, nowS, last ? `${last.sequence}:${last.snapshot_id}` : null).run();
+  await db.prepare("INSERT INTO snapshot_heads (sequence, snapshot_id, snapshot_digest, created_at, prev_head) VALUES (?,?,?,?,?)").bind(seq, snapshotId, snapshotDigest, nowS, last ? `${last.sequence}:${last.snapshot_id}` : null).run();
   return seq;
 }

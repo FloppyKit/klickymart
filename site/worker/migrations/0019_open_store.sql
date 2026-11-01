@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS endpoint_binding_versions (
 CREATE TABLE IF NOT EXISTS snapshot_heads (
   sequence INTEGER PRIMARY KEY,
   snapshot_id TEXT NOT NULL UNIQUE,
+  snapshot_digest TEXT,  -- sha256 over the snapshot data; NULL = label-only head, never served
   created_at INTEGER NOT NULL,
   prev_head TEXT
 );
