@@ -30,4 +30,4 @@ def test_env_path_validated(tmp_path, monkeypatch):
     with pytest.raises(ValueError): HA.path()
     monkeypatch.setenv("KM_HAND_ANOMALIES", str(tmp_path / "ok.jsonl")); assert HA.path() == str(tmp_path / "ok.jsonl")
     monkeypatch.delenv("KM_HAND_ANOMALIES")
-    assert HA.path() == os.path.join(CRAWLER, "out", "hand-anomalies.jsonl")
+    assert HA.path() == os.path.join(os.path.dirname(CRAWLER), "data", "hand-anomalies.jsonl")

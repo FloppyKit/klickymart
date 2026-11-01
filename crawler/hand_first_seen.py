@@ -4,8 +4,9 @@ btc_grade_hand_first_seen cannot reset it and extend protection.
 
 Append-only JSONL keyed by (domain, hand_by, hand_at normalized to UTC ISO seconds; "" when undated). A later write
 never moves the value forward: get() is the MIN over all events. The record field is only a cache; btc_grade reads
-this store first. Default path crawler/out/hand-first-seen.jsonl (untracked); KM_HAND_FIRST_SEEN overrides (validated:
-under crawler/out/ or a tmp dir). Corrupt lines are skipped and counted. A full wipe of crawler/out resets it."""
+this store first. Default path data/hand-first-seen.jsonl (TRACKED in git, append-only: enforced by
+tests/test_tracked_ledgers.py and check_append_only.py); KM_HAND_FIRST_SEEN overrides (validated: data/ or a tmp dir).
+Corrupt lines are skipped and counted."""
 import datetime, threading
 import jsonl_store
 

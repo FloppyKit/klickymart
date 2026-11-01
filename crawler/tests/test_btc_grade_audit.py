@@ -136,7 +136,7 @@ class AnomalyHistoryAndLedger(unittest.TestCase):
         after = open(self.path).read()
         self.assertTrue(after.startswith(before))                      # append-only, nothing rewritten
         last = json.loads(after.strip().splitlines()[-1])
-        self.assertEqual((last["event"], last["id"], last["cleared_by"], last["note"]), ("clear", eid, "matt", "typo in hand_at"))
+        self.assertEqual((last["event"], last["id"], last["cleared_by"], last["reason"]), ("clear", eid, "matt", "typo in hand_at"))
         self.assertEqual(self.HA.open_by_author(path=self.path), {})
         with self.assertRaises(KeyError): self.HA.clear("nope", "matt", "x", path=self.path)
     def test_env_override_path(self):

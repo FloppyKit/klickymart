@@ -2,8 +2,8 @@
 """Ledger of anomalous hand overrides, keyed by who set them (btc_grade_hand_by).
 
 Append-only JSONL: a 'record' event opens an entry (status 'open'); a 'clear' event, written only by clear(), closes it.
-Nothing is rewritten in place. Default path crawler/out/hand-anomalies.jsonl (untracked); KM_HAND_ANOMALIES overrides
-(validated: must resolve under crawler/out/ or a tmp dir). Corrupt lines are skipped and counted (corrupt_lines()).
+Nothing is rewritten in place. Default path data/hand-anomalies.jsonl (TRACKED in git, append-only: enforced by
+tests/test_tracked_ledgers.py and check_append_only.py); KM_HAND_ANOMALIES overrides (validated: data/ or a tmp dir). Corrupt lines are skipped and counted (corrupt_lines()).
 clear() is NOT authenticated: anyone who can call it or append to the file can close an entry. Operator-local only;
 not an audit trail.
 The ledger is decoupled from store grades: an open entry never keeps a record's btc_grade_needs_review set."""
@@ -54,11 +54,14 @@ def open_by_author(path=None):
         if eid not in cleared: out.setdefault(e.get("author"), []).append(e)
     return out
 
-def clear(id, cleared_by, note, path=None):
-    """The only way an entry closes: appends a 'clear' event. KeyError for an unknown id."""
+def clear(id, cleared_by, reason=None, path=None, note=None):
+    """The only way an entry closes: appends a tamper-evident 'clear' row {cleared_by, reason, date} to the same tracked
+    ledger; nothing is deleted or rewritten. `note` is an alias for `reason`. KeyError for an unknown id.
+    TODO(v9.2 key lifecycle, gated on Matt's go): clears will be signed by the operator key. No signatures yet."""
     if not isinstance(cleared_by, str) or not cleared_by.strip(): raise ValueError("cleared_by must be non-empty")
+    reason = reason if reason is not None else note
     p = path or globals()["path"]()
     with _lock:
         entries, cleared = _state(p)
         if id not in entries: raise KeyError(id)
-        _append(p, {"event": "clear", "id": id, "status": "cleared", "cleared_by": cleared_by, "note": note, "cleared_at": _now()})
+        _append(p, {"event": "clear", "id": id, "status": "cleared", "cleared_by": cleared_by, "reason": reason, "date": _now()})
