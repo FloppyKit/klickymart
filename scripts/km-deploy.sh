@@ -7,6 +7,7 @@
 #   - crons no more often than daily, no DO alarm interval < 24h, no new DO binding (override: --allow-schedule,
 #     which also requires "schedule-ok: Matt" in the HEAD commit message)
 #   - Worker name must be on the allowlist (prod env of name "klickymart" => "klickymart-production")
+# Each deploy is tagged --message "git:<sha>"; km-status matches on that tag.
 # After deploy: one km-smoke.sh run (60s cap); on failure one `wrangler rollback`, no retry.
 # Usage: km-deploy.sh [--check] [--allow-schedule]   (--check runs all gates and exits 0/1 before any Cloudflare write)
 set -euo pipefail
@@ -78,6 +79,7 @@ if g name; then
 BASE=$(grep -m1 -E '^name *=' "$TOML" | cut -d'"' -f2)
 PNAME=$(awk '/^\[env.production\]/{f=1;next} /^\[/{f=0} f&&/^name *=/{print}' "$TOML" | cut -d'"' -f2)
 WNAME=${PNAME:-$BASE-production}
+# Chuck ruling 2026-10-31: klickymart-production (prod) + klickymart (alias) only; any other klickymart* or other name refused.
 [[ " $ALLOWED_WORKERS " == *" $WNAME "* ]] || refuse "Worker name '$WNAME' not on allowlist ($ALLOWED_WORKERS)"
 fi
 echo "  gates PASS ($GATES)"
@@ -95,7 +97,7 @@ sed -i 's/database_id = "REPLACE_AT_DEPLOY"/database_id = "449bc56a-16f8-47f6-8a
 ! grep -q REPLACE_AT_DEPLOY wrangler.toml
 ln -s "$REPO/site/node_modules" node_modules
 timeout 300 npx wrangler d1 migrations apply klickymart --remote --env production 2>&1 | scrub | tail -4
-timeout 300 npx wrangler deploy --env production 2>&1 | grep -E "Version ID|Uploaded|ERROR|error" | scrub
+timeout 300 npx wrangler deploy --env production --message "git:$SHA" 2>&1 | grep -E "Version ID|Uploaded|ERROR|error" | scrub
 if timeout 60 bash "$REPO/scripts/km-smoke.sh" > "$D/smoke.out" 2>&1 && ! grep -q '^FAIL' "$D/smoke.out"; then
   scrub < "$D/smoke.out"; echo "SMOKE PASS"
 else

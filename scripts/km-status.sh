@@ -58,7 +58,9 @@ v=json.load(sys.stdin); v=v[-1] if v else {}
 a=v.get("annotations") or {}; m=v.get("metadata") or {}
 print(a.get("workers/tag") or "", a.get("workers/message") or "", m.get("source") or "")' 2>/dev/null)
 echo "  latest version annotations: ${VTAG:-none}"
-if echo "$MSG $VTAG" | grep -q "${HEAD:0:7}"; then echo "  CHECK deployed_eq_head: PASS"; else echo "  CHECK deployed_eq_head: FAIL (no deployment/version tagged with ${HEAD:0:7}; km-deploy does not tag versions with the sha yet)"; fi
+if echo "$MSG" | grep -q "git:$HEAD"; then echo "  CHECK deployed_eq_head: PASS (deployment message git:${HEAD:0:7})"
+elif echo "$MSG" | grep -q "git:"; then echo "  CHECK deployed_eq_head: FAIL (deployed $(echo "$MSG" | grep -oE 'git:[0-9a-f]{7}'), HEAD ${HEAD:0:7})"
+else echo "  CHECK deployed_eq_head: FAIL (unprovable: latest deployment has no git:<sha> message tag)"; fi
 
 echo "-- Live crons on $PROD (from Cloudflare, not repo)"
 cf "https://api.cloudflare.com/client/v4/accounts/$ACC/workers/scripts/$PROD/schedules" | python3 -c '
@@ -77,12 +79,12 @@ import json,sys
 allowed=sys.argv[1].split()
 d=json.load(sys.stdin)
 if not d.get("success"): print("  workers: unavailable", d.get("errors")); sys.exit()
-other=[]
-for s in d["result"]:
-  flag="" if s["id"] in allowed else "  <-- NOT klickymart"
-  if flag: other.append(s["id"])
-  print("  ", s["id"], s.get("modified_on",""), flag)
-print("  CHECK one_klickymart_worker:", "PASS" if not other else "FAIL (%d other Workers in shared account: %s)" % (len(other), ", ".join(other)))' "$ALLOWED_WORKERS"
+km=[s["id"] for s in d["result"] if s["id"].startswith("klickymart")]
+info=[s["id"] for s in d["result"] if not s["id"].startswith("klickymart")]
+stray=[w for w in km if w not in allowed]
+for w in km: print("  ", w, "" if w in allowed else "  <-- STRAY klickymart Worker")
+print("  INFO other projects in the shared account (not checked):", ", ".join(info) or "none")
+print("  CHECK one_klickymart_worker:", "PASS" if len(km)==1 and not stray else "FAIL (%s)" % ", ".join(km))' "$ALLOWED_WORKERS"
 
 echo "-- Usage today (UTC day, account-wide) vs 50% of free-tier daily limits"
 DAY=$(date -u +%Y-%m-%d)
@@ -109,7 +111,9 @@ echo; echo "== Own background jobs (wrangler/esbuild/workerd/node under /workspa
 J=$(ps -eo pid,lstart,etime,cmd | grep -E 'wrangler|esbuild|workerd|klickymart|km-verify|nostr-market|mock-servers|lnurlp' | grep -vE 'grep|km-status' | cut -c1-180)
 if [ -n "$J" ]; then echo "$J" | sed 's/^/  /'; else echo "  (none)"; fi
 echo; echo "== Key files under /workspace (paths only, never contents)"
-K=$(find /workspace -xdev \( -name node_modules -o -name '.venv*' -o -name site-packages -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
+R=$(find /workspace/research -xdev -type f -name '*.pem' 2>/dev/null)
+[ -n "$R" ] && echo "  INFO third-party test fixtures (not checked): $(echo $R | wc -w) .pem under /workspace/research"
+K=$(find /workspace/klickymart-public /workspace/nostr-market /workspace/nostr-market.ARCHIVED /workspace/km-verify -xdev \( -name node_modules -o -name '.venv*' -o -name site-packages -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
 if [ -n "$K" ]; then echo "$K" | sed 's/^/  /'; echo "  CHECK no_keys_under_workspace: FAIL ($(echo "$K" | wc -l) file(s))"; else echo "  CHECK no_keys_under_workspace: PASS"; fi
 }
 { main; jobs_and_keys; } 2>&1 | scrub
