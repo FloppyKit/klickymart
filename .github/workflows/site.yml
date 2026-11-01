@@ -15,6 +15,7 @@ concurrency:
 jobs:
   site:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: site
@@ -30,6 +31,7 @@ jobs:
       - run: node scripts/copy-vendor.js
       - run: npm run typecheck
       - run: npm test
+        timeout-minutes: 5
       - run: npm run bench
       - run: npx playwright install chromium
       - run: |
@@ -38,6 +40,7 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/stats >/dev/null && exit 0; sleep 1; done
           exit 1
       - run: npm run e2e
+        timeout-minutes: 30
       - run: kill "$(cat /tmp/wrangler.pid)" 2>/dev/null || true
       - name: Secret scan
         run: |
