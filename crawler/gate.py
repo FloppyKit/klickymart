@@ -17,7 +17,10 @@ import glob, ipaddress, json, os, re, socket, threading, time, urllib.parse, url
 HERE = os.path.dirname(os.path.abspath(__file__))
 O = lambda *p: os.path.join(HERE, "out", *p)
 UA_TOKEN = "FloppyKitMapBot"
-API_HOSTS = re.compile(r"(^|\.)(openrouter\.ai|klickymart\.com|rdap\.org)$|^rdap\.")
+# P1-1: exact non-store API hosts, https only (no prefix/suffix matching). Callers: llm.py (openrouter.ai),
+# pending_sites.py / ucp quote / submit queue (klickymart.com, www. is stripped by host_of), trust.py (rdap.org, whose IANA
+# bootstrap redirects .com/.net -> rdap.verisign.com and .org -> rdap.publicinterestregistry.org).
+API_HOSTS = frozenset({"openrouter.ai", "klickymart.com", "rdap.org", "rdap.verisign.com", "rdap.publicinterestregistry.org"})
 TERMS_PATH = re.compile(r"(?i)^/(policies/terms|pages/terms|terms|tos|legal|conditions|terms[-_]of[-_](service|use|sale)|terms[-_]and[-_]conditions|policies)(/|[-_.a-z]*)?")
 REFUSE_STATUS = {"blocked-tos", "error", "agents-not-welcome", "unknown", "robots-disallowed"}
 REFUSE_TOS = {"bans-automation", "unknown", "error"}
@@ -105,7 +108,9 @@ def check(url, purpose="page"):
     sp = urllib.parse.urlsplit(url)
     if sp.scheme not in ("http", "https"): return "non-http"
     h = host_of(url)
-    if API_HOSTS.search(h): return "api host"
+    if h in API_HOSTS:
+        if sp.scheme != "https": _refuse(url, "api host over plain http")
+        return "api host"
     if sp.path == "/robots.txt": return "robots.txt"
     v = verdict(h)
     status, tos = (v or {}).get("status"), (v or {}).get("tos")
