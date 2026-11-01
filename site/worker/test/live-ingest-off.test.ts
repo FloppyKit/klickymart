@@ -59,4 +59,25 @@ describe("LIVE_INGEST off (default)", () => {
     expect(r.status).toBe(200);
     expect(((await r.json()) as { live: unknown }).live).toEqual({ disabled: true });
   });
+
+  it("LIVE_INGEST on: fetch never arms an alarm; legacy alarm is deleted, not re-armed", async () => {
+    const s = fakeState(null);
+    const doObj = new RelayIngester(s.state, { RELAY_URLS: "", LIVE_INGEST: "1" } as never);
+    (doObj as unknown as { ensure: () => Promise<void> }).ensure = async () => {};
+    await doObj.fetch(new Request("https://ingester/ensure"));
+    expect(s.calls).not.toContain("set");
+    const s2 = fakeState(Date.now());
+    await new RelayIngester(s2.state, { RELAY_URLS: "", LIVE_INGEST: "1" } as never).alarm();
+    expect(s2.calls).toEqual(["delete"]);
+  });
+
+  it("source sets no DO alarm interval < 24h", async () => {
+    const src = (await import("../src/ingester-do.ts?raw")).default as string;
+    const DAY = 86_400_000;
+    for (const m of src.matchAll(/(ALARM|INTERVAL)[A-Z_]*_MS\s*=\s*([0-9_]+)/g)) expect(Number(m[2].replace(/_/g, ""))).toBeGreaterThanOrEqual(DAY);
+    for (const m of src.matchAll(/setAlarm\(([^)]*)\)/g)) {
+      const lit = m[1].match(/\+\s*([0-9_]+)/);
+      expect(lit ? Number(lit[1].replace(/_/g, "")) : DAY).toBeGreaterThanOrEqual(DAY);
+    }
+  });
 });

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the crawler keypair once. Writes nsec to ../secrets/crawler.nsec (0600). Prints npub only."""
+"""Generate the crawler keypair once. Writes nsec to $KM_CRAWLER_NSEC (default /home/box/secrets/klickymart/crawler.nsec, 0600). Prints npub only."""
 import os, sys
 from nostr_sdk import Keys
-P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "secrets", "crawler.nsec")
+P = os.environ.get("KM_CRAWLER_NSEC", "/home/box/secrets/klickymart/crawler.nsec")
 if os.path.exists(P): sys.exit("key exists; refusing to overwrite")
 os.makedirs(os.path.dirname(P), exist_ok=True)
 k = Keys.generate()

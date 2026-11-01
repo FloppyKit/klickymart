@@ -5,7 +5,7 @@ from nostr_sdk import Keys, EventBuilder, Kind, Tag, Event, NostrSigner
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from url_redact import redact  # KM-N01: strip captured session/auth tokens and query strings before signing
 HERE = os.path.dirname(os.path.abspath(__file__))
-keys = Keys.parse(open(os.path.join(HERE, "..", "secrets", "crawler.nsec")).read().strip())
+keys = Keys.parse(open(os.environ.get("KM_CRAWLER_NSEC", "/home/box/secrets/klickymart/crawler.nsec")).read().strip())
 src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "out", "records.jsonl")
 SIGNER = keys
 dst = os.path.join(HERE, "out", "events.jsonl")

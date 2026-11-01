@@ -1,13 +1,12 @@
 import { buildFlagStatic } from "./flags";
 import { SELFTEST_DOMAIN } from "./experience";
 /** RelayIngester Durable Object: keeps live WebSocket subscriptions to RELAY_URLS with exponential backoff, buffers
- * events and flushes them to D1. An alarm every 30 s re-establishes dropped sockets and flushes; the 5-minute cron
+ * events and flushes them to D1. No DO alarm is ever armed (no self-re-arming loop); the daily cron (15 6 * * *)
  * runs a separate `since`-based catch-up so nothing is lost while a socket is down. */
 import { BUFFER_LIMITS, buildFilters, ingestEvents, parseFrame, relayList, saveState, workerConnect, type IngestCtx, type SocketLike } from "./relay-ingest";
 import { loadSnapshot, type Env } from "./router";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 
-const ALARM_MS = 30_000;
 const FLUSH_AT = 50;
 
 export async function ingestCtx(env: Env): Promise<IngestCtx> {
@@ -19,7 +18,7 @@ export async function ingestCtx(env: Env): Promise<IngestCtx> {
 
 interface RelayLive { ws: SocketLike | null; state: "connecting" | "open" | "down"; attempts: number; nextTry: number; since: number; opened_at: number | null; events: number; last_error: string | null }
 
-/** Live WebSocket ingest is opt-in (LIVE_INGEST="1"/"true"); off by default so the DO is never kept awake. The 5-minute cron catch-up covers ingest. */
+/** Live WebSocket ingest is opt-in (LIVE_INGEST="1"/"true"); off by default so the DO is never kept awake. The daily cron catch-up covers ingest. */
 export function liveIngestEnabled(env: { LIVE_INGEST?: string }): boolean {
   return env.LIVE_INGEST === "1" || env.LIVE_INGEST === "true";
 }
@@ -35,13 +34,13 @@ export class RelayIngester {
   async fetch(_req: Request): Promise<Response> {
     if (!liveIngestEnabled(this.env as { LIVE_INGEST?: string })) { await this.shutdown(); return Response.json({ disabled: true }); }
     await this.ensure();
-    if (!(await this.state.storage.getAlarm())) await this.state.storage.setAlarm(Date.now() + ALARM_MS);
     return Response.json(this.status());
   }
 
+  /** Legacy alarm (armed by older deploys): flush once, drop it, never re-arm. */
   async alarm(): Promise<void> {
     if (!liveIngestEnabled(this.env as { LIVE_INGEST?: string })) { await this.shutdown(); return; }
-    try { await this.ensure(); await this.flush(); } finally { await this.state.storage.setAlarm(Date.now() + ALARM_MS); }
+    try { await this.flush(); } finally { await this.state.storage.deleteAlarm(); }
   }
 
   /** LIVE_INGEST off: close sockets, drop the alarm, do not re-arm. */

@@ -53,6 +53,6 @@ Implement `RelaySource` in `worker/src/ingest.ts` and call `ingest(new RelaySour
 
 `POST /facilitate` signs facilitated 421s with a key separate from the crawler key.
 Public key: `npub1zw8a7v4eyagkd0eqpqle0c06xxnvyuwaps2hyk3xykqgfsa49h9srq3694` (hex `138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb`).
-The secret lives only on the ops box (`nostr-market/secrets/facilitator.nsec`, mode 600, gitignored) and as the Worker secret
+The secret lives only on the ops box (`/home/box/secrets/klickymart/facilitator.nsec`, mode 600, never in git) and as the Worker secret
 `FACILITATOR_SK_HEX` (`wrangler secret put FACILITATOR_SK_HEX --env production`, value piped from stdin, never echoed).
 Without the secret, POST /facilitate returns 503 and signs nothing.
