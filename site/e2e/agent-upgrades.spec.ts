@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+// Static landscape frame: continuous canvas animation kept full-page screenshots from ever settling in CI.
+test.use({ reducedMotion: "reduce" });
+
 test("homepage check box answers inline", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto("/");
@@ -24,7 +27,7 @@ test("about shows MCP install snippets and simulated-shopper note", async ({ pag
   const canvas = page.locator("#km-landscape");
   await expect(canvas).toHaveAttribute("data-shoppers-simulated", /\d+/);
   await page.locator("#agents").screenshot({ path: "e2e/artifacts/about-agents-mcp-dark-desktop.png" });
-  await page.screenshot({ path: "e2e/artifacts/about-dark-desktop-agents.png", fullPage: true });
+  await page.screenshot({ path: "e2e/artifacts/about-dark-desktop-agents.png", animations: "disabled" });
 });
 
 for (const scheme of ["dark", "light"] as const) {
@@ -56,5 +59,5 @@ test("alternatives UI: homepage form and blocked-site suggestions", async ({ pag
   await page.screenshot({ path: "e2e/artifacts/alternatives-headphones-dark-desktop.png", fullPage: false });
   await page.goto("/check?format=html&domain=microsoft.com");
   await expect(page.locator('[data-testid="check-alternatives"]')).toContainText("Blocked here? Try these");
-  await page.screenshot({ path: "e2e/artifacts/check-blocked-alternatives-dark-desktop.png" });
+  await page.screenshot({ path: "e2e/artifacts/check-blocked-alternatives-dark-desktop.png", animations: "disabled" });
 });

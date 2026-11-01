@@ -4,6 +4,12 @@ import { waitFor2dLandscape, expectLandscapeInViewportCanvas } from "./landscape
 
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
 
+// The landscape canvas animates continuously; on software GL (SwiftShader in CI) that pegs the CPU and
+// stalls every navigation, axe run and screenshot. Reduced motion draws one static frame (same as
+// ?nomotion=1), so nothing asserted here changes. Tests are independent, so run them in parallel.
+test.use({ reducedMotion: "reduce" });
+test.describe.configure({ mode: "parallel" });
+
 /** Spec §4.2: dark theme must not show UA-default light control surfaces. */
 async function expectNoLightControlSurfaces(page: Page, path: string): Promise<void> {
   await page.goto(`${base}${path}`);
@@ -198,6 +204,10 @@ for (const theme of ["dark", "light"] as const) {
           });
         }
       }
+      if (theme === "dark") {
+        // Was a separate test that read this file; it depended on serial order, so it lives here now.
+        expectLandscapeInViewportCanvas("e2e/artifacts/home-dark-desktop.png", 12);
+      }
     });
   });
 }
@@ -260,8 +270,4 @@ test("advertised agent routes respond", async ({ request }) => {
   expect(mcp.status()).toBe(200);
   const j = (await mcp.json()) as { result?: { tools?: unknown[] } };
   expect(j.result?.tools?.length).toBeGreaterThanOrEqual(2);
-});
-
-test("home dark desktop capture shows synthwave canvas", () => {
-  expectLandscapeInViewportCanvas("e2e/artifacts/home-dark-desktop.png", 12);
 });
