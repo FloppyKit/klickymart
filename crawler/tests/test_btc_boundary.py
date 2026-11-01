@@ -14,6 +14,7 @@ class T(unittest.TestCase):
                 self.assertEqual(q["provenance"], "store-asserted")
                 self.assertEqual(q["url"], url); self.assertTrue(q["q"]); self.assertIn("snapshot_id", q)
                 self.assertIsNone(q["snapshot_id"])
+                self.assertRegex(q["evidence_sha"], r"^[0-9a-f]{64}$"); self.assertRegex(q["fetched_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
     def test_1_badge_on_non_payment_page_counts(self):
         u = "https://shop.example/products/widget"
@@ -33,9 +34,15 @@ class T(unittest.TestCase):
         u = "https://shop.example/help/faq"
         pay, no, q = run(u, "help", "FAQ", "Does Example accept bitcoin?")
         self.assertEqual((pay, no, q), ([], [], []))
-        # current gap: NOT_PAYMENT_RX matches only a one-word name, so a multi-word subject reads as acceptance
+        # FAQ gap closed: a segment ending in '?' is never BTC evidence, whatever the subject
         pay, no, q = run(u, "help", "FAQ", "Does the shop accept bitcoin?")
-        self.assertEqual(pay, ["btc"]); self.assertEqual(q[0]["conf"], "med"); self.assert_provenance(q, u)
+        self.assertEqual((pay, no, q), ([], [], []))
+
+    def test_3b_faq_question_plus_answer_counts_once_from_answer(self):
+        u = "https://shop.example/help/faq"
+        pay, no, q = run(u, "help", "FAQ", "Does the shop accept bitcoin? Yes, we accept bitcoin.")
+        self.assertEqual(pay, ["btc"]); self.assertEqual(len(q), 1)
+        self.assertEqual(q[0]["q"], "Yes, we accept bitcoin."); self.assert_provenance(q, u)
 
     def test_4_bitcoin_backed_loan_page_is_not_evidence(self):
         u = "https://lender.example/help/bitcoin-loans"
@@ -46,5 +53,25 @@ class T(unittest.TestCase):
     def test_non_btc_quotes_have_no_provenance_field(self):
         pay, _, q = run("https://shop.example/help/payment", "help", "Payment", "We accept Visa and PayPal.")
         self.assertEqual(pay, ["card", "pp"]); self.assertTrue(all("provenance" not in x for x in q))
+
+class Evidence(unittest.TestCase):
+    def test_same_text_same_sha_and_normalization(self):
+        from extract import evidence_sha, normalize_text
+        a = "Bitcoin  accepted\n\n Add to cart "
+        self.assertEqual(evidence_sha(a), evidence_sha(a))
+        self.assertEqual(evidence_sha(a), evidence_sha("Bitcoin accepted Add to cart"))
+        self.assertEqual(normalize_text("Cafe\u0301\t x"), "Caf\u00e9 x")   # NFC + whitespace collapse
+        self.assertNotEqual(evidence_sha(a), evidence_sha("Bitcoin accepted"))
+    def test_quote_is_substring_of_stored_blob(self):
+        import tempfile, hashlib
+        d = tempfile.mkdtemp()
+        txt = "Widget\n\n  Pay  with   bitcoin\tor lightning at checkout today.\nAdd to cart"
+        _, _, q = extract_payments([("https://shop.example/p", "pdp", "Widget", txt, "2026-10-31T12:00:00Z")], evidence_dir=d)
+        btc = [x for x in q if x["c"] in BTC_STRICT]; self.assertTrue(btc)
+        for x in btc:
+            blob = open(os.path.join(d, x["evidence_sha"] + ".txt"), encoding="utf-8").read()
+            self.assertEqual(hashlib.sha256(blob.encode("utf-8")).hexdigest(), x["evidence_sha"])
+            self.assertIn(x["q"], blob); self.assertEqual(x["fetched_at"], "2026-10-31T12:00:00Z"); self.assertEqual(x["url"], "https://shop.example/p")
+        self.assertEqual(os.listdir(d), [btc[0]["evidence_sha"] + ".txt"])
 
 if __name__ == "__main__": unittest.main()

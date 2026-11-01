@@ -268,11 +268,12 @@ for d, (url, codes) in CH.items():
         if c not in (r.get("pay") or []): r["pay"] = sorted(set(r.get("pay") or []) | {c}); note(d, f"pay +{c} (store page: {url})")
     g, info = _bg.grade_record(r, {"privacy": ["noacct"]} if r.get("guest") is True else None)
     if d == "foundation.xyz" and g is None:
-        info = {"quote": q, "url": url, "range": "2-4", "reason": "self-hosted BTCPay Server per the store's FAQ; whether checkout needs an account is not evidenced, so no single grade"}
+        info = {"quote": q, "url": url, "range": "2-4", "basis": "claimed", "reason": "self-hosted BTCPay Server per the store's FAQ; whether checkout needs an account is not evidenced, so no single grade"}
     if d == "bitkey.world" and g is None:
-        info = {"quote": q, "url": url, "range": "2-4", "reason": "pays in bitcoin with only an email and pickup name per the store; the bitcoin processor (self-hosted or custodial) is not stated"}
+        info = {"quote": q, "url": url, "range": "2-4", "basis": "claimed", "reason": "pays in bitcoin with only an email and pickup name per the store; the bitcoin processor (self-hosted or custodial) is not stated"}
     r["btc"] = g; r["btc_src"] = "agent-evidence" if g is not None else None
     r["btc_grade_quote"], r["btc_grade_url"], r["btc_grade_reason"] = info.get("quote"), info.get("url"), info.get("reason")
+    r["btc_grade_basis"] = info.get("basis")   # grade and basis published together
     if info.get("range"): r["btc_grade_range"] = info["range"]
     r["btc_ev"] = {"url": info.get("url"), "q": info.get("quote"), "reason": info.get("reason"), "checked_at": at}
     note(d, f"btc graded: {g if g is not None else 'range ' + info.get('range', '?')} ({info.get('reason')})")

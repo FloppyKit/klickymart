@@ -7,7 +7,8 @@
   evidence. Lines between [ugc-start]/[ugc-end] markers (inserted by crawl.py around review DOM
   blocks), lines under a review/Q&A heading, and review-shaped lines are skipped.
 - Scope (v0.3-draft): every quote carries scope online / in-store / both / null (unstated)."""
-import re
+import hashlib, os, re, unicodedata
+from datetime import datetime, timezone
 TERMS = [
  ("card", r"\b(visa|mastercard|american express|amex|discover|credit cards?|debit cards?)\b"),
  ("pp", r"\bpaypal\b(?!\W*pay in 4)"), ("bnpl:pp4", r"\bpaypal\W*pay in 4\b"),
@@ -90,15 +91,49 @@ def btc_payment_context(line, paypage):
     if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
     return bool(paypage and CTX.search(line))
 
-def btc_provenance(q):
+def normalize_text(t):
+    """Evidence normalization (the ONE definition; evidence_sha hashes its UTF-8 bytes):
+    1. Unicode NFC; 2. every run of whitespace (\\s+, incl. newlines/tabs/NBSP) -> one ASCII space; 3. strip ends."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", t or "")).strip()
+
+def evidence_sha(t):
+    """sha256 hex of the normalized UTF-8 text."""
+    return hashlib.sha256(normalize_text(t).encode("utf-8")).hexdigest()
+
+def store_evidence_text(t, evidence_dir):
+    """Content-addressed blob: <evidence_dir>/<sha>.txt holds normalize_text(t). Idempotent. Returns sha."""
+    sha = evidence_sha(t)
+    if evidence_dir:
+        os.makedirs(evidence_dir, exist_ok=True)
+        path = os.path.join(evidence_dir, sha + ".txt")
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f: f.write(normalize_text(t))
+    return sha
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def btc_provenance(q, sha=None, fetched_at=None):
     """Spec v9.2 s1: BTC evidence read from page text is what the store says, never something KlickyMart observed.
-    snapshot_id: crawl records carry no snapshot/evidence id yet, so it is None (url + quote are the provenance)."""
+    snapshot_id: crawl records carry no snapshot id yet, so it is None. evidence_sha = sha256 of the normalized
+    extracted page text the quote came from (see normalize_text); fetched_at = ISO-8601 UTC; url = page url."""
     q["provenance"] = "store-asserted"; q["snapshot_id"] = None
+    q["evidence_sha"] = sha; q["fetched_at"] = fetched_at
     return q
 
-def extract_payments(texts):
+def extract_payments(texts, evidence_dir=None):
+    """texts: (url, step, title, text[, fetched_at]). Text is NFC-normalized first so every quote is a substring
+    of normalize_text(text). If evidence_dir is set, the normalized blob is stored there as <evidence_sha>.txt."""
     pay, no, quotes = set(), set(), []
-    for url, step, title, t in texts:
+    for item in texts:
+        url, step, title, t = item[:4]
+        fetched_at = item[4] if len(item) > 4 and item[4] else utc_now_iso()
+        t = unicodedata.normalize("NFC", t or "")
+        sha = None
+        def prov(q):
+            nonlocal sha
+            if sha is None: sha = store_evidence_text(t, evidence_dir)
+            return btc_provenance(q, sha, fetched_at)
         paypage = step == "help" and bool(PAYPAGE.search(url + " " + title))
         lines = [re.sub(r"\s+", " ", l).strip() for l in t.splitlines()]
         lines = [l for l in lines if l]
@@ -117,18 +152,20 @@ def extract_payments(texts):
                 # sentence-level negation: "SNAP EBT is accepted online. Cash EBT is not accepted." -> one pos, one neg
                 segs = [x for x in re.split(r"(?<=[.!?])\s+", line) if re.search(rx, x, flags=re.I)] or [line]
                 for seg in segs:
+                    # FAQ gap (spec): a sentence segment ending in '?' is a question, never BTC evidence
+                    if code in BTC_STRICT and seg.rstrip().endswith("?"): continue
                     neg = bool(NEG.search(seg))
                     (no if neg else pay).add(code)
                     sc = line_scope(seg, None) or line_scope(line, head_scope)
                     if not any(q["c"] == code and q["neg"] == neg and q["scope"] == sc for q in quotes):
                         q = {"c": code, "neg": neg, "url": url, "q": seg[:240],
                              "conf": "med" if paypage else "low", "scope": sc}
-                        quotes.append(btc_provenance(q) if code in BTC_STRICT else q)
+                        quotes.append(prov(q) if code in BTC_STRICT else q)
         for i, line in enumerate(lines):
             if ugc[i]: continue
             if re.search(r"(?i)on-?chain payments only", line):
                 no.add("ln"); pay.discard("ln")
-                quotes.append(btc_provenance({"c": "ln", "neg": True, "url": url, "q": line[:240], "conf": "med", "scope": line_scope(line)}))
+                quotes.append(prov({"c": "ln", "neg": True, "url": url, "q": line[:240], "conf": "med", "scope": line_scope(line)}))
     if pay & {"btc", "eth", "usdt", "usdc", "ltc", "xmr"}: pay.discard("crypto")
     return sorted(pay), sorted(no - pay), quotes
 

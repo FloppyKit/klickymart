@@ -7,7 +7,8 @@ Usage: python crawl.py sites.json [--out out] [--batch 25] [--offset 0] [--force
 import json, re, sys, time, hashlib, argparse, os, urllib.robotparser
 from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
-from extract import extract_payments, scope_split
+from extract import extract_payments, scope_split, utc_now_iso
+EVIDENCE_TEXT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "evidence-text")  # content-addressed <evidence_sha>.txt (git-ignored)
 from url_redact import redact, redact_str, clean_url  # R-C-006: redact at write time, not only before signing
 from egress import egress_check, install as _egress_install
 _egress_install()  # KIMI-007: every Playwright context/goto in crawl.py and tos.py goes through the egress guard
@@ -182,12 +183,13 @@ def crawl_site(browser, site, ev_dir, tos=None):
             rec["fetch"][step] = "skip:robots"; continue
         time.sleep(PACE); pages += 1
         res, text, links = visit(ctx, site, url, step, ev_dir, rec)
+        fetched_at = utc_now_iso()
         rec["fetch"][step if step not in rec["fetch"] else f"{step}{pages}"] = res.get("wall") or res.get("status") or res.get("error")
         if res.get("wall"):
             if step == "home": break
             continue
         if text:
-            texts.append((url, step, res.get("title", ""), text))
+            texts.append((url, step, res.get("title", ""), text, fetched_at))
             if step == "home" and not site.get("help") and links and not discovered:
                 discovered = True
                 cands = [h for t, h in links if h and urlparse(h).netloc.endswith(d.split("/")[0]) and HELP_RX.search(t + " " + h)]
@@ -198,10 +200,10 @@ def crawl_site(browser, site, ev_dir, tos=None):
         if not any(u["c"] == x["c"] and u["at"] == x["at"] for u in uniq): uniq.append(x)
     rec["ar"] = uniq
     # extraction
-    pay, pay_no, quotes = extract_payments(texts)
+    pay, pay_no, quotes = extract_payments(texts, evidence_dir=EVIDENCE_TEXT_DIR)
     rec["pay"], rec["pay_no"], rec["pay_q"] = pay, pay_no, quotes
     rec["pay_online"], rec["pay_instore"], rec["pay_unscoped"] = scope_split(quotes)
-    rec["pay_src"] = "observed-rendered-pages" if pay else None
+    rec["pay_src"] = "rendered-pages" if pay else None
     rec["evu"] = sorted({q["url"] for q in quotes})
     rec["kyc"] = None; rec["co"] = None; rec["steps"] = None; rec["guest"] = None; rec["tos"] = (tos or {}).get("tos")   # 'ok' or null (unknown); bans-automation never reaches here
     if tos and tos.get("url"): rec["tos_url"] = tos["url"]

@@ -50,7 +50,7 @@ for (let i = 0; i < 35; i++) {
     pay_online,
     pay_instore,
     pay_unscoped,
-    pay_src: "observed-rendered-pages",
+    pay_src: "rendered-pages",
     evu: [`https://${d}/pay`],
     btc,
     btc_any: btc === null ? true : btc > 0,

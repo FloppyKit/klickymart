@@ -10,9 +10,47 @@ FIAT_CONVERT = re.compile(r"(?i)crypto (debit )?card|via (an )?exchange|coinbase
 NOACCT_TEXT = re.compile(r"(?i)only the minimum (necessary )?shipping information|no account (is )?(needed|required)|without (creating )?an account|guest checkout")
 PRIV = re.compile(r"(?i)cashu|ecash|fedimint|silent payments?|\bark\b")
 
+# Basis of a grade, highest first. No numeric weights: basis only breaks ties within a grade.
+BASIS_BOUND = "bound"        # signed endpoint binding resolving when probed. NOT IMPLEMENTED: never emitted yet (hook: bound_basis)
+BASIS_OBSERVED = "observed"  # checkout probe reached the payment screen and saw a method/processor
+BASIS_CLAIMED = "claimed"    # page text only
+BASIS_ORDER = (BASIS_BOUND, BASIS_OBSERVED, BASIS_CLAIMED)
+CLAIMED_CAP = 2              # default scorer: basis 'claimed' caps at 2; 3 and 4 need 'observed' or 'bound'
+
+def bound_basis(r, probe=None):
+    """Hook for 'bound' (signed endpoint binding that resolves when probed). Not implemented: always False."""
+    return False
+
+def probe_observed(probe):
+    """'observed': probe reached the payment screen and its methods or processors are non-empty."""
+    p = probe or {}
+    return p.get("step_reached") == "payment_methods" and bool(p.get("methods") or p.get("processors"))
+
+def grade_basis(r, probe=None):
+    if bound_basis(r, probe): return BASIS_BOUND
+    return BASIS_OBSERVED if probe_observed(probe) else BASIS_CLAIMED
+
+def grade_sort_key(grade, basis):
+    """Sort key (ascending = best first): grade first (higher better, None last), basis breaks ties (bound > observed > claimed)."""
+    return (grade is None, -(grade if grade is not None else 0), BASIS_ORDER.index(basis) if basis in BASIS_ORDER else len(BASIS_ORDER))
+
 def grade_record(r, probe=None):
-    """Return (grade|None, info dict). info: src, quote, url, reason, range."""
+    """Return (grade|None, info dict). info: src, quote, url, reason, range, basis (every non-hand result)."""
     if r.get("btc_src") == "hand": return r.get("btc"), {"src": "hand"}
+    g, info = _grade_text(r, probe)
+    if g == 0 and info.get("src") == "agent-evidence" or g == 1:
+        info["basis"] = BASIS_CLAIMED   # downgrades stand at 'claimed'
+        return g, info
+    basis = grade_basis(r, probe)
+    info["basis"] = basis
+    if g is not None and g > CLAIMED_CAP and basis == BASIS_CLAIMED:
+        info.pop("src", None)
+        info["range"] = "3-4 claimed"
+        info["reason"] = "claimed by page text only: " + info["reason"] + "; 3-4 needs an observed checkout or bound endpoint"
+        return None, info
+    return g, info
+
+def _grade_text(r, probe=None):
     quotes = [q for q in r.get("pay_q") or [] if q["c"] in BTC and not q.get("neg")]
     pm = [m for m in (probe or {}).get("methods") or [] if m["c"] in BTC]
     procs = (probe or {}).get("processors") or []
@@ -52,6 +90,7 @@ def apply(r, probe=None):
     out["btc_src"] = "agent-evidence" if g is not None else None
     out["btc_grade_quote"], out["btc_grade_url"] = info.get("quote"), info.get("url")
     out["btc_grade_reason"] = info.get("reason")
+    out["btc_grade_basis"] = info.get("basis")   # always published with the grade
     if g is not None and g >= 3:
         out["btc_priv"] = sorted(set(out.get("btc_priv") or []) | {"noacct", "selfhosted"})
     if info.get("range"): out["btc_grade_range"] = info["range"]
