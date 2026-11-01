@@ -24,7 +24,7 @@ export function parseReviewEvent(input: unknown, knownDomain: (d: string) => boo
   const ev = input as NostrEventLine & Record<string, unknown>;
   if ("nsec" in ev || "privkey" in ev || "seckey" in ev) return fail("secret_sent", "never send a secret key; sign locally and send only the signed event");
   const v = verifyNostrEvent(ev, NOSTR_KIND_ACCEPTANCE);
-  if (!v.ok) return fail("bad_signature", v.reason);
+  if (!v.ok) return fail(v.reason.startsWith("wrong kind") ? "bad_kind" : "bad_signature", v.reason);
   const tags = ev.tags as string[][];
   if (!tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return fail("bad_tags", "tags must be arrays of strings");
   const nowS = Math.floor(now / 1000);
