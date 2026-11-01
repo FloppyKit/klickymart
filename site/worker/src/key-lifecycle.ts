@@ -27,12 +27,18 @@ import { verifyResult, type HarnessOpts, type HarnessVerdict, type HeadPayload, 
 export const KEYSTMT_DOMAIN = "klickymart-keystmt-v1";
 export const REVOKE_DOMAIN = "klickymart-keyrevoke-v1";
 export const REVKEY_ROTATE_DOMAIN = "klickymart-revkey-rotate-v1";
-/** Hard max lifetime of a key statement (harness clamps signed expires_at to created_at + this). v9.2 says "short
- * (starting guess)" with no number. PENDING SATOSHI: placeholder 7 days. */
-export const KEY_STATEMENT_TTL_CAP_S = 7 * 86400;
-/** How long a superseded statement still verifies after its successor's created_at. v9.2 does not define an overlap for
- * the KlickyMart signing key (only for feedback keys). PENDING SATOSHI: placeholder 0 = no overlap (fail closed). */
-export const KEY_OVERLAP_S = 0;
+/** Hard max lifetime of a key statement, compiled in (Satoshi final M3 rule 1, Matt OK 2026-11-01). Config may LOWER
+ * the cap (KM_KEY_TTL_CAP_S / ttlCapS) but never raise it. Raising it is a code change + review. */
+export const HARD_MAX_S = 604800;
+/** @deprecated alias kept for readers of the first M3 pass. */
+export const KEY_STATEMENT_TTL_CAP_S = HARD_MAX_S;
+/** Effective cap: min(HARD_MAX_S, config). Missing, non-integer, zero or negative config -> HARD_MAX_S. */
+export function effectiveTtlCap(config?: number | string | null): number {
+  const n = typeof config === "string" ? (/^\d+$/.test(config.trim()) ? Number(config.trim()) : NaN) : config ?? NaN;
+  return Number.isSafeInteger(n) && (n as number) > 0 ? Math.min(HARD_MAX_S, n as number) : HARD_MAX_S;
+}
+/** Effective expiry of a statement: min(expires_at, created_at + effective cap). Over-long expiries are clamped. */
+export const effectiveExpiry = (p: { created_at: number; expires_at: number }, config?: number | string | null) => Math.min(p.expires_at, p.created_at + effectiveTtlCap(config));
 /** Minimum distinct channels for the first pin (v9.2: "at least two"). */
 export const MIN_PIN_CHANNELS = 2;
 
@@ -225,12 +231,13 @@ export function handoverProblem(prev: KeyStatement, s: KeyStatement, st: KeyStat
   return null;
 }
 
-export type StatementStatus = "current" | "overlap" | "superseded" | "revoked" | "expired" | "not_yet_valid" | "compromised" | "unknown";
-export interface KeyOpts { skewS?: number; ttlCapS?: number; overlapS?: number }
+export type StatementStatus = "current" | "superseded" | "revoked" | "expired" | "not_yet_valid" | "compromised" | "unknown";
+/** No overlap option: the old key dies the moment its handover is accepted (Satoshi final M3 rule 2). */
+export interface KeyOpts { skewS?: number; ttlCapS?: number }
 
-/** Status of the statement named by a result, at the harness's own clock. Only "current" and "overlap" verify. */
+/** Status of the statement named by a result, at the harness's own clock. Only "current" verifies. */
 export function statementStatus(st: KeyState, hash: string | null | undefined, nowS: number, o: KeyOpts = {}): { status: StatementStatus; stmt?: KeyStatement; until?: number } {
-  const S = o.skewS ?? 60, cap = o.ttlCapS ?? KEY_STATEMENT_TTL_CAP_S, ov = o.overlapS ?? KEY_OVERLAP_S;
+  const S = o.skewS ?? 60;
   const v = evaluate(st, nowS);
   if (v.compromised) return { status: "compromised" };
   if (!hash) return { status: "unknown" };
@@ -239,13 +246,10 @@ export function statementStatus(st: KeyState, hash: string | null | undefined, n
   const s = v.chain[i]!;
   if (v.revokedFrom !== null && i >= v.revokedFrom) return { status: "revoked", stmt: s };
   if (s.payload.created_at > nowS + S) return { status: "not_yet_valid", stmt: s };
-  let until = Math.min(s.payload.expires_at, s.payload.created_at + cap); // future-dated expiry is clamped
+  const until = effectiveExpiry(s.payload, o.ttlCapS); // over-long expiry is clamped, never trusted
   if (nowS > until) return { status: "expired", stmt: s };
-  const next = v.chain[i + 1];
-  if (!next) return { status: "current", stmt: s, until };
-  const ovUntil = next.payload.created_at + ov;
-  if (ov > 0 && nowS <= ovUntil) { until = Math.min(until, ovUntil); return { status: "overlap", stmt: s, until }; }
-  return { status: "superseded", stmt: s };
+  if (v.chain[i + 1]) return { status: "superseded", stmt: s }; // overlap 0
+  return { status: "current", stmt: s, until };
 }
 
 /** The statement a producer should sign with right now (last valid, unrevoked, unexpired), or null = fail closed. */
@@ -283,14 +287,14 @@ export function keyLifecycleEnabled(env: { KM_KEY_LIFECYCLE?: string }): boolean
 // ---------------- Harness: results under the key lifecycle ----------------
 
 /** verifyResult plus the M3 checks: the result and its head both name the same key-statement hash, that statement is
- * current (or inside an overlap) in the pinned lineage, both are signed by its key, and acceptance ends no later than the
+ * current in the pinned lineage, both are signed by its key, and acceptance ends no later than the
  * statement's clamped expiry. Compromised, revoked, expired, superseded or unknown statements fail closed. */
 export function verifyResultWithKeys(res: Signed<ResultPayload>, head: Signed<HeadPayload>, ks: KeyState, o: Omit<HarnessOpts, "pinned" | "requireKeyStatement"> & KeyOpts): HarnessVerdict & { keyStatus?: StatementStatus } {
   const ksh = res?.payload?.key_statement_hash;
   if (!ksh) return { ok: false, reason: "result: no key statement" };
   if (head?.payload?.key_statement_hash !== ksh) return { ok: false, reason: "head: does not name the result's key statement" };
   const s = statementStatus(ks, ksh, o.nowS, o);
-  if (s.status !== "current" && s.status !== "overlap") return { ok: false, reason: `key statement ${s.status}`, keyStatus: s.status };
+  if (s.status !== "current") return { ok: false, reason: `key statement ${s.status}`, keyStatus: s.status };
   const v = verifyResult(res, head, { ...o, pinned: s.stmt!.payload.key, requireKeyStatement: true });
   if (!v.ok) return v;
   return { ...v, acceptUntil: Math.min(v.acceptUntil, s.until!), keyStatus: s.status };
@@ -301,7 +305,7 @@ export function verifyResultWithKeys(res: Signed<ResultPayload>, head: Signed<He
 export function paymentGateWithKeys(cached: { acceptUntil: number; key_statement_hash: string } | null, ks: KeyState, nowS: number, relayOnlyOptIn = false, o: KeyOpts = {}): "use_cache" | "relay_only" | "fail_closed" {
   if (cached && nowS <= cached.acceptUntil) {
     const s = statementStatus(ks, cached.key_statement_hash, nowS, o).status;
-    if (s === "current" || s === "overlap") return "use_cache";
+    if (s === "current") return "use_cache";
   }
   return relayOnlyOptIn ? "relay_only" : "fail_closed";
 }

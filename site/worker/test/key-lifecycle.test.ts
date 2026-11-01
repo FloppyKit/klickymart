@@ -3,7 +3,7 @@ import { env } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import {
-  KEY_STATEMENT_TTL_CAP_S, addRevkeyRotate, addRevoke, addStatement, currentStatement, evaluate, exportKeyState, handoverProblem,
+  HARD_MAX_S, KEY_STATEMENT_TTL_CAP_S, effectiveExpiry, effectiveTtlCap, addRevkeyRotate, addRevoke, addStatement, currentStatement, evaluate, exportKeyState, handoverProblem,
   importKeyState, keyLifecycleEnabled, makeHandover, makeInception, makeRevkeyRotate, makeRevoke, newKeyState, paymentGateWithKeys,
   pinFromChannels, repin, statementHash, statementStatus, storeKeyRecord, verifyResultWithKeys, type KeyState, type KeyStatement,
 } from "../src/key-lifecycle";
@@ -80,6 +80,31 @@ describe("v9.2 §4 acceptance: pre-rotation", () => {
     const { stmts } = lineage(1);
     const t = { ...stmts[0]!, payload: { ...stmts[0]!.payload, expires_at: NOW + 99 * DAY } };
     expect(addStatement(newKeyState(stmts[0]!.hash), t).outcome).toBe("rejected");
+  });
+});
+
+describe("rule 1: TTL cap (HARD_MAX_S compiled in; config may only lower it)", () => {
+  it("HARD_MAX_S is 7 days and config can lower but never raise it", () => {
+    expect(HARD_MAX_S).toBe(604800);
+    expect(effectiveTtlCap(undefined)).toBe(HARD_MAX_S);
+    expect(effectiveTtlCap("86400")).toBe(86400);
+    expect(effectiveTtlCap(3600)).toBe(3600);
+    expect(effectiveTtlCap(10 * HARD_MAX_S)).toBe(HARD_MAX_S);
+    expect(effectiveTtlCap("9999999999")).toBe(HARD_MAX_S);
+    for (const bad of ["", "abc", "-5", "0", "1.5", 0, -1, NaN]) expect(effectiveTtlCap(bad as never)).toBe(HARD_MAX_S);
+  });
+  it("effective expiry = min(expires_at, created_at + min(HARD_MAX_S, config)); over-long is clamped, not rejected", () => {
+    const sk = key();
+    const s = makeInception(sk, pk(key()), pk(key()), NOW - DAY, NOW + 365 * DAY);
+    const st = newKeyState(s.hash);
+    expect(addStatement(st, s).outcome).toBe("accepted"); // not rejected
+    expect(effectiveExpiry(s.payload)).toBe(NOW - DAY + HARD_MAX_S);
+    expect(statementStatus(st, s.hash, NOW - DAY + HARD_MAX_S).status).toBe("current");
+    expect(statementStatus(st, s.hash, NOW - DAY + HARD_MAX_S + 1).status).toBe("expired");
+    expect(statementStatus(st, s.hash, NOW + DAY + 1, { ttlCapS: 2 * DAY }).status).toBe("expired"); // lowered
+    expect(statementStatus(st, s.hash, NOW - DAY + HARD_MAX_S + 1, { ttlCapS: 30 * DAY }).status).toBe("expired"); // can't raise
+    const short = makeInception(sk, pk(key()), pk(key()), NOW - DAY, NOW + 60);
+    expect(effectiveExpiry(short.payload)).toBe(NOW + 60); // own expires_at wins when shorter
   });
 });
 
@@ -213,11 +238,17 @@ describe("results bind the key statement", () => {
     expect(paymentGateWithKeys(cached, st, NOW)).toBe("fail_closed");
     expect(paymentGateWithKeys(cached, st, NOW, true)).toBe("relay_only");
   });
-  it("no overlap by default: the old key stops verifying at handover (PENDING SATOSHI overlap window)", () => {
+  it("rule 2: overlap is 0 and cannot be configured: the old key dies at handover", () => {
     const { sks, stmts, st } = lineage(2);
     const old = signedPair(sks[0]!, stmts[0]!.hash);
-    expect(verifyResultWithKeys(old.res, old.head, st, HO).ok).toBe(false);
-    expect(verifyResultWithKeys(old.res, old.head, st, { ...HO, overlapS: 20 * DAY }).ok).toBe(true);
+    expect(verifyResultWithKeys(old.res, old.head, st, HO)).toMatchObject({ ok: false, keyStatus: "superseded" });
+    expect(verifyResultWithKeys(old.res, old.head, st, { ...HO, overlapS: 20 * DAY } as never).ok).toBe(false);
+    // the instant the handover is accepted, not at its created_at
+    const one = lineage(1); const h = makeHandover(one.stmts[0]!, one.sks[0]!, one.sks[1]!, pk(key()), pk(one.rev), NOW + 30, NOW + DAY);
+    const r0 = signedPair(one.sks[0]!, one.stmts[0]!.hash);
+    expect(verifyResultWithKeys(r0.res, r0.head, one.st, HO).ok).toBe(true);
+    addStatement(one.st, h);
+    expect(verifyResultWithKeys(r0.res, r0.head, one.st, HO).ok).toBe(false);
   });
 });
 
