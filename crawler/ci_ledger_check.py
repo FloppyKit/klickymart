@@ -13,7 +13,8 @@ Base selection:
 Scan: every commit in the range that touched a ledger is checked against ITS OWN parent(s) only:
   - one parent: the parent's file must be an exact line prefix of the child's (check_append_only.check_bytes)
   - merge: the first parent's file must be an exact line prefix of the result (no reordering, so git blame keeps each
-    row's commit date); every other parent's rows must be present after it (multiset); extra rows are appends.
+    row's commit date); every other parent's own rows (not in parent 1) must follow it in their original order
+    (ordered subsequence; parents may interleave); extra rows are appends.
 Why sound: rows in the base are in every first commit of the range's parents; by induction each step keeps all of its
 parents' rows (prefix, or multiset superset for merges), so no row reachable from base is ever edited or dropped by HEAD.
 A union merge result (base+M+S) contains both base+M and base+S, so normal merges pass.
@@ -38,18 +39,28 @@ def blob(rev, path):
     if r.returncode != 0: raise RuntimeError(f"git show {rev}:{path} failed")
     return r.stdout
 
+def _lines(b):
+    return b.split(b"\n")[:-1] if b else []
+
+def _is_subsequence(needle, hay):
+    it = iter(hay)
+    return all(any(x == y for y in it) for x in needle)
+
 def check_merge(parents_bytes, child):
-    """First parent's file must be an exact line prefix of the result (no reorder, so blame keeps each row's date);
-    every other parent's rows must appear after that prefix (multiset); anything else is an append."""
+    """First parent's file must be an exact line prefix of the result (no reorder, so blame keeps each row's date).
+    For every other parent, its rows not already in the first parent must appear after that prefix as an ordered
+    subsequence (original order kept; rows of different parents may interleave); anything else is an append."""
     why = check_bytes(parents_bytes[0], child)
     if why: return f"first parent not an exact prefix: {why}"
-    have = collections.Counter(child[len(parents_bytes[0]):].split(b"\n")[:-1])
+    tail = _lines(child[len(parents_bytes[0]):])
     for i, pb in enumerate(parents_bytes[1:], 2):
-        need = collections.Counter(pb.split(b"\n")[:-1] if pb else [])
-        # rows parent i shares with parent 1 are already in the prefix
-        need -= collections.Counter(parents_bytes[0].split(b"\n")[:-1] if parents_bytes[0] else [])
-        missing = need - have
-        if missing: return f"merge dropped or edited {sum(missing.values())} row(s) of parent {i}"
+        shared = collections.Counter(_lines(parents_bytes[0]))
+        own = []
+        for ln in _lines(pb):
+            if shared[ln]: shared[ln] -= 1
+            else: own.append(ln)
+        if not _is_subsequence(own, tail):
+            return f"merge dropped, edited or reordered row(s) of parent {i}"
     return None
 
 def is_ancestor(base):
