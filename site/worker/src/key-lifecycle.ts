@@ -352,12 +352,12 @@ export function paymentGateWithKeys(cached: { acceptUntil: number; key_statement
 
 // ---------------- Worker side ----------------
 
-export type KeyRecordKind = "statement" | "revoke" | "revkey_rotate";
+export type KeyRecordKind = "statement" | "revoke" | "revkey_rotate" | "staged_statement";
 
 /** Insert one record (append-only; a known hash is a no-op). The record is validated first; invalid records are not stored. */
 export async function storeKeyRecord(db: D1Database, kind: KeyRecordKind, rec: KeyStatement | Revoke | RevkeyRotate, nowS: number): Promise<AddOutcome> {
   const probe = newKeyState("0".repeat(64));
-  const out = kind === "statement" ? addStatement(probe, rec as KeyStatement) : kind === "revoke" ? addRevoke(probe, rec as Revoke) : addRevkeyRotate(probe, rec as RevkeyRotate);
+  const out = kind === "statement" || kind === "staged_statement" ? addStatement(probe, rec as KeyStatement) : kind === "revoke" ? addRevoke(probe, rec as Revoke) : addRevkeyRotate(probe, rec as RevkeyRotate);
   if (out.outcome === "rejected") return "rejected";
   const body = canonicalJson(rec);
   const id = bytesToHex(sha256(utf8ToBytes(body))); // whole signed record: two rotations with one payload but different signatures both stay
@@ -372,9 +372,41 @@ export async function loadKeyState(db: D1Database, root: string): Promise<KeySta
     const st = newKeyState(root);
     for (const r of results ?? []) {
       const b = JSON.parse(r.body_json);
+      if (r.kind === "staged_statement") continue; // not part of the lineage until the cron promotes it
       if (r.kind === "statement") addStatement(st, b); else if (r.kind === "revoke") addRevoke(st, b); else if (r.kind === "revkey_rotate") addRevkeyRotate(st, b);
     }
     evaluate(st, 0);
     return st;
   } catch { return null; }
+}
+
+// ---------------- Cron handover (Satoshi final M3 rule 2) ----------------
+/** Stage a handover statement for the next daily cron. Staged rows are NOT part of the lineage (loadKeyState ignores
+ * them), so staging never kills the current key. */
+export const stageHandover = (db: D1Database, stmt: KeyStatement, nowS: number) => storeKeyRecord(db, "staged_statement", stmt, nowS);
+
+/** Called by the daily cron BEFORE it writes the day's head (no new cron, no higher frequency). Promotes a staged
+ * handover only if it is a valid handover from the current statement AND the Worker holds the successor's key
+ * (KM_RESULT_SK_NEXT_HEX). The old key dies the moment the statement is accepted (overlap 0); the head written right
+ * after is served under the new key, so there is no 503 gap. A handover stored any other way (outside the cron, or
+ * without the next key loaded) is allowed and fails closed: /open-store/* answers 503 until a head can be signed by the
+ * key of the current statement. Returns the promoted statement hash, or null. */
+export async function cronHandover(db: D1Database, env: { KM_KEY_ROOT?: string; KM_RESULT_SK_NEXT_HEX?: string; KM_KEY_TTL_CAP_S?: string }, nowS: number): Promise<string | null> {
+  const root = (env.KM_KEY_ROOT ?? "").trim();
+  const nextPub = pubFromSkHex(env.KM_RESULT_SK_NEXT_HEX);
+  if (!HEX64.test(root) || !nextPub) return null;
+  const ks = await loadKeyState(db, root);
+  if (!ks) return null;
+  const cur = currentStatement(ks, nowS, { ttlCapS: env.KM_KEY_TTL_CAP_S as never });
+  if (!cur) return null;
+  const { results } = await db.prepare("SELECT body_json FROM km_key_records WHERE kind = 'staged_statement'").all<{ body_json: string }>();
+  const cands = (results ?? []).map((r) => JSON.parse(r.body_json) as KeyStatement).filter((s) => s.payload?.key === nextPub && s.payload.prev === cur.hash && handoverProblem(cur, s, ks) === null);
+  if (cands.length !== 1) return null; // none, or ambiguous: never pick one (two would be a fork once promoted)
+  const out = await storeKeyRecord(db, "statement", cands[0]!, nowS);
+  return out === "rejected" ? null : cands[0]!.hash;
+}
+/** x-only pubkey of a 64-hex secret, or null. The secret is never logged or returned. */
+export function pubFromSkHex(sk: string | undefined): string | null {
+  if (!sk || !HEX64.test(sk)) return null;
+  try { return bytesToHex(secp.schnorr.getPublicKey(hexToBytes(sk))); } catch { return null; }
 }

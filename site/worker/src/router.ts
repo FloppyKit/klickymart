@@ -112,9 +112,9 @@ export interface Env {
   FACILITATE_ENABLED?: string;
   /** M1 kill switch: "0"/"false"/"off" stops the 420/421/422 marks validator from running at ingest. Default on. */
   KM_HANDSHAKE_MARKS?: string;
-  /** M2 kill switch: "0"/"false"/"off" stops endpoint-binding ingest (kind, filter, storage). Default on. Observation only. */
+  /** M2 switch: "1"/"true"/"on" enables endpoint-binding ingest (kind, filter, storage). Default OFF. Observation only. */
   KM_ENDPOINT_BINDINGS?: string;
-  /** M2 kill switch: "0"/"false"/"off" removes /open-store/* (signed results). Default on; 503 without key or fresh head. */
+  /** M2 switch: "1"/"true"/"on" enables /open-store/* (signed results). Default OFF; when on, 503 without key or fresh head. */
   KM_SIGNED_RESULTS?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
@@ -122,6 +122,10 @@ export interface Env {
   KM_KEY_LIFECYCLE?: string;
   /** M3: hash of the pinned inception key statement (public, not a secret). */
   KM_KEY_ROOT?: string;
+  /** M3: optional lower TTL cap for key statements, seconds. Can only LOWER the compiled HARD_MAX_S (7 days). */
+  KM_KEY_TTL_CAP_S?: string;
+  /** M3: the pre-announced successor's secret key (wrangler secret, 64 hex), loaded ahead of a cron handover. Never logged. */
+  KM_RESULT_SK_NEXT_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
   SUBMIT_SALT?: string;
   /** "production" in [env.production.vars]; with it, a missing SUBMIT_SALT makes rate-limited endpoints refuse (503). */

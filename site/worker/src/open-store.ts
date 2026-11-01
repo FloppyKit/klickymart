@@ -4,9 +4,7 @@
 import type { Env } from "./router";
 import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
-import { currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, statementStatus } from "./key-lifecycle";
-import * as secp from "@noble/secp256k1";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { cronHandover, currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, pubFromSkHex, statementStatus } from "./key-lifecycle";
 export { signedResultsEnabled } from "./signed-result";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
@@ -17,7 +15,7 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   const lifecycle = keyLifecycleEnabled(env);
   if (path === "/open-store/keys" && lifecycle) return keysRoute(env);
   if (path !== "/open-store/head" && path !== "/open-store/binding") return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
-  const sk = env.KM_RESULT_SK_HEX;
+  let sk = env.KM_RESULT_SK_HEX;
   if (!sk || !/^[0-9a-f]{64}$/.test(sk)) return unavailable("no result-signing key configured");
   if (!env.DB) return unavailable("no database");
   const nowS = Math.floor(Date.now() / 1000);
@@ -35,12 +33,14 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
     const ks = await loadKeyState(env.DB, root);
     if (!ks) return unavailable("key records unreadable");
     if (ks.compromised) return unavailable("key lineage compromised");
-    const cur = currentStatement(ks, nowS);
+    const cap = env.KM_KEY_TTL_CAP_S; // may only LOWER HARD_MAX_S
+    const cur = currentStatement(ks, nowS, { ttlCapS: cap as never });
     if (!cur) return unavailable("no current key statement (expired, revoked or missing)");
-    let signer = "";
-    try { signer = bytesToHex(secp.schnorr.getPublicKey(hexToBytes(sk))); } catch { /* fall through */ }
-    if (cur.payload.key !== signer) return unavailable("signing key is not the key named by the current statement");
-    ksh = cur.hash; keyUntil = statementStatus(ks, cur.hash, nowS).until;
+    // Sign with whichever loaded key the current statement names (after a cron handover that is KM_RESULT_SK_NEXT_HEX).
+    const pick = [env.KM_RESULT_SK_HEX, env.KM_RESULT_SK_NEXT_HEX].find((k) => pubFromSkHex(k) === cur.payload.key);
+    if (!pick) return unavailable("signing key is not the key named by the current statement");
+    sk = pick;
+    ksh = cur.hash; keyUntil = statementStatus(ks, cur.hash, nowS, { ttlCapS: cap as never }).until;
     head.key_statement_hash = ksh;
     head.expires_at = Math.min(head.expires_at, keyUntil ?? head.expires_at);
   }
@@ -58,8 +58,10 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
  * KM_SIGNED_RESULTS is on; otherwise does nothing. snapshot_id = "<snapshot data version>@<cron unix seconds>": the spec
  * does not yet define what a head commits to, so this is a LABEL (which data version + when), not a content commitment
  * (no Merkle root / digest). Flagged for Satoshi; M4 owns the real snapshot step. */
-export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
+export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string; KM_KEY_LIFECYCLE?: string; KM_KEY_ROOT?: string; KM_RESULT_SK_NEXT_HEX?: string; KM_KEY_TTL_CAP_S?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
   if (!_sre(env) || !env.DB) return null;
+  // M3: a staged handover is promoted in this same daily run, right before the head is written (no 503 gap).
+  if (keyLifecycleEnabled(env)) { try { await cronHandover(env.DB, env, nowS); } catch { /* lineage unchanged; fails closed if needed */ } }
   try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
 }
 

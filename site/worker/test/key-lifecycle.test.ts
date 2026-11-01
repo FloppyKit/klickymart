@@ -8,7 +8,8 @@ import {
   pinFromChannels, repin, classifyPastResult, archiveResult, statementHash, statementStatus, storeKeyRecord, verifyResultWithKeys, type KeyState, type KeyStatement,
 } from "../src/key-lifecycle";
 import { buildResult, signHead, signResult, type HeadPayload } from "../src/signed-result";
-import { openStoreRoute } from "../src/open-store";
+import { openStoreRoute, writeDailyHead } from "../src/open-store";
+import { cronHandover, stageHandover, loadKeyState } from "../src/key-lifecycle";
 import { handleRequest } from "../src/router";
 
 // Throwaway keys, generated in memory per run. No real key is read; nothing touches a relay.
@@ -446,6 +447,57 @@ describe("worker: KM_KEY_LIFECYCLE (default off) and /open-store under the lifec
     expect(r.status).toBe(503);
     expect(await r.text()).toMatch(/compromised/);
     void stmts;
+  });
+  async function realClockLineage() {
+    const t = Math.floor(Date.now() / 1000);
+    const sks = [key(), key(), key()], rev = key();
+    const s0 = makeInception(sks[0]!, pk(sks[1]!), pk(rev), t - DAY, t + 3 * DAY);
+    await storeKeyRecord(env.DB, "statement", s0, t);
+    await env.DB.prepare("INSERT INTO snapshot_heads (sequence, snapshot_id, snapshot_digest, created_at, prev_head) VALUES (0,'s0',?,?,NULL)").bind(DG, t - 60).run();
+    const h1 = makeHandover(s0, sks[0]!, sks[1]!, pk(sks[2]!), pk(rev), t, t + 3 * DAY);
+    return { t, sks, rev, s0, h1 };
+  }
+  const head = (e: never) => openStoreRoute("/open-store/head", new URL("https://x/open-store/head"), e);
+  it("rule 2: cron handover promotes the staged statement and the same run's head is signed by the new key (no 503 gap)", async () => {
+    const { t, sks, s0, h1 } = await realClockLineage();
+    const e = E(sks[0]!, s0.hash, { KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[1]!) });
+    expect((await stageHandover(env.DB, h1, t))).toBe("accepted");
+    const before = await (await head(e)).json() as { payload: HeadPayload; signer: string };
+    expect(before.payload.key_statement_hash).toBe(s0.hash); // staging does not kill the old key
+    expect(before.signer).toBe(pk(sks[0]!));
+    expect(await writeDailyHead(e as never, "v1", t)).toBe(1);
+    // M2 writes label-only heads (never served) until M4 supplies snapshot_digest; stand in for M4 here.
+    await env.DB.prepare("UPDATE snapshot_heads SET snapshot_digest = ? WHERE sequence = 1").bind(DG).run();
+    const r = await head(e);
+    expect(r.status).toBe(200);
+    const after = await r.json() as { payload: HeadPayload; signer: string };
+    expect(after.payload.key_statement_hash).toBe(h1.hash);
+    expect(after.signer).toBe(pk(sks[1]!));
+    const ks = (await loadKeyState(env.DB, s0.hash))!;
+    expect(statementStatus(ks, s0.hash, t).status).toBe("superseded");
+  });
+  it("rule 2: cron does nothing without the next key loaded, or with two staged candidates", async () => {
+    const { t, sks, rev, s0, h1 } = await realClockLineage();
+    await stageHandover(env.DB, h1, t);
+    expect(await cronHandover(env.DB, { KM_KEY_ROOT: s0.hash }, t)).toBeNull();
+    await stageHandover(env.DB, makeHandover(s0, sks[0]!, sks[1]!, pk(key()), pk(rev), t, t + DAY), t);
+    expect(await cronHandover(env.DB, { KM_KEY_ROOT: s0.hash, KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[1]!) }, t)).toBeNull();
+  });
+  it("rule 2: a handover outside the cron is allowed and fails closed until the new key signs", async () => {
+    const { t, sks, s0, h1 } = await realClockLineage();
+    await storeKeyRecord(env.DB, "statement", h1, t);
+    expect((await head(E(sks[0]!, s0.hash))).status).toBe(503);
+    expect((await head(E(sks[0]!, s0.hash, { KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[1]!) }))).status).toBe(200);
+  });
+  it("rule 1: KM_KEY_TTL_CAP_S lowers the cap in the Worker but cannot raise it", async () => {
+    const { sks, s0 } = await realClockLineage(); // s0 created a day ago
+    expect((await head(E(sks[0]!, s0.hash, { KM_KEY_TTL_CAP_S: "3600" }))).status).toBe(503);
+    expect((await head(E(sks[0]!, s0.hash, { KM_KEY_TTL_CAP_S: "99999999" }))).status).toBe(200);
+  });
+  it("rule 5: with the lifecycle on every served head carries key_statement_hash", async () => {
+    const { sks, s0 } = await realClockLineage();
+    const h = await (await head(E(sks[0]!, s0.hash))).json() as { payload: HeadPayload };
+    expect(h.payload.key_statement_hash).toBe(s0.hash);
   });
   it("router: /open-store/keys does not exist with the shipped defaults", async () => {
     const r = await handleRequest(new Request("https://klickymart.com/open-store/keys"), env as never);
