@@ -27,6 +27,11 @@ def test_redact_table(name, text, secrets):
         out = f(text)
         for s in secrets: assert s not in out, (name, out)
 
+@pytest.mark.parametrize("u", ["https://shop.example/products/Mens-Running-Shoe-Blue-Size10-2024/",
+                               "https://shop.example/p/Womens_Trail_Jacket_XL2024_Red/details"])
+def test_readable_slugs_not_redacted(u):
+    assert egress.redact(u) == u
+
 def test_redact_keeps_plain_text_and_short_paths():
     assert egress.redact("https://shop.example/products/123/blue-shirt") == "https://shop.example/products/123/blue-shirt"
     assert egress.redact("egress: not a public internet host: localhost") == "egress: not a public internet host: localhost"

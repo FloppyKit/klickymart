@@ -71,10 +71,13 @@ _RULES = [
     # free text key=value / key: value
     (re.compile(r"(?i)\b(" + _SECRET_KEYS + r")(\s*[=:]\s*)(?!\[redacted\])[^\s,;&\"'<>]+"), lambda m: m.group(1) + m.group(2) + _R),
 ]
-# long token-like url path segments: hex runs, prefixed secrets (sk-..., ghp_...), or long mixed-case+digit base64ish runs
+# long token-like url path segments. A readable slug (word-like parts joined by '-' or '_', e.g.
+# Mens-Running-Shoe-Blue-Size10-2024) is NOT a token unless it has a known token prefix or is 32+ hex.
+_TOKEN_PREFIX = re.compile(r"(?i)^(sk|pk|rk)[-_]|^(ghp|gho|ghs|ghu|github_pat)_|^xox[abprs]-|^ln(bc|tb|bcrt)\d|^(api|key|tok)[-_]")
 def _seg_secret(seg):
     if len(seg) < 20: return False
-    if re.fullmatch(r"[A-Fa-f0-9]{32,}", seg) or re.match(r"(?i)(sk|pk|rk|ghp|gho|xox[abp]|api|key|tok)[-_]", seg): return True
+    if re.fullmatch(r"[A-Fa-f0-9]{32,}", seg) or _TOKEN_PREFIX.match(seg): return True
+    if re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+", seg): return False   # slug
     return bool(re.fullmatch(r"[A-Za-z0-9+/=_-]{24,}", seg) and re.search(r"[A-Z]", seg) and re.search(r"[a-z]", seg) and re.search(r"\d", seg))
 
 def redact(s):
