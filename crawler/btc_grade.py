@@ -56,6 +56,19 @@ def _date(x):
     if dt.tzinfo is None: dt = dt.replace(tzinfo=datetime.timezone.utc)
     return dt.astimezone(datetime.timezone.utc).date()
 
+# Starting guess, modeled on the v9.2 event created_at skew check: a hand_at further than this in the future is an anomaly.
+HAND_AT_SKEW = datetime.timedelta(minutes=10)
+
+def _dt(x):
+    """Aware UTC datetime of x (date-only -> midnight UTC), or None."""
+    if x is None or x == "": return None
+    if isinstance(x, datetime.datetime): dt = x
+    elif isinstance(x, datetime.date): dt = datetime.datetime(x.year, x.month, x.day)
+    else:
+        try: dt = datetime.datetime.fromisoformat(str(x).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError): return None
+    return (dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)).astimezone(datetime.timezone.utc)
+
 def _today(today=None):
     """Injectable 'today'; defaults to the UTC date (not box-local)."""
     return _date(today) or datetime.datetime.now(datetime.timezone.utc).date()
@@ -85,8 +98,15 @@ def mark_first_seen(out, today=None):
     """Persist btc_grade_hand_first_seen (once) for an undated or future-dated hand override, so the clamp cannot
     move forward on later passes. Returns True when undated."""
     at = _date(out.get("btc_grade_hand_at"))
-    if at is not None and at <= _today(today): return False
-    if not _date(out.get("btc_grade_hand_first_seen")): out["btc_grade_hand_first_seen"] = _today(today).isoformat()
+    now = _dt(today) or datetime.datetime.now(datetime.timezone.utc)
+    at_dt = _dt(out.get("btc_grade_hand_at"))
+    future = at_dt is not None and at_dt - now > HAND_AT_SKEW
+    if (at is None or at > _today(today) or future) and not _date(out.get("btc_grade_hand_first_seen")):
+        out["btc_grade_hand_first_seen"] = _today(today).isoformat()
+    if future and "btc_grade_anomaly" not in out:
+        out["btc_grade_anomaly"] = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"),
+                                    "clamped_to": out["btc_grade_hand_first_seen"], "seen_at": now.isoformat()}
+        out["btc_grade_needs_review"] = True
     return at is None
 
 def _redact_url(u):
@@ -128,7 +148,7 @@ def note_conflict(out, probe_grade, probe_basis, probe_url, today=None, undated=
     out["btc_grade_conflict"] = {"hand": {"grade": out.get("btc"), "basis": BASIS_HAND},
                                  "probe": {"grade": probe_grade, "basis": probe_basis, "url": _redact_url(probe_url)},
                                  "seen_at": _today(today).isoformat()}
-    if undated: out["btc_grade_needs_review"] = True
+    out["btc_grade_needs_review"] = True   # Satoshi 2026-10-31: any recorded conflict, dated or not
     return out
 
 def grade_record(r, probe=None):

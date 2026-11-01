@@ -74,4 +74,21 @@ class P2_7ConflictUrlRedacted(unittest.TestCase):
         self.assertTrue(u.startswith("https://s.example/checkout")); self.assertNotIn("?", u)
         for bad in ("SECRETtok", "MACx", "user:pw"): self.assertNotIn(bad, u)
 
+class NeedsReviewAndSkew(unittest.TestCase):
+    def test_dated_conflict_sets_flag(self):
+        out = apply(hand(2, btc_grade_hand_at="2026-10-30"), CARD_ONLY, today="2026-11-01")
+        self.assertIn("btc_grade_conflict", out); self.assertIs(out["btc_grade_needs_review"], True)
+        from checkout_parse import merge
+        p = {"d": "s.example", "step_reached": "payment_methods", "btc_offered": "no", "methods": [{"c": "card", "ev": "Visa"}], "path": [["p", "https://s.example/c"]]}
+        m = merge(hand(3, btc_grade_hand_at="2026-10-30"), p, today="2026-11-01")
+        self.assertIn("btc_grade_conflict", m); self.assertIs(m["btc_grade_needs_review"], True)
+    def test_future_hand_at_beyond_skew_anomaly(self):
+        out = apply(hand(0, btc_grade_hand_at="2026-11-01T12:30:00Z"), today="2026-11-01T12:00:00Z")
+        a = out["btc_grade_anomaly"]
+        self.assertEqual((a["kind"], a["hand_at"], a["clamped_to"]), ("future_hand_at", "2026-11-01T12:30:00Z", out["btc_grade_hand_first_seen"]))
+        self.assertTrue(a["seen_at"]); self.assertIs(out["btc_grade_needs_review"], True)
+    def test_hand_at_within_skew_no_anomaly(self):
+        out = apply(hand(0, btc_grade_hand_at="2026-11-01T12:09:00Z"), today="2026-11-01T12:00:00Z")
+        self.assertNotIn("btc_grade_anomaly", out); self.assertNotIn("btc_grade_needs_review", out)
+
 if __name__ == "__main__": unittest.main()
