@@ -203,7 +203,7 @@ describe("results bind the key statement", () => {
     const wrong = signedPair(sks[0]!, stmts[1]!.hash);
     expect(verifyResultWithKeys(wrong.res, wrong.head, st, HO).ok).toBe(false);
     const split = signedPair(sks[1]!, stmts[1]!.hash, { headKsh: stmts[0]!.hash });
-    expect(verifyResultWithKeys(split.res, split.head, st, HO).reason).toMatch(/head/);
+    expect(verifyResultWithKeys(split.res, split.head, st, HO)).toMatchObject({ ok: false, reason: expect.stringMatching(/head/) });
   });
   it("cached acceptance dies when a revoke is seen later (results signed before a revoke are rejected from then on)", () => {
     const { rev, stmts, st } = lineage(2);
@@ -326,7 +326,7 @@ describe("worker: KM_KEY_LIFECYCLE (default off) and /open-store under the lifec
     void stmts;
   });
   it("router: /open-store/keys does not exist with the shipped defaults", async () => {
-    const r = await handleRequest(new Request("https://klickymart.com/open-store/keys"), env as never, {} as never);
+    const r = await handleRequest(new Request("https://klickymart.com/open-store/keys"), env as never);
     expect(r.status).not.toBe(200);
   });
   it("statementHash is stable over the canonical payload", () => {
