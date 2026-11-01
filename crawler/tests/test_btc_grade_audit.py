@@ -1,4 +1,4 @@
-import os, sys, unittest
+import json, os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from btc_grade import grade_record, apply, probe_observed
 
@@ -84,11 +84,69 @@ class NeedsReviewAndSkew(unittest.TestCase):
         self.assertIn("btc_grade_conflict", m); self.assertIs(m["btc_grade_needs_review"], True)
     def test_future_hand_at_beyond_skew_anomaly(self):
         out = apply(hand(0, btc_grade_hand_at="2026-11-01T12:30:00Z"), today="2026-11-01T12:00:00Z")
-        a = out["btc_grade_anomaly"]
+        self.assertEqual(len(out["btc_grade_anomalies"]), 1); a = out["btc_grade_anomalies"][0]
         self.assertEqual((a["kind"], a["hand_at"], a["clamped_to"]), ("future_hand_at", "2026-11-01T12:30:00Z", out["btc_grade_hand_first_seen"]))
         self.assertTrue(a["seen_at"]); self.assertIs(out["btc_grade_needs_review"], True)
     def test_hand_at_within_skew_no_anomaly(self):
         out = apply(hand(0, btc_grade_hand_at="2026-11-01T12:09:00Z"), today="2026-11-01T12:00:00Z")
-        self.assertNotIn("btc_grade_anomaly", out); self.assertNotIn("btc_grade_needs_review", out)
+        self.assertFalse(out.get("btc_grade_anomalies")); self.assertNotIn("btc_grade_needs_review", out)
+
+class AnomalyHistoryAndLedger(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.d = tempfile.mkdtemp(); self.path = os.path.join(self.d, "ha.jsonl")
+        import hand_anomalies as HA; self.HA = HA
+        self.sink = lambda e: HA.record(e, path=self.path)
+    def fut(self, g=0, by="kb", d="s.example"):
+        return hand(g, d=d, btc_grade_hand_by=by, btc_grade_hand_at="2026-11-01T12:30:00Z")
+    def test_anomaly_survives_post_review_overwrite_and_flag_clears(self):
+        first = apply(self.fut(2), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        self.assertTrue(first["btc_grade_needs_review"])
+        later = apply(first, CARD_ONLY, today="2027-03-01T00:00:00Z", anomaly_sink=self.sink)   # past review_by
+        self.assertEqual((later["btc"], later["btc_src"]), (0, "agent-evidence"))
+        self.assertNotIn("btc_grade_needs_review", later)
+        self.assertEqual(later["btc_grade_anomalies"], first["btc_grade_anomalies"])
+        again = apply(later, CARD_ONLY, today="2027-03-02T00:00:00Z", anomaly_sink=self.sink)
+        self.assertEqual(len(again["btc_grade_anomalies"]), 1)
+    def test_record_dedup_on_record(self):
+        out = apply(self.fut(), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        out = apply(out, today="2026-11-01T12:01:00Z", anomaly_sink=self.sink)
+        self.assertEqual(len(out["btc_grade_anomalies"]), 1)
+    def test_ledger_one_entry_per_key_across_passes(self):
+        for t in ("2026-11-01T12:00:00Z", "2026-11-01T12:05:00Z"):
+            apply(self.fut(), today=t, anomaly_sink=self.sink)          # fresh record each pass
+        from checkout_parse import merge
+        merge(self.fut(), {"d": "s.example", "btc_offered": "no"}, today="2026-11-01T12:06:00Z", anomaly_sink=self.sink)
+        rows = [l for l in open(self.path) if l.strip()]
+        self.assertEqual(len(rows), 1)
+        e = list(self.HA.open_by_author(path=self.path)["kb"])[0]
+        for k in ("author", "domain", "kind", "hand_at", "clamped_to", "seen_at", "status", "id"): self.assertIn(k, e)
+        self.assertEqual((e["author"], e["domain"], e["kind"], e["status"]), ("kb", "s.example", "future_hand_at", "open"))
+    def test_open_by_author_groups(self):
+        apply(self.fut(by="kb", d="a.example"), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        apply(self.fut(by="kb", d="b.example"), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        apply(self.fut(by="matt", d="a.example"), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        g = self.HA.open_by_author(path=self.path)
+        self.assertEqual({a: sorted(e["domain"] for e in es) for a, es in g.items()}, {"kb": ["a.example", "b.example"], "matt": ["a.example"]})
+    def test_clear_appends_event_and_closes(self):
+        apply(self.fut(), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        before = open(self.path).read()
+        eid = self.HA.open_by_author(path=self.path)["kb"][0]["id"]
+        self.HA.clear(eid, "matt", "typo in hand_at", path=self.path)
+        after = open(self.path).read()
+        self.assertTrue(after.startswith(before))                      # append-only, nothing rewritten
+        last = json.loads(after.strip().splitlines()[-1])
+        self.assertEqual((last["event"], last["id"], last["cleared_by"], last["note"]), ("clear", eid, "matt", "typo in hand_at"))
+        self.assertEqual(self.HA.open_by_author(path=self.path), {})
+        with self.assertRaises(KeyError): self.HA.clear("nope", "matt", "x", path=self.path)
+    def test_env_override_path(self):
+        os.environ["KM_HAND_ANOMALIES"] = self.path
+        try: self.assertEqual(self.HA.path(), self.path)
+        finally: os.environ.pop("KM_HAND_ANOMALIES")
+    def test_open_ledger_entry_does_not_hold_store_flag(self):
+        first = apply(self.fut(2), today="2026-11-01T12:00:00Z", anomaly_sink=self.sink)
+        self.assertTrue(self.HA.open_by_author(path=self.path))       # still open
+        later = apply(first, CARD_ONLY, today="2027-03-01T00:00:00Z", anomaly_sink=self.sink)
+        self.assertNotIn("btc_grade_needs_review", later)
 
 if __name__ == "__main__": unittest.main()

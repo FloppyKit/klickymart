@@ -94,7 +94,7 @@ def hand_protected(r, today=None):
     if r.get("btc_src") != "hand": return False
     return _today(today) < _date(hand_review_by(r, today))
 
-def mark_first_seen(out, today=None):
+def mark_first_seen(out, today=None, anomaly_sink=None):
     """Persist btc_grade_hand_first_seen (once) for an undated or future-dated hand override, so the clamp cannot
     move forward on later passes. Returns True when undated."""
     at = _date(out.get("btc_grade_hand_at"))
@@ -103,11 +103,22 @@ def mark_first_seen(out, today=None):
     future = at_dt is not None and at_dt - now > HAND_AT_SKEW
     if (at is None or at > _today(today) or future) and not _date(out.get("btc_grade_hand_first_seen")):
         out["btc_grade_hand_first_seen"] = _today(today).isoformat()
-    if future and "btc_grade_anomaly" not in out:
-        out["btc_grade_anomaly"] = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"),
-                                    "clamped_to": out["btc_grade_hand_first_seen"], "seen_at": now.isoformat()}
-        out["btc_grade_needs_review"] = True
+    if future:
+        a = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"), "hand_by": out.get("btc_grade_hand_by"),
+             "clamped_to": out["btc_grade_hand_first_seen"], "seen_at": now.isoformat()}
+        # append-only history, never cleared (not even by a post-review overwrite); one entry per (kind, hand_at, hand_by)
+        hist = out["btc_grade_anomalies"] = list(out.get("btc_grade_anomalies") or [])
+        if not any((x.get("kind"), x.get("hand_at"), x.get("hand_by")) == (a["kind"], a["hand_at"], a["hand_by"]) for x in hist):
+            hist.append(a)
+            out["btc_grade_needs_review"] = True
+        (anomaly_sink or _default_anomaly_sink)({"author": a["hand_by"], "domain": out.get("d"), "kind": a["kind"],
+                                                 "hand_at": a["hand_at"], "clamped_to": a["clamped_to"], "seen_at": a["seen_at"]})
     return at is None
+
+def _default_anomaly_sink(entry):
+    """Ledger of anomalous hand overrides by author (hand_anomalies.py; idempotent). Decoupled from the record's flag."""
+    import hand_anomalies
+    hand_anomalies.record(entry)
 
 def _redact_url(u):
     """P2-7: conflict urls are site-controlled; store them with userinfo/query stripped (egress.redact, the shared helper)."""
@@ -198,11 +209,11 @@ def _grade_text(r, probe=None):
         return None, {"quote": quote, "url": url, "range": "2-3", "reason": "BTCPay seen with guest checkout; host ownership not verifiable without placing an order"}
     return None, {"quote": quote, "url": url, "range": "1-4", "reason": "bitcoin accepted; processor/custody and account requirement not evidenced"}
 
-def apply(r, probe=None, today=None):
+def apply(r, probe=None, today=None, anomaly_sink=None):
     """today (date or ISO str) is injectable for tests; defaults to the UTC date."""
     out = dict(r)
     if r.get("btc_src") == "hand":
-        undated = mark_first_seen(out, today)
+        undated = mark_first_seen(out, today, anomaly_sink)
         out["btc_grade_hand_review_by"] = hand_review_by(out, today)
         pg, pinfo = grade_record({k: v for k, v in r.items() if k != "btc_src"}, probe)
         if hand_protected(out, today):

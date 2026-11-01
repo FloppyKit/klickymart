@@ -94,7 +94,7 @@ def phone_required(probe):
     if (probe or {}).get("step_reached") in ("payment_methods", "after_contact", "after_address"): return False
     return None
 
-def merge(record, probe, today=None):
+def merge(record, probe, today=None, anomaly_sink=None):
     """Return a new record updated from a probe result; only conclusive probes change btc. A hand grade is kept before its
     btc_grade_hand_review_by (hand_at + 90 days) and a disagreeing probe is recorded in btc_grade_conflict; on/after
     review_by the probe overwrites it (up or down). today is injectable for tests."""
@@ -104,7 +104,7 @@ def merge(record, probe, today=None):
     g = grade(probe)
     if probe.get("btc_offered") == "yes": r["btc_any"] = True
     if r.get("btc_src") == "hand":
-        undated = btc_grade.mark_first_seen(r, today)
+        undated = btc_grade.mark_first_seen(r, today, anomaly_sink)
         r["btc_grade_hand_review_by"] = btc_grade.hand_review_by(r, today)
     if r.get("btc_src") == "hand" and r.get("btc") is not None and btc_grade.hand_protected(r, today):
         url = (probe.get("path") or [[None, None]])[-1][-1]
