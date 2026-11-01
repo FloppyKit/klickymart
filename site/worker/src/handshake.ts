@@ -4,7 +4,8 @@
  * Validation only MARKS events. It returns errors (malformed: clients SHOULD ignore), warnings, and thread marks.
  * It has no score, weight or rank output, and nothing here is read by ranking code. Payment fields (preimage, zap, cashu)
  * are recorded as *claimed*: a self-minted preimage or a zap receipt from the payee's own LNURL service proves nothing on
- * its own, so this module never marks a payment verified (that needs store-bound keys; see relay-ingest.ts proof tiers).
+ * its own, so this module never marks a payment verified. Payment fields are self-reported claims; the strongest evidence
+ * of a met need is the 420 author's own signed 422. Invalid = broken shape only; everything else is a factual mark.
  * KlickyMart never holds funds or keys; this module only reads signed public events.
  */
 import { NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT, NOSTR_KIND_ACCEPTANCE } from "./nostr-kinds";
@@ -21,8 +22,8 @@ export type ProofType = (typeof PROOF_TYPES)[number];
 export const MAX_MSAT = 21_000_000n * 100_000_000n * 1000n;
 
 export interface Need { kind: 420; id: string; pubkey: string; offerMsat: bigint | null; offerUnit: string | null; payment: string[][]; directedTo: string[]; expiration: number | null; topics: string[] }
-export interface Fulfillment { kind: 421; id: string; pubkey: string; needId: string; requester: string; owedMsat: bigint | null; bolt11: string | null; proofs: { type: ProofType; value: string[] }[] }
-export interface Acceptance { kind: 422; id: string; pubkey: string; needId: string | null; fulfillmentId: string | null; fulfiller: string | null; amountMsat: bigint | null; tipMsat: bigint | null; status: "accepted" | "rejected"; claimedPayment: { preimage: string | null; zap: string | null; cashu: boolean }; review: boolean }
+export interface Fulfillment { kind: 421; id: string; pubkey: string; createdAt: number; noProof: boolean; needId: string; requester: string; owedMsat: bigint | null; bolt11: string | null; proofs: { type: ProofType; value: string[] }[] }
+export interface Acceptance { kind: 422; id: string; pubkey: string; needId: string | null; fulfillmentId: string | null; fulfiller: string | null; amountMsat: bigint | null; tipMsat: bigint | null; status: "accepted" | "rejected"; claimedPayment: { preimage: string | null; zap: string | null; cashu: boolean; amount: boolean }; review: boolean }
 export type Handshake = Need | Fulfillment | Acceptance;
 
 export interface EventResult { ok: boolean; errors: string[]; warnings: string[]; parsed: Handshake | null }
@@ -77,10 +78,9 @@ export function validateHandshakeEvent(ev: NostrEventLine, opts: { checkSig?: bo
       if (t[1] === "event" && !HEX64.test(t[2])) errors.push("421: proof event must be a 64-hex event id");
       proofs.push({ type: t[1] as ProofType, value: t.slice(2) });
     }
-    if (!proofs.length && !ev.content.trim()) warnings.push("421: no proof tag and empty content");
     const b = one(ev, "bolt11"); if (b && !/^ln(bc|tb|bcrt)/i.test(b[1] ?? "")) errors.push("421: bolt11 must be a lightning invoice");
     if (errors.length) return fail();
-    return { ok: true, errors, warnings, parsed: { kind: 421, id: ev.id, pubkey: ev.pubkey, needId: needs[0][1], requester: ps[0][1], owedMsat, bolt11: b?.[1] ?? null, proofs } };
+    return { ok: true, errors, warnings, parsed: { kind: 421, id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, noProof: !proofs.length && !ev.content.trim(), needId: needs[0][1], requester: ps[0][1], owedMsat, bolt11: b?.[1] ?? null, proofs } };
   }
 
   // 422
@@ -103,9 +103,8 @@ export function validateHandshakeEvent(ev: NostrEventLine, opts: { checkSig?: bo
   const pre = one(ev, "preimage")?.[1] ?? null, zap = one(ev, "zap")?.[1] ?? null;
   if (pre !== null && !HEX64.test(pre)) errors.push("422: preimage must be 64 hex");
   if (zap !== null && !HEX64.test(zap)) errors.push("422: zap must be a 9735 event id");
-  if (st === "rejected" && (amountMsat || pre || zap)) warnings.push("422: rejected but carries payment fields");
   if (errors.length) return fail();
-  return { ok: true, errors, warnings, parsed: { kind: 422, id: ev.id, pubkey: ev.pubkey, needId: needs[0]?.[1] ?? null, fulfillmentId: fuls[0]?.[1] ?? null, fulfiller: ps[0]?.[1] ?? null, amountMsat, tipMsat, status: st as Acceptance["status"], claimedPayment: { preimage: pre, zap, cashu: !!one(ev, "cashu") }, review } };
+  return { ok: true, errors, warnings, parsed: { kind: 422, id: ev.id, pubkey: ev.pubkey, needId: needs[0]?.[1] ?? null, fulfillmentId: fuls[0]?.[1] ?? null, fulfiller: ps[0]?.[1] ?? null, amountMsat, tipMsat, status: st as Acceptance["status"], claimedPayment: { preimage: pre, zap, cashu: !!one(ev, "cashu"), amount: amountMsat !== null && amountMsat > 0n }, review } };
 }
 
 /** Marks a thread check can attach. Marks are labels for display/audit only; none implies a score. */
@@ -124,9 +123,13 @@ export type ThreadMark =
   | "paid_below_owed"         // 422 accepted, amount - tip < 421 amount owed
   | "payment_claimed_unverified" // preimage/zap/cashu present; not verified here
   | "accepted_unpaid"         // 422 accepted with no payment field
-  | "multiple_acceptances";   // more than one valid 422 for the same 421
+  | "multiple_acceptances"    // more than one 422 from the 420 author for the same 421 (still ONE loop; none is picked)
+  | "unit_not_comparable"     // 421 owes msat but the 420 offer is in another unit
+  | "rejected_with_payment"   // 422 status=rejected but carries amount/preimage/zap/cashu
+  | "no_proof"                // 421 with no proof tag and empty content
+  | "late_fulfilment";        // 421 created_at (self-asserted) is after the 420's expiration
 
-export interface ThreadReport { byId: Map<string, { result: EventResult; marks: ThreadMark[] }>; duplicates: string[]; loops: { need: string; fulfillment: string; acceptance: string }[] }
+export interface ThreadReport { byId: Map<string, { result: EventResult; marks: ThreadMark[] }>; duplicates: string[]; loops: { need: string; fulfillment: string; acceptances: string[] }[] }
 
 /** Check references across a set of handshake events. Pure: no I/O, no ranking side effects. */
 export function checkThreads(events: NostrEventLine[], opts: { checkSig?: boolean } = {}): ThreadReport {
@@ -146,7 +149,9 @@ export function checkThreads(events: NostrEventLine[], opts: { checkSig?: boolea
       if (need.pubkey === p.pubkey) m.push("self_fulfillment");
       if (p.requester !== need.pubkey) m.push("requester_mismatch");
       if (need.directedTo.length && !need.directedTo.includes(p.pubkey)) m.push("not_directed");
-      if (p.owedMsat !== null) { if (need.offerMsat === null) m.push("owed_without_offer"); else if (need.offerUnit === "msat" && p.owedMsat > need.offerMsat) m.push("owed_exceeds_offer"); }
+      if (p.owedMsat !== null) { if (need.offerMsat === null) m.push("owed_without_offer"); else if (need.offerUnit !== "msat") m.push("unit_not_comparable"); else if (p.owedMsat > need.offerMsat) m.push("owed_exceeds_offer"); }
+      if (p.noProof) m.push("no_proof");
+      if (need.expiration !== null && p.createdAt > need.expiration) m.push("late_fulfilment");
     }
     if (p.kind === 422 && !p.review) {
       const ful = get(p.fulfillmentId, 421), need = get(p.needId, 420);
@@ -159,10 +164,11 @@ export function checkThreads(events: NostrEventLine[], opts: { checkSig?: boolea
         if (c.preimage || c.zap || c.cashu) m.push("payment_claimed_unverified"); else m.push("accepted_unpaid");
         if (ful.owedMsat !== null && (p.amountMsat === null || p.amountMsat - (p.tipMsat ?? 0n) < ful.owedMsat)) m.push("paid_below_owed");
       }
+      if (p.status === "rejected") { const c = p.claimedPayment; if (c.preimage || c.zap || c.cashu || c.amount) m.push("rejected_with_payment"); }
       const blocking: ThreadMark[] = ["acceptor_not_requester", "need_mismatch", "fulfiller_mismatch"];
       if (!m.some((x) => blocking.includes(x))) {
         acceptCount.set(ful.id, (acceptCount.get(ful.id) ?? 0) + 1);
-        if (p.status === "accepted") loops.push({ need: need.id, fulfillment: ful.id, acceptance: p.id });
+        if (p.status === "accepted") { const ex = loops.find((l) => l.fulfillment === ful.id); if (ex) ex.acceptances.push(p.id); else loops.push({ need: need.id, fulfillment: ful.id, acceptances: [p.id] }); }
       }
     }
   }

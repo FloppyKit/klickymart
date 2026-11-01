@@ -61,7 +61,7 @@ describe("handshake: threading 420 -> 421 -> 422", () => {
     const alice = key(), bob = key();
     const n = need(alice), f = ful(bob, n, [["amount", "40000000"]]), a = acc(alice, f, n.id, [["amount", "40000000"], ["zap", "cd".repeat(32)]]);
     const r = checkThreads([a, f, n]);
-    expect(r.loops).toEqual([{ need: n.id, fulfillment: f.id, acceptance: a.id }]);
+    expect(r.loops).toEqual([{ need: n.id, fulfillment: f.id, acceptances: [a.id] }]);
     expect(marks(r, f.id)).toEqual([]);
     expect(marks(r, a.id)).toEqual(["payment_claimed_unverified"]); // claimed, never "verified"
   });
@@ -113,6 +113,9 @@ describe("handshake: adversarial (one operator, ten keys)", () => {
     const n = need(ten[6]), f = ful(ten[7], n), a1 = acc(ten[6], f, n.id), a2 = acc(ten[6], f, n.id, [["amount", "1"]]);
     const r = checkThreads([n, f, a1, a2]);
     expect(marks(r, a1.id)).toContain("multiple_acceptances"); expect(marks(r, a2.id)).toContain("multiple_acceptances");
+    expect(r.loops.length).toBe(1); expect(r.loops[0].acceptances.sort()).toEqual([a1.id, a2.id].sort());
+    const other = acc(ten[5], f, n.id); const r2 = checkThreads([n, f, a1, other]);
+    expect(marks(r2, other.id)).toContain("acceptor_not_requester"); expect(marks(r2, a1.id)).not.toContain("multiple_acceptances"); expect(r2.loops.length).toBe(1);
   });
   it("amount mismatches are marked", () => {
     const n = need(ten[8]), f = ful(ten[9], n, [["amount", "50000000"]]), a = acc(ten[8], f, n.id, [["amount", "30000000"], ["tip", "1000"]]);
@@ -126,6 +129,32 @@ describe("handshake: adversarial (one operator, ten keys)", () => {
     const a = sign(ten[0], 422, [["e", f.id, "", "fulfillment"], ["e", n.id, "", "need"], ["p", ten[3].pk]]);
     const r = checkThreads([n, f, a]);
     expect(marks(r, f.id)).toContain("requester_mismatch"); expect(marks(r, a.id)).toContain("fulfiller_mismatch");
+  });
+});
+
+describe("handshake: Satoshi 2026-11-01 marks (facts, still valid)", () => {
+  const a = key(), b = key();
+  it("unit_not_comparable when the offer is not msat", () => {
+    const n = sign(a, 420, [["amount", "40", "USD"]]), f = ful(b, n, [["amount", "5"]]);
+    expect(validateHandshakeEvent(n).ok).toBe(true);
+    expect(marks(checkThreads([n, f]), f.id)).toEqual(["unit_not_comparable"]);
+  });
+  it("rejected_with_payment stays valid", () => {
+    const n = need(a), f = ful(b, n), x = acc(a, f, n.id, [["status", "rejected"], ["amount", "10"]]);
+    expect(validateHandshakeEvent(x).ok).toBe(true);
+    const r = checkThreads([n, f, x]); expect(marks(r, x.id)).toEqual(["rejected_with_payment"]); expect(r.loops).toEqual([]);
+    const y = acc(a, f, n.id, [["status", "rejected"]]); expect(marks(checkThreads([n, f, y]), y.id)).toEqual([]);
+  });
+  it("no_proof: 421 with no proof and empty content is valid and marked", () => {
+    const n = need(a), f = sign(b, 421, [["e", n.id, "", "need"], ["p", a.pk]], "");
+    expect(validateHandshakeEvent(f)).toMatchObject({ ok: true, warnings: [] });
+    expect(marks(checkThreads([n, f]), f.id)).toEqual(["no_proof"]);
+  });
+  it("late_fulfilment when 421 created_at is after the 420 expiration", () => {
+    const n = need(a, [["expiration", String(t0 - 10)]]), f = ful(b, n);
+    expect(marks(checkThreads([n, f]), f.id)).toEqual(["late_fulfilment"]);
+    const n2 = need(a, [["expiration", String(t0 + 1000)]]), f2 = ful(b, n2);
+    expect(marks(checkThreads([n2, f2]), f2.id)).toEqual([]);
   });
 });
 

@@ -68,14 +68,22 @@ Thread marks (on otherwise valid events):
 | `fulfiller_mismatch` | 422 | 422 `p` ≠ 421 author |
 | `paid_below_owed` | 422 | accepted and `amount − tip` < 421 owed |
 | `payment_claimed_unverified` / `accepted_unpaid` | 422 | accepted with / without a payment field |
-| `multiple_acceptances` | 422 | more than one non-mismatched 422 cites the same 421 |
+| `multiple_acceptances` | 422 | several 422s from the 420 author cite the same 421: still ONE loop, none picked (created_at is self-asserted) |
+| `unit_not_comparable` | 421 | owed msat but the 420 offer is in another unit |
+| `rejected_with_payment` | 422 | `status=rejected` with amount/preimage/zap/cashu (still valid) |
+| `no_proof` | 421 | no `proof` tag and empty content (still valid) |
+| `late_fulfilment` | 421 | 421 `created_at` (self-asserted) after the 420's `expiration` (still valid) |
+
+Principle (Satoshi, 2026-11-01): the validator states facts as marks; `invalid` only for broken shape; scorers decide.
+Indexers count every **structurally complete loop**. Only a 422 signed by the 420's author closes a loop.
 
 A loop (420→421→422) is reported only when the 422 is `accepted` and has none of `acceptor_not_requester`,
 `need_mismatch`, `fulfiller_mismatch`.
 
 ## Security considerations
 
-- **Payment proof.** A preimage the payee minted for its own invoice, or a zap receipt signed by the payee's own LNURL
+- **Payment proof.** Payment fields are self-reported claims; nothing in this NIP verifies payment. The strongest evidence
+  that a need was met is the 420 author's own signed 422. A preimage the payee minted for its own invoice, or a zap receipt signed by the payee's own LNURL
   service, proves nothing about a third party paying. Validators MUST treat these as claims. Upgrading a claim to
   verified requires keys bound to the payee independently of the event author (see NIP-DRAFT.md Reputation / proof tiers)
   and is out of scope here.
@@ -83,3 +91,16 @@ A loop (420→421→422) is reported only when the 422 is `accepted` and has non
   self-fulfilment is detectable from the events. Cross-key collusion is a weighting problem for indexers, not a validity rule.
 - **Tips** are display only and MUST NOT affect ranking or any mark.
 - **Custody.** Indexers MUST NOT hold funds, keys, wallet connections or ecash on behalf of users.
+
+## Kind collision check (CASCADE 1.1, 2026-11-01, read-only)
+
+- nips README kind table (https://github.com/nostr-protocol/nips/blob/master/README.md, fetched from
+  https://raw.githubusercontent.com/nostr-protocol/nips/master/README.md): no entry for `420`, `421`, `422`, and no range
+  covers them. Nearest neighbours: `443`–`445` (Marmot). `31420` and `1423` also absent.
+- Open PRs: `gh search prs --repo nostr-protocol/nips --state open "kind 420"` (also 421, 422) returned none. All 482 open
+  PRs listed via `gh pr list --state open`; diffs of 481 grepped for added lines containing `420`/`421`/`422` as a word.
+  One hit, https://github.com/nostr-protocol/nips/pull/2073, is a category-ID CSV (rows like `420,417,Phone Services`), not
+  event kinds. One PR's diff (2102) came back empty and was not checked.
+- Closed PRs with those numbers in the title (https://github.com/nostr-protocol/nips/pull/420, /pull/421, and
+  https://github.com/nostr-protocol/nips/pull/375 "NIP-420" supply-chain, closed) are PR/NIP numbers, not kind claims.
+- Result: **no collision found** as of 2026-11-01. Kinds remain provisional; re-check before any submission.
