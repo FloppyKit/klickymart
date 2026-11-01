@@ -1,0 +1,3 @@
+{"id":"sub_0123456789abcdef0123","domain":"roaster.example","category_hint":"coffee","submissions":1,"state":"pending","flags":[],"queued_at":"2026-10-30T19:00:00.000Z","src":"community"}
+{"id":"sub_00000000000000000001","domain":"wacaco.com","category_hint":null,"submissions":2,"state":"pending","flags":[],"queued_at":"2026-10-30T19:01:00.000Z","src":"community"}
+{"id":"sub_00000000000000000002","domain":"broken.example","category_hint":null,"submissions":1,"state":"pending","flags":["lookalike?"],"queued_at":"2026-10-30T19:02:00.000Z","src":"community"}

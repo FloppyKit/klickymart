@@ -68,6 +68,28 @@ def ugc_mask(lines, paypage=False):
         if not paypage and FIRST_PERSON.search(l) and len(l) >= 25: mask[i] = True
     return mask
 
+BTC_STRICT = {"btc", "ln", "liq", "cashu", "fedi", "ark", "sp", "bolt12", "lnurl"}
+_COIN = r"(bitcoin|btc|lightning|sats|cashu|ecash|on-?chain)"
+ACCEPT_RX = re.compile(r"(?i)\b(pay|paying|paid for|checkout|check out|purchase|order|shop|buy\b[^.]{0,40}?)\b[^.]{0,40}\b(with|using|via|in)\s+(\w+\s+){0,2}" + _COIN + r"\b"
+                       r"|\b" + _COIN + r"\b[^.]{0,30}\b(accepted|payments? (accepted|option|method)s?|checkout|invoice)\b"
+                       r"|\b(we|now) accepts?\b[^.]{0,40}\b" + _COIN + r"\b|\baccepts?\b[^.]{0,20}\b" + _COIN + r"\b")
+EDITORIAL_RX = re.compile(r"(?i)\b(buy|sell|trade|earn|invest|price of|interest|paid in|send|stack|hodl|learn|news|protocol|network is)\b[^.]{0,12}\b(and sell\s+)?" + _COIN + r"\b")
+NOT_PAYMENT_RX = re.compile(r"(?i)bitcoin-backed|line of credit|\bloans?\b|\binterest\b|\bdoes [\w.]+ accept\b|\bwhere (can|to) (i )?(spend|use)\b")
+BADGE_RX = re.compile(r"(?i)^(" + _COIN + r"( (and|or|&) " + _COIN + r")?( network)? (accepted|payments? accepted)( here)?|pay with " + _COIN + r")[.!]?$")
+
+# On a payment page, a short table/list row naming a coin or network ("Bitcoin BTC Bitcoin Network, Lightning Network")
+# is a list of accepted methods even without a verb (bitrefill help center, 2026-10-30 QA).
+LIST_ROW_RX = re.compile(r"(?i)\b(lightning|bitcoin|liquid) network\b|\bbitcoin\s+\(?btc\)?\s+\S")   # needs a network/ticker column, not a bare word
+
+def btc_payment_context(line, paypage):
+    """BTC evidence must read as payment acceptance, not editorial text about bitcoin."""
+    if BADGE_RX.match(line.strip()): return True
+    if NOT_PAYMENT_RX.search(line): return False
+    if ACCEPT_RX.search(line): return True
+    if EDITORIAL_RX.search(line): return False
+    if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
+    return bool(paypage and CTX.search(line))
+
 def extract_payments(texts):
     pay, no, quotes = set(), set(), []
     for url, step, title, t in texts:
@@ -81,11 +103,11 @@ def extract_payments(texts):
                 head_scope = "in-store" if SCOPE_HEAD_INSTORE.match(line) else ("online" if SCOPE_HEAD_ONLINE.match(line) else None)
             if ugc[i] or line.startswith("## "): continue   # headings set scope; they are not evidence themselves
             if NAV.match(line): continue
-            ok_ctx = paypage or (len(line) >= 25 and CTX.search(line))
+            ok_ctx = paypage or (len(line) >= 25 and CTX.search(line)) or bool(BADGE_RX.match(line))
             if not ok_ctx: continue
             for code, rx in TERMS:
                 if not re.search(rx, line, flags=re.I): continue
-                if code in ("btc", "ln") and not paypage and not STRONG_BTC.search(line): continue
+                if code in BTC_STRICT and not btc_payment_context(line, paypage): continue
                 # sentence-level negation: "SNAP EBT is accepted online. Cash EBT is not accepted." -> one pos, one neg
                 segs = [x for x in re.split(r"(?<=[.!?])\s+", line) if re.search(rx, x, flags=re.I)] or [line]
                 for seg in segs:

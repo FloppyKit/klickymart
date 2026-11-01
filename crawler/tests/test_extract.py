@@ -49,3 +49,16 @@ class Scope(unittest.TestCase):
         self.assertEqual(scope_split(q), ([], [], ["pp"]))
 
 if __name__ == "__main__": unittest.main()
+
+
+def test_paypage_table_row_lightning_network():
+    from extract import extract_payments
+    t = "Name Code Network(s)\nBitcoin BTC Bitcoin Network, Lightning Network\nLitecoin LTC Litecoin"
+    pay, no, q = extract_payments([("https://help.example.com/hc/en-us/articles/1-What-can-I-pay-with", "help", "What can I pay with", t)])
+    assert "ln" in pay and "btc" in pay
+
+
+def test_non_paypage_lightning_row_still_needs_context():
+    from extract import extract_payments
+    pay, _, _ = extract_payments([("https://example.com/blog/news", "home", "News", "Lightning Network")])
+    assert "ln" not in pay

@@ -11,6 +11,7 @@ Output (out/tos.jsonl), one line per domain:
 Matt's rule (2026-10-29): bans-automation => the crawler SKIPS the site entirely and records the ToS finding.
 Usage: python tos.py sites.json [--only d1,d2] [--out out]"""
 import json, re, sys, time, argparse, os
+from terms_page import is_terms_page
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 from crawl import UA, UA_TOKEN, load_robots, detect_wall, now
@@ -82,11 +83,14 @@ def check_site(browser, site):
                     strong = [h for h in cands if re.search(r"(?i)terms|conditions|legal|agreement|cou\b|_cou", h)]
                     cands = list(dict.fromkeys(strong or cands))[:2]
                     found_link = bool(cands)
-                    plan += [("terms", h) for h in cands] or [("terms", base + p) for p in TERMS_PATHS]
+                    plan += [("terms", h) for h in cands] + [("terms", base + p) for p in TERMS_PATHS]  # 2026-10-31: standard paths also tried when a footer link is not a terms page
                     continue
                 text = page.inner_text("body")
-                if len(text) < 1500 or not re.search(r"(?i)terms|conditions|agreement", title + text[:3000]):
-                    continue   # not a terms page
+                try: h1 = page.inner_text("h1", timeout=2000)
+                except Exception: h1 = ""
+                ok_terms, why = is_terms_page(page.url, title, h1, text)
+                if not ok_terms:
+                    out["fetch"][url] = f"{st}:not-terms ({why})"; continue   # e.g. a region picker
                 os.makedirs(TEXT_DIR, exist_ok=True)
                 with open(os.path.join(TEXT_DIR, f"{d}.txt"), "w") as f: f.write(page.url + "\n" + title + "\n\n" + text)
                 code, q, lead = classify(text)
@@ -108,6 +112,12 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("sites"); ap.add_argument("--only", default=""); ap.add_argument("--out", default="out")
     ap.add_argument("--reclassify", action="store_true", help="offline: re-run classify() on saved out/tos_text, no network")
     a = ap.parse_args(); sites = json.load(open(a.sites))
+    ov_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tos_urls.override.json")
+    if os.path.exists(ov_path):   # hand-supplied terms URLs (found by search), tried before footer links
+        ov = json.load(open(ov_path))
+        for s in sites:
+            u = (ov.get(s["d"]) or {}).get("urls") or []
+            s["terms"] = list(dict.fromkeys(u + s.get("terms", [])))
     if a.reclassify:
         outp = os.path.join(a.out, "tos.jsonl"); recs = [json.loads(l) for l in open(outp) if l.strip()]
         for r in recs:
@@ -131,8 +141,9 @@ def main():
         for s in sites:
             r = check_site(b, s); recs[r["d"]] = r
             print(f"{r['d']}: tos={r['tos']} url={r['url']} n={r['n']} q={(r['q'] or '')[:160]!r}", flush=True)
-            with open(outp, "w") as f:
+            with open(outp + ".tmp", "w") as f:
                 for x in recs.values(): f.write(json.dumps(x, separators=(",", ":")) + "\n")
+            os.replace(outp + ".tmp", outp)   # atomic: crawl.py may read it concurrently
         b.close()
 
 if __name__ == "__main__": main()

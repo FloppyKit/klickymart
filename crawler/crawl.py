@@ -12,7 +12,7 @@ from url_redact import redact, redact_str, clean_url  # R-C-006: redact at write
 from egress import egress_check, install as _egress_install
 _egress_install()  # KIMI-007: every Playwright context/goto in crawl.py and tos.py goes through the egress guard
 
-UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)"   # bot info + opt-out page (site/bot/index.html)
+from ua import UA   # single UA (Agent/KlickyBot token); importing ua also installs gate.py. bot info + opt-out page (site/bot/index.html)
 UA_TOKEN = "FloppyKitMapBot"
 AI_UAS = ["GPTBot","ChatGPT-User","OAI-SearchBot","ClaudeBot","Claude-User","anthropic-ai","PerplexityBot",
           "Google-Extended","CCBot","Grok","Grok-User","Applebot-Extended","Bytespider","Amazonbot"]
