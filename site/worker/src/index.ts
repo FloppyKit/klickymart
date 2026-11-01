@@ -1,4 +1,5 @@
-import { handleRequest, mcpErrorFor, type Env as RouterEnv } from "./router";
+import { handleRequest, loadSnapshot, mcpErrorFor, type Env as RouterEnv } from "./router";
+import { writeDailyHead } from "./open-store";
 import { catchUp, relayList } from "./relay-ingest";
 import { ingestCtx, liveIngestEnabled } from "./ingester-do";
 import { HTML_CSP } from "./render/layout";
@@ -48,6 +49,8 @@ export default {
         try { await env.INGESTER.get(env.INGESTER.idFromName("main")).fetch("https://ingester/ensure"); } catch { /* reported via ingest_state */ }
       }
       if (env.DB) await catchUp(env.DB, relayList(env.RELAY_URLS), await ingestCtx(e));
+      // M2: one signed-results head per daily cron run, only when KM_SIGNED_RESULTS is on (no-op otherwise).
+      if (env.DB) { try { await writeDailyHead(e, (await loadSnapshot(e)).version, Math.floor(Date.now() / 1000)); } catch { /* head stays stale; routes 503 */ } }
     })());
   },
 };

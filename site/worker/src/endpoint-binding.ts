@@ -42,11 +42,13 @@ export interface BindingState {
   conflicts: Conflict[];         // every conflict; never dropped. Conflict is PERMANENT for the key
   versions: Record<string, VersionRef>;  // permanent index: every version ever accepted -> (hash, created_at, id)
   seen: { version: number; hash: string; ev: BEv }[];  // ordinary superseded/accepted states only; capped at historyCap
-  ignored: { count: number; last_hash: string | null };  // post-revoke, future-dated, stale replays: counted, not stored
+  ignored: { count: number; last_hash: string | null; ids?: string[] };  // post-revoke, future-dated, stale replays: counted once per distinct event id (ids = capped list of event ids, hash-only), never stored
   first_seen: number;            // KlickyMart's clock, never created_at
   changed_at: number | null;     // when KlickyMart saw the last accepted change after the first
 }
 export type Outcome = "accepted" | "duplicate" | "stale" | "conflict" | "revoked" | "ignored_after_revoke" | "ignored_future" | `rejected:${string}`;
+/** Cap on remembered ignored event ids per key (dedupe window for the ignored counter). */
+export const IGNORED_IDS_CAP = 512;
 export const IGNORED_OUTCOMES: ReadonlySet<Outcome> = new Set<Outcome>(["stale", "ignored_after_revoke", "ignored_future"]);
 
 export function bindingsEnabled(env: { KM_ENDPOINT_BINDINGS?: string }): boolean {
@@ -106,21 +108,35 @@ export function applyBinding(prev: BindingState | undefined, ev: BEv, nowS: numb
   const parsed = parseBinding(ev);
   if (!parsed.ok) return { state: prev ?? emptyState(ev.pubkey, nowS), outcome: `rejected:${parsed.reason}` };
   const { c, hash } = parsed.value;
-  const s: BindingState = prev ? { ...prev, seen: [...prev.seen], conflicts: [...prev.conflicts], versions: { ...(prev.versions ?? {}) }, ignored: { ...prev.ignored } } : emptyState(ev.pubkey, nowS);
+  const s: BindingState = prev ? { ...prev, seen: [...prev.seen], conflicts: [...prev.conflicts], versions: { ...(prev.versions ?? {}) }, ignored: { ...prev.ignored, ids: [...(prev.ignored.ids ?? [])] } } : emptyState(ev.pubkey, nowS);
   if (s.pubkey !== ev.pubkey) return { state: s, outcome: "rejected:wrong store key" };
-  const ignore = (o: Outcome) => { s.ignored.count++; s.ignored.last_hash = ev.id; return { state: s, outcome: o }; };
+  // Each distinct ignored event id counts once; a re-receipt of the same id is a duplicate (relays and catch-up overlap resend).
+  const ids = (s.ignored.ids ??= []);
+  const ignore = (o: Outcome) => {
+    if (ids.includes(ev.id)) return { state: s, outcome: "duplicate" as Outcome };
+    s.ignored.count++; s.ignored.last_hash = ev.id; ids.push(ev.id); if (ids.length > IGNORED_IDS_CAP) ids.splice(0, ids.length - IGNORED_IDS_CAP);
+    return { state: s, outcome: o };
+  };
+  // Re-receipt of any event already in the state (accepted, superseded, conflict side or the revocation) is a duplicate.
+  const storedIds = [s.revoked, s.first, s.latest, ...s.seen.map((x) => x.ev), ...s.conflicts.flatMap((x) => x.events)].map((e) => e?.id);
+  if (storedIds.includes(ev.id)) return { state: s, outcome: "duplicate" };
   if (s.revoked) return ignore("ignored_after_revoke");
   // Revocation is terminal and beats version, created_at AND skew S (Satoshi 2026-11-01): checked before the future gate.
   if (c.revoked) { s.revoked = ev; return { state: s, outcome: "revoked" }; }
   if (ev.created_at > nowS + p.skewS) return ignore("ignored_future");
   const known: { version: number; hash: string; ev: BEv }[] = [...s.seen, ...[s.first, s.latest, ...s.conflicts.flatMap((x) => x.events)].filter((e): e is BEv => !!e).map((e) => ({ version: (JSON.parse(e.content) as BindingContent).version, hash: hashHex(e.content), ev: e }))];
   const sameVersion = known.filter((x) => x.version === c.version);
-  if (sameVersion.some((x) => x.ev.id === ev.id || x.hash === hash)) return { state: s, outcome: "duplicate" };
+  if (known.some((x) => x.ev.id === ev.id)) return { state: s, outcome: "duplicate" };
+  // A different event id re-asserting known content: a stale replay (ignored, counted) when it is older than the current
+  // binding (lower version or earlier created_at); otherwise a harmless duplicate.
+  const L0 = s.latest ? parseBinding(s.latest) : null;
+  const olderThanLatest = !!(L0 && L0.ok && (c.version < L0.value.c.version || ev.created_at < s.latest!.created_at));
+  if (sameVersion.some((x) => x.hash === hash)) return olderThanLatest ? ignore("stale") : { state: s, outcome: "duplicate" };
   const remember = () => { s.seen.push({ version: c.version, hash, ev }); if (s.seen.length > p.historyCap) s.seen.splice(0, s.seen.length - p.historyCap); };
   const conflict = (a: BEv) => { s.conflicts.push({ events: [a, ev], old_ref: null, marks: [] }); return { state: s, outcome: "conflict" as Outcome }; };
   // Permanent index: a known version with different content is a conflict regardless of created_at.
   const ref = s.versions[String(c.version)];
-  if (ref && ref.hash === hash) return { state: s, outcome: "duplicate" };
+  if (ref && ref.hash === hash) return olderThanLatest ? ignore("stale") : { state: s, outcome: "duplicate" };
   if (ref) {
     const old = known.find((x) => x.ev.id === ref.id);
     if (old) return conflict(old.ev);

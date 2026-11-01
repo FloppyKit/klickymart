@@ -5,6 +5,7 @@ import type { Env } from "./router";
 import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
 export { signedResultsEnabled } from "./signed-result";
+import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
 const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 const unavailable = (why: string) => Response.json({ ok: false, error: "unavailable", reason: why }, { status: 503, headers: H });
@@ -25,4 +26,13 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(nonce)) return Response.json({ ok: false, error: "nonce required (8-128 chars A-Za-z0-9_-)" }, { status: 400, headers: H });
   const state = await loadBindingState(env.DB, pubkey);
   return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS), sk) }, { headers: H });
+}
+
+/** Daily snapshot step (M2): called once from the existing daily cron after relay catch-up. Writes one head row only when
+ * KM_SIGNED_RESULTS is on; otherwise does nothing. snapshot_id = "<snapshot data version>@<cron unix seconds>": the spec
+ * does not yet define what a head commits to, so this is a LABEL (which data version + when), not a content commitment
+ * (no Merkle root / digest). Flagged for Satoshi; M4 owns the real snapshot step. */
+export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
+  if (!_sre(env) || !env.DB) return null;
+  try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
 }

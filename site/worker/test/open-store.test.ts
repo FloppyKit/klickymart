@@ -6,7 +6,7 @@ import { nostrEventId } from "../src/nostr-verify";
 import { NOSTR_KIND_ENDPOINT_BINDING as K } from "../src/nostr-kinds";
 import { applyBinding, bindingStatus, hashHex, bindingsEnabled, BINDING_D, canonicalJson, loadBindingState, matchEndpoint, type BEv, type BindingState } from "../src/endpoint-binding";
 import { buildResult, paymentGate, recordSnapshotHead, latestHead, signHead, signResult, signedResultsEnabled, typedFields, verifyResult, type HeadPayload, type ResultPayload, type Signed } from "../src/signed-result";
-import { openStoreRoute } from "../src/open-store";
+import { openStoreRoute, writeDailyHead } from "../src/open-store";
 import { buildFilters, ingestEvents, type IngestCtx } from "../src/relay-ingest";
 import { handleRequest } from "../src/router";
 
@@ -476,5 +476,67 @@ describe("binding kind placeholder", () => {
     const { NOSTR_KIND_ENDPOINT_BINDING } = await import("../src/nostr-kinds");
     expect(NOSTR_KIND_ENDPOINT_BINDING).toBe(31431);
     expect(NOSTR_KIND_ENDPOINT_BINDING).not.toBe(31421);
+  });
+});
+
+describe("ignored counter: one per distinct event id; stale replays count", () => {
+  it("re-receipts of the same ignored id do not increment; last_ignored_hash kept", () => {
+    const sk = key();
+    const v1 = ev(sk, bind(1), NOW - 300), rv = ev(sk, { revoked: true, version: 1 }, NOW - 200), after = ev(sk, bind(2), NOW - 100);
+    const { s, outs } = run([v1, rv, after, after, rv, after]);
+    expect(outs).toEqual(["accepted", "revoked", "ignored_after_revoke", "duplicate", "duplicate", "duplicate"]);
+    expect(s!.ignored.count).toBe(1); expect(s!.ignored.last_hash).toBe(after.id);
+    expect(JSON.stringify(s!.ignored)).not.toContain(after.content); expect(JSON.stringify(s!.ignored)).not.toContain(after.sig);
+  });
+  it("stale replays (older version, or same content re-signed earlier) count once each", () => {
+    const sk = key();
+    const v1 = ev(sk, bind(1), NOW - 300), v2 = ev(sk, bind(2, { node_id: NODE2 }), NOW - 200);
+    const oldV1 = ev(sk, bind(1), NOW - 400);                 // same v1 content, different id, older: stale replay
+    const lower = ev(sk, bind(0, { node_id: NODE2 }), NOW - 500); // lower version, new content: stale
+    const { s, outs } = run([v1, v2, oldV1, oldV1, lower, lower, v1]);
+    expect(outs).toEqual(["accepted", "accepted", "stale", "duplicate", "stale", "duplicate", "duplicate"]);
+    expect(s!.ignored.count).toBe(2); expect(s!.ignored.last_hash).toBe(lower.id);
+    expect(bindingStatus(s, NOW)).toBe("matches_observed_binding");
+  });
+  it("future-dated re-receipt counts once", () => {
+    const sk = key(); const f = ev(sk, bind(1), NOW + 7200);
+    const { s, outs } = run([f, f, f]); expect(outs).toEqual(["ignored_future", "duplicate", "duplicate"]); expect(s!.ignored.count).toBe(1);
+  });
+  it("D1 path: repeated ingest batches leave ignored_count at the distinct count", async () => {
+    await env.DB.prepare("DELETE FROM endpoint_binding_state").run(); await env.DB.prepare("DELETE FROM endpoint_binding_events").run();
+    const sk = key(); const now = Date.now(); const t = Math.floor(now / 1000);
+    const v1 = ev(sk, { version: 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 300);
+    const rv = ev(sk, { revoked: true, version: 1 }, t - 200);
+    const a1 = ev(sk, { version: 2, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 100);
+    const a2 = ev(sk, { version: 3, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 50);
+    const c = { domains: new Set(["example.com"]), ourPubkey: null, endpointBindings: true, now };
+    for (let i = 0; i < 4; i++) await ingestEvents(env.DB, [v1, rv, a1, a2].map((e) => ({ ev: e, relay: "wss://r" + i })), c);
+    const row = await env.DB.prepare("SELECT ignored_count, last_ignored_hash FROM endpoint_binding_state WHERE pubkey = ?").bind(pk(sk)).first<{ ignored_count: number; last_ignored_hash: string }>();
+    expect(row!.ignored_count).toBe(2); expect(row!.last_ignored_hash).toBe(a2.id);
+  });
+});
+
+describe("daily head write (cron path)", () => {
+  beforeEach(async () => { await env.DB.prepare("DELETE FROM snapshot_heads").run(); });
+  it("off (unset or off): writes nothing", async () => {
+    const t = Math.floor(Date.now() / 1000);
+    expect(await writeDailyHead({ DB: env.DB }, "v1", t)).toBeNull();
+    expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "off" }, "v1", t)).toBeNull();
+    expect((await env.DB.prepare("SELECT COUNT(*) AS c FROM snapshot_heads").first<{ c: number }>())!.c).toBe(0);
+  });
+  it("on: one head per run, chained, served by /open-store/head; same-second rerun is a no-op", async () => {
+    const t = Math.floor(Date.now() / 1000);
+    expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t - 86400)).toBe(0);
+    expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t)).toBe(1);
+    expect(await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t)).toBeNull();
+    const h = await latestHead(env.DB, t);
+    expect(h).toMatchObject({ sequence: 1, snapshot_id: `v1@${t}`, prev_head: `0:v1@${t - 86400}` });
+    const res = await handleRequest(new Request("https://x/open-store/head"), { ...env, KM_SIGNED_RESULTS: "on", KM_RESULT_SK_HEX: KM_HEX } as never);
+    expect(res.status).toBe(200);
+  });
+  it("head is stale after HEAD_TTL_S (routes then 503; TTL vs daily write is an open design question)", async () => {
+    const t = Math.floor(Date.now() / 1000);
+    await writeDailyHead({ DB: env.DB, KM_SIGNED_RESULTS: "on" }, "v1", t - 3601);
+    expect(await latestHead(env.DB, t)).toBeNull();
   });
 });

@@ -582,6 +582,11 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
 - **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
   by the daily snapshot step (M4).
+- **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
+  `snapshot_id` is `<snapshot data version>@<cron unix seconds>`: a label, not a content commitment (what a head commits to is
+  not yet specified; M4). Open question: `HEAD_TTL_S` = 3600 with a once-daily write leaves the routes 503 for ~23 h a day.
+- **Ignored counter:** counts each distinct ignored event id once (re-receipts are duplicates); stale replays (lower version,
+  or known content re-signed with an earlier created_at) count. Only event ids are kept (capped), never content.
 - **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31431 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.
 
 ## Numbering and kind checks (checked 2026-10-29)
