@@ -58,3 +58,34 @@ def test_pull_request_uses_pr_base(repo):
     base = g("rev-parse", "HEAD"); g("checkout", "-qb", "pr"); app(d, g, '{"r":"p"}', "p")
     r = run(d, "--event", "pull_request", "--ref", "refs/pull/1/merge", "--pr-base", base)
     assert r.returncode == 0 and f"base {base}" in r.stdout
+
+def test_r8_1_reordering_merge_fails(repo):
+    d, g = repo
+    before = g("rev-parse", "HEAD")
+    env = dict(os.environ, GIT_COMMITTER_DATE="2026-10-20T12:00:00", GIT_AUTHOR_DATE="2026-10-20T12:00:00")  # throwaway repo
+    with open(d / F, "a") as f: f.write('{"r":"old"}\n')
+    subprocess.run(["git", "-C", str(d), "commit", "-qam", "old row"], check=True, env=env)
+    g("checkout", "-qb", "side", before); app(d, g, '{"r":"S"}', "side"); g("checkout", "-q", "main")
+    subprocess.run(["git", "-C", str(d), "merge", "-q", "--no-commit", "side"], capture_output=True)
+    (d / F).write_text('{"r":"base"}\n{"r":"S"}\n{"r":"old"}\n')   # moves "old" below S: blame would re-date it
+    g("add", F); g("commit", "-qm", "reordering merge"); bad = g("rev-parse", "HEAD")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 1 and bad[:12] in r.stdout, r.stdout
+
+def test_r8_1_reorder_in_non_merge_commit_fails(repo):
+    d, g = repo
+    before = app(d, g, '{"r":"a"}', "a")
+    (d / F).write_text('{"r":"a"}\n{"r":"base"}\n'); g("commit", "-qam", "reorder"); bad = g("rev-parse", "HEAD")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 1 and bad[:12] in r.stdout, r.stdout
+
+def test_r8_2_non_ancestor_before_fails_closed(repo):
+    d, g = repo
+    old = app(d, g, '{"r":"a"}', "a"); g("branch", "keep-old")         # old tip stays reachable via another branch
+    g("reset", "-q", "--hard", "HEAD~1"); app(d, g, '{"r":"b"}', "rewritten main")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", old)
+    assert r.returncode == 2 and "append-only scan" not in r.stdout, r.stdout
+    r = run(d, "--event", "push", "--ref", "refs/heads/feat", "--before", old)
+    assert r.returncode == 2, r.stdout
+    r = run(d, "--event", "pull_request", "--ref", "refs/pull/1/merge", "--pr-base", old)
+    assert r.returncode == 2, r.stdout
