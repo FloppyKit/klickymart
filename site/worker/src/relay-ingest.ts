@@ -42,7 +42,7 @@ export interface IngestCtx {
   handshakeMarks?: boolean;
   /** Test hook: replaces checkThreads. */
   handshakeChecker?: typeof import("./handshake").checkThreads;
-  /** M2 KM_ENDPOINT_BINDINGS switch (default OFF). Only true subscribes, validates and stores the binding kind (31421, placeholder pending NIP check). */
+  /** M2 KM_ENDPOINT_BINDINGS switch (default OFF). Only true subscribes, validates and stores the binding kind (31431, internal placeholder pending NIP check). */
   endpointBindings?: boolean;
 }
 

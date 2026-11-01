@@ -541,13 +541,13 @@ Indexers SHOULD label, never hide. KlickyMart publishes `trust_tier`, `trust_why
 
 Submitter reputation = submissions whose store reached `seen` or `verified`, minus 2 x flagged submissions.
 
-## Endpoint binding (provisional kind 31421) and signed results (KlickyMart M2)
+## Endpoint binding (provisional kind 31431) and signed results (KlickyMart M2)
 
-**Status: draft, kind number provisional.** The design picks no number and rules out 30078. 31421 is one placeholder
+**Status: draft, kind number provisional.** The design picks no number and rules out 30078. 31431 is an internal placeholder
 constant (`NOSTR_KIND_ENDPOINT_BINDING`). **Before anything public it needs the nips kind-list + open-PR collision check
-re-run** (plus live relay usage). Read-only check 2026-11-01: `31421` absent from
-https://github.com/nostr-protocol/nips/blob/master/README.md and from the diffs of all 482 open PRs at
-https://github.com/nostr-protocol/nips/pulls (relay usage not checked). Implemented in `site/worker/src/endpoint-binding.ts` and `site/worker/src/signed-result.ts`.
+re-run** (plus live relay usage). It was moved off 31421 on 2026-11-01 because KlickyMart's draft product offers already use 31421. Read-only check 2026-11-01: `31431`
+absent from https://github.com/nostr-protocol/nips/blob/master/README.md (raw README fetched) and unused elsewhere in this repo;
+open PRs and relay usage not checked for 31431. Nothing is published under it. Implemented in `site/worker/src/endpoint-binding.ts` and `site/worker/src/signed-result.ts`.
 
 - **Binding event.** Addressable, one per store key, `["d","klickymart-endpoints"]`. Content is canonical JSON (keys
   sorted, no whitespace) with ONLY the v9.2 §2 fields: `{"endpoints":{...},"expires_at":<unix>,"version":<int>}` with
@@ -582,7 +582,7 @@ https://github.com/nostr-protocol/nips/pulls (relay usage not checked). Implemen
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
 - **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
   by the daily snapshot step (M4).
-- **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31421 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.
+- **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31431 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.
 
 ## Numbering and kind checks (checked 2026-10-29)
 

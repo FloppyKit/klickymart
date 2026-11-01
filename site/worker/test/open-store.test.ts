@@ -470,3 +470,11 @@ describe("open-store routes + KM_SIGNED_RESULTS kill switch", () => {
     expect(on.status).toBe(200);
   });
 });
+
+describe("binding kind placeholder", () => {
+  it("does not collide with the draft product-offer kind 31421", async () => {
+    const { NOSTR_KIND_ENDPOINT_BINDING } = await import("../src/nostr-kinds");
+    expect(NOSTR_KIND_ENDPOINT_BINDING).toBe(31431);
+    expect(NOSTR_KIND_ENDPOINT_BINDING).not.toBe(31421);
+  });
+});

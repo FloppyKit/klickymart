@@ -14,5 +14,6 @@ export const NOSTR_KIND_ACCEPTANCE = 422;
 export const NOSTR_KIND_STORE_SUGGESTION = 1423;
 
 /** M2 endpoint binding (v9.2 §2): addressable, one per store key, fixed d tag. PROVISIONAL: v9.2 picks no number (not
- * 30078); 31421 is a placeholder pending the kind-collision check and Satoshi/Matt sign-off. Change here only. */
-export const NOSTR_KIND_ENDPOINT_BINDING = 31421;
+ * 30078); 31431 is an INTERNAL PLACEHOLDER pending the NIP kind-collision check and Satoshi/Matt sign-off; nothing is published
+ * under it. Moved off 31421 (2026-11-01), which the draft product offers use (llms.ts, crawler/kinds.py). Change here only. */
+export const NOSTR_KIND_ENDPOINT_BINDING = 31431;
