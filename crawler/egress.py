@@ -57,18 +57,43 @@ def public_host(host, resolve=None):
     return ok
 
 _ANY_URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+")
+_SECRET_KEYS = r"(?:macaroon|preimage|token|access_token|refresh_token|id_token|api_?key|secret|password|authorization|auth)"
+_R = "[redacted]"
+_RULES = [
+    # Authorization header (any scheme) and free-standing Bearer/L402/LSAT credentials
+    (re.compile(r"(?i)\b(authorization\s*[:=]\s*)(?:(bearer|basic|l402|lsat|token|digest)\s+)?[^\s,;\"']+(?:\s*:\s*[^\s,;\"']+)?"),
+     lambda m: m.group(1) + ((m.group(2) + " ") if m.group(2) else "") + _R),
+    (re.compile(r"(?i)\b(bearer|l402|lsat)\s+[A-Za-z0-9._~+/=:-]{8,}"), lambda m: m.group(1) + " " + _R),
+    # JSON "key": "value"
+    (re.compile(r'(?i)("' + _SECRET_KEYS + r'"\s*:\s*)"[^"]*"'), lambda m: m.group(1) + '"' + _R + '"'),
+    # percent-encoded key%3Dvalue
+    (re.compile(r"(?i)\b(" + _SECRET_KEYS + r")%3D[^\s&%\"']+(?:%(?!26)[0-9a-f]{2}[^\s&%\"']*)*"), lambda m: m.group(1) + "%3D" + _R),
+    # free text key=value / key: value
+    (re.compile(r"(?i)\b(" + _SECRET_KEYS + r")(\s*[=:]\s*)(?!\[redacted\])[^\s,;&\"'<>]+"), lambda m: m.group(1) + m.group(2) + _R),
+]
+# long token-like url path segments: hex runs, prefixed secrets (sk-..., ghp_...), or long mixed-case+digit base64ish runs
+def _seg_secret(seg):
+    if len(seg) < 20: return False
+    if re.fullmatch(r"[A-Fa-f0-9]{32,}", seg) or re.match(r"(?i)(sk|pk|rk|ghp|gho|xox[abp]|api|key|tok)[-_]", seg): return True
+    return bool(re.fullmatch(r"[A-Za-z0-9+/=_-]{24,}", seg) and re.search(r"[A-Z]", seg) and re.search(r"[a-z]", seg) and re.search(r"\d", seg))
+
 def redact(s):
-    """P2-1: the ONE redact helper for refusal urls and reasons, any scheme: drop userinfo, query and fragment, then the
-    url_redact token rules. Never raises."""
+    """The ONE redact helper (refusal urls, reasons, logs, conflict urls), any scheme. Drops url userinfo, query and
+    fragment, token-like path segments, Authorization/Bearer/L402 credentials, JSON/percent-encoded/free-text secret
+    key values, then the url_redact token rules. Never raises."""
     s = str(s)
     def _one(m):
         u = m.group(0)
         try:
             sp = urllib.parse.urlsplit(u)
-            return urllib.parse.urlunsplit((sp.scheme, sp.netloc.rsplit("@", 1)[-1], sp.path, "", ""))
+            path = "/".join(_R if _seg_secret(x) else x for x in sp.path.split("/"))
+            return urllib.parse.urlunsplit((sp.scheme, sp.netloc.rsplit("@", 1)[-1], path, "", ""))
         except ValueError: return "[redacted-url]"
-    s = _ANY_URL.sub(_one, s)
-    s = re.sub(r"(?i)\b(macaroon|token|preimage|authorization)=\S+", r"\1=[redacted]", s)
+    try:
+        for rx, fn in _RULES[:4]: s = rx.sub(fn, s)
+        s = _ANY_URL.sub(_one, s)
+        s = _RULES[4][0].sub(_RULES[4][1], s)
+    except Exception: return _R
     try:
         from url_redact import redact_str
         return redact_str(s)
