@@ -104,11 +104,13 @@ def merge(record, probe, today=None, anomaly_sink=None):
     g = grade(probe)
     if probe.get("btc_offered") == "yes": r["btc_any"] = True
     if r.get("btc_src") == "hand":
+        n_anom = len(r.get("btc_grade_anomalies") or [])
         undated = btc_grade.mark_first_seen(r, today, anomaly_sink)
+        fresh = len(r.get("btc_grade_anomalies") or []) > n_anom
         r["btc_grade_hand_review_by"] = btc_grade.hand_review_by(r, today)
     if r.get("btc_src") == "hand" and r.get("btc") is not None and btc_grade.hand_protected(r, today):
         url = (probe.get("path") or [[None, None]])[-1][-1]
-        btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today, undated)
+        btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today, undated, fresh)
     elif g is not None:   # only a concrete grade overwrites; None never erases a hand grade
         if r.get("btc_src") == "hand":
             for k in ("btc_grade_conflict", "btc_grade_basis", "btc_grade_needs_review"): r.pop(k, None)

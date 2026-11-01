@@ -155,16 +155,29 @@ def write_hand_override(r, log=print, today=None, **fields):
     cand["btc_grade_hand_review_by"] = hand_review_by(cand, today)
     r.update(cand); return True
 
-def note_conflict(out, probe_grade, probe_basis, probe_url, today=None, undated=False):
+def note_conflict(out, probe_grade, probe_basis, probe_url, today=None, undated=False, anomaly_this_pass=False):
     """Keep the hand grade; record a disagreeing concrete probe instead of dropping it (url redacted). Agreement clears it;
     an inconclusive (None) probe leaves any existing record alone. Undated overrides also get btc_grade_needs_review."""
     if probe_grade is None: return out
     if probe_grade == out.get("btc"):
-        out.pop("btc_grade_conflict", None); return out
+        # n-3: agreement clears the conflict AND the flag, unless an anomaly was appended in this same pass
+        out.pop("btc_grade_conflict", None)
+        if out.get("btc_grade_needs_review") and not anomaly_this_pass: out["btc_grade_needs_review"] = False
+        return out
     out["btc_grade_conflict"] = {"hand": {"grade": out.get("btc"), "basis": BASIS_HAND},
                                  "probe": {"grade": probe_grade, "basis": probe_basis, "url": _redact_url(probe_url)},
                                  "seen_at": _today(today).isoformat()}
     out["btc_grade_needs_review"] = True   # Satoshi 2026-10-31: any recorded conflict, dated or not
+    return out
+
+def clear_review(r, cleared_by, note, now=None):
+    """Human-only clear of btc_grade_needs_review (never called by the crawler). Appends to btc_grade_review_log.
+    Not authenticated: cleared_by is operator-entered text."""
+    if not isinstance(cleared_by, str) or not cleared_by.strip(): raise ValueError("cleared_by must be non-empty")
+    out = dict(r)
+    at = (_dt(now) or datetime.datetime.now(datetime.timezone.utc)).isoformat()
+    out["btc_grade_review_log"] = list(out.get("btc_grade_review_log") or []) + [{"cleared_by": cleared_by, "note": note, "at": at}]
+    out["btc_grade_needs_review"] = False
     return out
 
 def grade_record(r, probe=None):
@@ -218,13 +231,15 @@ def apply(r, probe=None, today=None, anomaly_sink=None):
     """today (date or ISO str) is injectable for tests; defaults to the UTC date."""
     out = dict(r)
     if r.get("btc_src") == "hand":
+        n_anom = len(out.get("btc_grade_anomalies") or [])
         undated = mark_first_seen(out, today, anomaly_sink)
+        fresh = len(out.get("btc_grade_anomalies") or []) > n_anom
         out["btc_grade_hand_review_by"] = hand_review_by(out, today)
         pg, pinfo = grade_record({k: v for k, v in r.items() if k != "btc_src"}, probe)
         if hand_protected(out, today):
             out["btc_grade_basis"] = BASIS_HAND   # a hand grade is never 'observed', whatever the probe saw
             for k in ("btc_grade_hand_by", "btc_grade_hand_at", "btc_grade_hand_evidence"): out.setdefault(k, None)
-            return note_conflict(out, pg, pinfo.get("basis"), pinfo.get("url"), today, undated)
+            return note_conflict(out, pg, pinfo.get("basis"), pinfo.get("url"), today, undated, fresh)
         # review_by reached: normal rules, but an inconclusive (None) result never erases a hand grade (P2-a)
         if pg is None: out["btc_grade_basis"] = BASIS_HAND; return out
         out.pop("btc_grade_conflict", None); out.pop("btc_grade_needs_review", None)
