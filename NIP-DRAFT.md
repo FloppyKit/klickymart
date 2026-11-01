@@ -580,8 +580,19 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   result bound to the head, max age, TTL caps clamp signed expiries, harness-only fields `unknown`, raw events replayed
   to confirm any `matches`/`url_only` claim. Acceptance ends at the earliest of result, head and binding expiry. When
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
-- **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
-  by the daily snapshot step (M4).
+- **Key lifecycle (M3, `KM_KEY_LIFECYCLE`, default OFF; `site/worker/src/key-lifecycle.ts`).** Hash-linked key statements
+  (`klickymart-keystmt-v1`: key, seq, prev hash, `next_key_digest` = sha256 of the next x-only key, revocation key,
+  `created_at`, `expires_at`). A handover is valid only to the pre-announced successor and carries the previous key's
+  signature plus the new key's proof of possession; statements are immutable, and two statements at one position (fork
+  or edit) mark the lineage compromised (fails closed). A revoke (`klickymart-keyrevoke-v1`) is signed by the offline
+  revocation key, only revokes, covers the target and its descendants and beats any handover regardless of timestamps.
+  Rotating the revocation key needs both the signing key and the old revocation key. Harnesses persist revokes (restoring
+  an older backup cannot undo one), clamp statement expiry to a hard cap (placeholder 7 days, PENDING SATOSHI), allow no
+  overlap after a handover by default (PENDING SATOSHI), and pin the root on two or more agreeing channels. With the
+  switch on, heads and results name the current statement's hash and the Worker refuses to sign (503) without a current,
+  unrevoked statement for its own key; `GET /open-store/keys` serves the stored records. With it off, results keep
+  `key_statement_hash: null`. Nothing is published to Nostr.
+- **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
   on-demand writes, no extra cron; a missed day fails closed (503). Freeze-window tradeoff: a frozen or replayed head can
