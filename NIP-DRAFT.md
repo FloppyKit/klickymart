@@ -615,9 +615,19 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
      the record (`km_key_ots`) and upgraded by the existing daily cron. Stamping runs in the background and never blocks
      signing; a failure leaves the record unstamped. An anchor counts only at >= `CONF` = 6 confirmations.
   2. Records embed `notbefore` = {height, hash} of a recent Bitcoin block. A confirmed anchor more than `FRESH_K` blocks
-     after `notbefore` (default 36, `KM_KEY_OTS_FRESH_K`, compiled max 144, PENDING SATOSHI; TODO measure real
-     calendar-to-block latency), a `notbefore` naming a block that isn't there, or an anchor with no `notbefore` = stale
-     and invalid.
+     after `notbefore` (default 36, `KM_KEY_OTS_FRESH_K`, compiled max 144, confirmed by Satoshi; TODO measure real
+     calendar-to-block latency) = stale and invalid for key statements, rotations and OLD-key revokes. Revokes from the
+     CURRENT revocation key are exempt from staleness. A record is rejected outright if its `notbefore` disagrees with a
+     known header or is more than `CONF` above the tip.
+     **Pre-OTS records** (no `notbefore`) stay valid chain history but are unbounded: never strictly before or after
+     anything, so in a dispute they fall to the tie rule (the revoke wins). **Activation:** turning `KM_KEY_OTS` on takes
+     effect only in the daily cron run that promotes (and stamps) a fresh statement carrying `notbefore`
+     (`km_key_ots_state`); after that every stored lifecycle record must carry `notbefore` (others are rejected), and
+     harnesses reject later statements, rotations and old-key revokes without one.
+     **Header-eclipse cap:** harnesses latch `first_seen_tip` per record. If no header source knows a record's
+     `notbefore` block by `first_seen_tip` + `FRESH_K` + `CONF`, a rotation or key statement is invalid and ignored, and an
+     old-key revoke counts as a tie (the revoke wins, terminal). An eclipse may delay a resolution but never turns a valid
+     revoke into an ignored one; the dispute deadline below fires only once both `notbefore` blocks are header-known.
   3. A is strictly before B only if anchor(A) < notbefore(B), heights only, never block timestamps; overlap = tie.
   4. Forks stay terminal for the whole lineage. Archived results record the key statement's anchor height as an
      `observed` provenance field only; no salvage.
