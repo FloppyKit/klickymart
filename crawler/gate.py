@@ -222,6 +222,7 @@ def _install_playwright(proxy):
         setattr(cls, name, wrap)
     orig_np = Browser.new_page
     def new_page(self, *a, **k):
+        k.setdefault("service_workers", "block")   # d3: Browser.new_page makes its own context
         p = orig_np(self, *a, **k); gate_ctx(p.context); return p
     Browser.new_page = new_page
     from playwright.sync_api._generated import Page

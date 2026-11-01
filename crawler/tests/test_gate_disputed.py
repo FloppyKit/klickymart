@@ -43,12 +43,14 @@ def test_d3_contexts_block_service_workers():
         seen = []
         class Ctx:
             def route(self, *a, **k): pass
+        class Pg: context = Ctx()
         Browser.new_context = lambda self, *a, **k: (seen.append(k.get('service_workers')), Ctx())[1]
+        Browser.new_page = lambda self, *a, **k: (seen.append(k.get('service_workers')), Pg())[1]
         BrowserType.launch_persistent_context = lambda self, *a, **k: (seen.append(k.get('service_workers')), Ctx())[1]
         import gate
         gate.start_egress_proxy = lambda: 'http://127.0.0.1:9'
         gate.install()
-        Browser.new_context(object()); BrowserType.launch_persistent_context(object(), '/tmp/x')
+        Browser.new_context(object()); BrowserType.launch_persistent_context(object(), '/tmp/x'); Browser.new_page(object())
         print(seen)
     """)
-    assert out == "['block', 'block']", out
+    assert out == "['block', 'block', 'block']", out
