@@ -19,4 +19,7 @@ def main(rec=os.path.join(HERE, "out", "records.jsonl"), probes=os.path.join(HER
             changed += m != r; n += 1
             out.write(json.dumps(m, separators=(",", ":")) + "\n")
     print(f"records={n} probed={len(latest)} changed={changed} -> {dst}")
-if __name__ == "__main__": main(*sys.argv[1:])
+def _main(*a):
+    main(*a)
+    import ledger_commit; ledger_commit.flush_and_commit()   # one ledger commit per pass (gated on KM_LEDGER_AUTOCOMMIT=1)
+if __name__ == "__main__": _main(*sys.argv[1:])

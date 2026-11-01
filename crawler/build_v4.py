@@ -383,3 +383,4 @@ with open(O("v4-diff-2026-10-30.md"), "w") as f:
     f.write("## New index entries\n" + "".join(f"- {d} ({recs[d].get('status')}, seed {recs[d].get('seed_source')})\n" for d in added) + "\n## Notable changes\n")
     for d, ns in sorted(diff.items()): f.write(f"- **{d}**: " + "; ".join(ns) + "\n")
 print(f"records {len(recs)} new {len(added)} changed {len(changed)} offers {len(offers)} stores_with_offers {len({x['domain'] for x in offers})} drafts {len(drafts)}")
+import ledger_commit; ledger_commit.flush_and_commit()   # one ledger commit per pass (gated on KM_LEDGER_AUTOCOMMIT=1)
