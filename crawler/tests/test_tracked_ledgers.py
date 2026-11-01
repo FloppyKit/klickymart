@@ -75,3 +75,40 @@ def test_check_script_allows_append(tmp_path):
 def test_check_script_fails_on_removed_or_edited(tmp_path, new):
     d, f = _git_repo(tmp_path); f.write_text(new)
     r = _check(d, "--paths", "data/hand-anomalies.jsonl"); assert r.returncode == 1, r.stdout + r.stderr
+
+
+def test_p2_c_bad_ref_fails_closed(tmp_path):
+    d, f = _git_repo(tmp_path)
+    r = _check_ref(d, "nonexistent-ref"); assert r.returncode == 2, r.stdout + r.stderr
+    r = subprocess.run([sys.executable, os.path.join(CRAWLER, "check_append_only.py"), "nonexistent-ref"], cwd=str(d), capture_output=True, text=True)
+    assert r.returncode != 0
+
+def test_p2_c_new_path_at_valid_base_ok(tmp_path):
+    d, f = _git_repo(tmp_path); (d / "data" / "new.jsonl").write_text('{"b":1}\n')
+    r = _check(d, "--paths", "data/new.jsonl"); assert r.returncode == 0, r.stdout
+
+def _base(d, content):
+    f = d / "data" / "hand-anomalies.jsonl"; f.write_bytes(content)
+    subprocess.run(["git", "-C", str(d), "commit", "-qam", "b2"], check=True, capture_output=True)
+    return f
+
+def test_p2_d_unterminated_last_line_extended_fails(tmp_path):
+    d, _ = _git_repo(tmp_path); f = _base(d, b'{"a":1}\n{"first_seen":"2026-10-31"}')
+    f.write_bytes(b'{"a":1}\n{"first_seen":"2026-10-31"}x\n')
+    assert _check(d, "--paths", "data/hand-anomalies.jsonl").returncode == 1
+
+def test_p2_d_unterminated_base_fails_even_unchanged(tmp_path):
+    d, _ = _git_repo(tmp_path); _base(d, b'{"a":1}')
+    assert _check(d, "--paths", "data/hand-anomalies.jsonl").returncode == 1
+
+@pytest.mark.parametrize("new", [b'{"a":1}\r\n{"a":2}\n', b'{"a":1}\n{"a":2}\n{"a":3}\r\n'])
+def test_p2_d_carriage_return_fails(tmp_path, new):
+    d, f = _git_repo(tmp_path); f.write_bytes(new)
+    assert _check(d, "--paths", "data/hand-anomalies.jsonl").returncode == 1
+
+def _check_ref(d, ref):
+    return subprocess.run([sys.executable, os.path.join(CRAWLER, "check_append_only.py"), ref, "--paths", "data/hand-anomalies.jsonl"], cwd=str(d), capture_output=True, text=True)
+
+def test_ci_workflow_runs_append_only_check():
+    wf = open(os.path.join(REPO, ".github", "workflows", "site.yml")).read()
+    assert "check_append_only.py" in wf and "fetch-depth: 0" in wf

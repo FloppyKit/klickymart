@@ -6,6 +6,7 @@ on:
     paths:
       - "site/**"
       - "data/**"
+      - "crawler/check_append_only.py"
       - ".github/workflows/site.yml"
 
 concurrency:
@@ -13,6 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ledgers:
+    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). Full history so the merge base resolves; a bad ref fails.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Append-only ledgers vs merge base with main
+        run: |
+          base="$(git merge-base origin/main HEAD)"
+          python3 crawler/check_append_only.py "$base"
   site:
     runs-on: ubuntu-latest
     defaults:
