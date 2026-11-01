@@ -84,4 +84,67 @@ class Hand(unittest.TestCase):
         self.assertLess(k(2, "hand", "note: phoned store"), k(2, "claimed"))
         r = apply({"btc": 2, "btc_src": "hand"}); self.assertEqual(r["btc_grade_basis"], "hand")
 
+class HandReviewBy(unittest.TestCase):
+    URL = "https://x.example/pay"
+    PROBE0 = {"step_reached": "payment_methods", "methods": [{"c": "card", "ev": "Visa"}], "path": [["pay", "https://x.example/checkout"]]}
+    Q2 = [{"c": "btc", "neg": False, "url": URL, "q": "Pay with bitcoin via OpenNode. Guest checkout, no account needed."}]
+    def hand(self, g, **kw):
+        r = {"d": "x.example", "btc": g, "btc_src": "hand", "btc_grade_basis": "hand", "btc_grade_hand_by": "kb",
+             "btc_grade_hand_at": "2026-10-30", "btc_grade_hand_evidence": self.URL}
+        r.update(kw); return r
+
+    def test_review_by_is_hand_at_plus_90(self):
+        from btc_grade import hand_review_by
+        self.assertEqual(apply(self.hand(2), today="2026-11-01")["btc_grade_hand_review_by"], "2027-01-28")
+        self.assertEqual(hand_review_by({"btc_grade_hand_at": "2026-10-30"}), "2027-01-28")
+
+    def test_before_review_downgrade_probe_kept_with_conflict(self):
+        out = apply(self.hand(2), self.PROBE0, today="2026-11-15")
+        self.assertEqual((out["btc"], out["btc_src"], out["btc_grade_basis"]), (2, "hand", "hand"))
+        c = out["btc_grade_conflict"]
+        self.assertEqual(c["hand"], {"grade": 2, "basis": "hand"})
+        self.assertEqual((c["probe"]["grade"], c["probe"]["basis"], c["probe"]["url"]), (0, "claimed", "https://x.example/checkout"))
+        self.assertEqual(c["seen_at"], "2026-11-15")
+
+    def test_before_review_upgrade_probe_kept_with_conflict(self):
+        out = apply(self.hand(0, pay_q=self.Q2), today="2026-11-15")
+        self.assertEqual((out["btc"], out["btc_src"]), (0, "hand"))
+        self.assertEqual(out["btc_grade_conflict"]["probe"]["grade"], 2)
+        self.assertEqual(out["btc_grade_conflict"]["probe"]["url"], self.URL)
+
+    def test_before_review_agreeing_probe_no_conflict(self):
+        self.assertNotIn("btc_grade_conflict", apply(self.hand(0), self.PROBE0, today="2026-11-15"))
+        self.assertNotIn("btc_grade_conflict", apply(self.hand(2, pay_q=self.Q2), today="2026-11-15"))
+
+    def test_on_or_after_review_probe_overwrites(self):
+        for today in ("2027-01-28", "2027-03-01"):
+            down = apply(self.hand(2), self.PROBE0, today=today)
+            self.assertEqual((down["btc"], down["btc_src"], down["btc_grade_basis"]), (0, "agent-evidence", "claimed"))
+            self.assertNotIn("btc_grade_conflict", down)
+            up = apply(self.hand(0, pay_q=self.Q2), today=today)
+            self.assertEqual((up["btc"], up["btc_src"]), (2, "agent-evidence"))
+        self.assertEqual(apply(self.hand(2), self.PROBE0, today="2027-01-27")["btc"], 2)   # day before: still hand
+
+class HandReviewByMerge(unittest.TestCase):
+    def setUp(self):
+        from checkout_parse import merge, grade
+        self.merge, self.grade = merge, grade
+    def probe(self, btc):
+        p = {"d": "x.example", "step_reached": "payment_methods", "btc_offered": "yes" if btc else "no",
+             "methods": [{"c": "btc", "ev": "Bitcoin"}] if btc else [{"c": "card", "ev": "Visa"}],
+             "processors": [], "privacy": ["noacct", "selfhosted"] if btc else [], "path": [["pay", "https://x.example/checkout"]]}
+        return p
+    def test_merge_symmetric(self):
+        for hand_g, p in ((3, self.probe(False)), (0, self.probe(True))):
+            g = self.grade(p)
+            self.assertNotIn(g, (None, hand_g))
+            r = {"d": "x.example", "btc": hand_g, "btc_src": "hand", "btc_grade_hand_at": "2026-10-30"}
+            kept = self.merge(r, p, today="2026-12-01")
+            self.assertEqual((kept["btc"], kept["btc_src"]), (hand_g, "hand"))
+            self.assertEqual(kept["btc_grade_conflict"]["probe"]["grade"], g)
+            self.assertEqual(kept["btc_grade_hand_review_by"], "2027-01-28")
+            over = self.merge(r, p, today="2027-01-28")
+            self.assertEqual((over["btc"], over["btc_src"]), (g, "checkout-probe"))
+            self.assertNotIn("btc_grade_conflict", over)
+
 if __name__ == "__main__": unittest.main()

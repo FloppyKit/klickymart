@@ -32,4 +32,15 @@ class BtcContext(unittest.TestCase):
         self.assertIn("btc", pay("Which payment methods do you take? Card, PayPal and Bitcoin are available.", "help", "https://s.example/faq/payment"))
         self.assertFalse(btc_payment_context("BITCOIN", True))
 
+    def test_editorial_line_does_not_borrow(self):   # payment word elsewhere on the line, not in a preceding question
+        for l in ["Buy Bitcoin today. We accept card and PayPal at checkout.",
+                  "We accept card and PayPal at checkout. Bitcoin is the future of money."]:
+            self.assertNotIn("btc", pay(l, "help", "https://s.example/faq/payment"), l)
+
+    def test_question_without_ctx_does_not_lend(self):
+        l = "What is your favourite coin? Bitcoin is available."
+        self.assertNotIn("btc", pay(l, "help", "https://s.example/faq/payment"))
+        # same answer after a CTX question does borrow
+        self.assertIn("btc", pay("Which payment methods do you take? Bitcoin is available.", "help", "https://s.example/faq/payment"))
+
 if __name__ == "__main__": unittest.main()

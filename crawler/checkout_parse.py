@@ -94,13 +94,21 @@ def phone_required(probe):
     if (probe or {}).get("step_reached") in ("payment_methods", "after_contact", "after_address"): return False
     return None
 
-def merge(record, probe):
-    """Return a new record updated from a probe result. Never downgrades a hand-set grade; only conclusive probes change btc."""
+def merge(record, probe, today=None):
+    """Return a new record updated from a probe result; only conclusive probes change btc. A hand grade is kept before its
+    btc_grade_hand_review_by (hand_at + 90 days) and a disagreeing probe is recorded in btc_grade_conflict; on/after
+    review_by the probe overwrites it (up or down). today is injectable for tests."""
+    import btc_grade
     r = dict(record)
     if not probe or probe.get("d") != r.get("d"): return r
     g = grade(probe)
     if probe.get("btc_offered") == "yes": r["btc_any"] = True
-    if g is not None and (r.get("btc_src") != "hand" or r.get("btc") is None):
+    if r.get("btc_src") == "hand": r["btc_grade_hand_review_by"] = btc_grade.hand_review_by(r)
+    if r.get("btc_src") == "hand" and r.get("btc") is not None and btc_grade.hand_protected(r, today):
+        url = (probe.get("path") or [[None, None]])[-1][-1]
+        btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today)
+    elif g is not None:
+        if r.get("btc_src") == "hand": r.pop("btc_grade_conflict", None); r.pop("btc_grade_basis", None)
         r["btc"] = g; r["btc_src"] = "checkout-probe"
     priv = sorted(set(r.get("btc_priv") or []) | ({"noacct", "selfhosted", "ecash", "sp", "ark"} & set(probe.get("privacy") or [])
                   if probe.get("btc_offered") == "yes" else set()))

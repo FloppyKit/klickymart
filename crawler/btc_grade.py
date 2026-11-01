@@ -2,7 +2,7 @@
 """Evidence-based bitcoin grading (CRAWL-RUBRIC.md). Never guesses: a grade is set only when a quote/URL supports it;
 otherwise btc stays null with btc_grade_reason (and btc_grade_range when bounded). Hand grades (btc_src='hand') are kept.
 Usage: btc_grade.py in.jsonl out.jsonl"""
-import json, re, sys
+import datetime, json, re, sys
 BTC = {"btc", "ln", "liq", "cashu", "fedi", "ark", "sp", "bolt12", "lnurl"}
 SELF = re.compile(r"(?i)btcpay|own (lightning )?node|self-hosted")
 CUSTODIAL = re.compile(r"(?i)confirmo|opennode|strike|bitpay|coinbase commerce|zaprite|ibex|speed|blink|nowpayments|coingate")
@@ -37,6 +37,36 @@ def grade_sort_key(grade, basis, hand_evidence=None):
     its basis label stays 'hand'."""
     if basis == BASIS_HAND and not hand_evidence: basis = BASIS_CLAIMED
     return (grade is None, -(grade if grade is not None else 0), BASIS_ORDER.index(basis) if basis in BASIS_ORDER else len(BASIS_ORDER))
+
+HAND_REVIEW_DAYS = 90       # a hand grade is protected until btc_grade_hand_review_by = hand_at + 90 days
+
+def _date(x):
+    if isinstance(x, datetime.datetime): return x.date()
+    if isinstance(x, datetime.date): return x
+    try: return datetime.date.fromisoformat(str(x)[:10])
+    except (TypeError, ValueError): return None
+
+def hand_review_by(r):
+    """ISO date hand_at + 90 days, or None when hand_at is missing/unparseable."""
+    at = _date(r.get("btc_grade_hand_at"))
+    return (at + datetime.timedelta(days=HAND_REVIEW_DAYS)).isoformat() if at else None
+
+def hand_protected(r, today=None):
+    """True while a hand grade may not be overwritten: before review_by. A hand grade without a parseable hand_at
+    has no review date and stays protected (legacy behavior)."""
+    if r.get("btc_src") != "hand": return False
+    rb = hand_review_by(r)
+    if rb is None: return True
+    return _date(today or datetime.date.today()) < _date(rb)
+
+def note_conflict(out, probe_grade, probe_basis, probe_url, today=None):
+    """Keep the hand grade; record a disagreeing probe instead of dropping it. Agreement (or an inconclusive probe) clears it."""
+    if probe_grade is None or probe_grade == out.get("btc"):
+        out.pop("btc_grade_conflict", None); return out
+    out["btc_grade_conflict"] = {"hand": {"grade": out.get("btc"), "basis": BASIS_HAND},
+                                 "probe": {"grade": probe_grade, "basis": probe_basis, "url": probe_url},
+                                 "seen_at": _date(today or datetime.date.today()).isoformat()}
+    return out
 
 def grade_record(r, probe=None):
     """Return (grade|None, info dict). info: src, quote, url, reason, range, basis (every non-hand result)."""
@@ -85,13 +115,19 @@ def _grade_text(r, probe=None):
         return None, {"quote": quote, "url": url, "range": "2-3", "reason": "BTCPay seen with guest checkout; host ownership not verifiable without placing an order"}
     return None, {"quote": quote, "url": url, "range": "1-4", "reason": "bitcoin accepted; processor/custody and account requirement not evidenced"}
 
-def apply(r, probe=None):
-    g, info = grade_record(r, probe)
+def apply(r, probe=None, today=None):
+    """today (date or ISO str) is injectable for tests; defaults to date.today()."""
     out = dict(r)
-    if info.get("src") == "hand":
-        out["btc_grade_basis"] = BASIS_HAND   # a hand grade is never 'observed', whatever the probe saw
-        for k in ("btc_grade_hand_by", "btc_grade_hand_at", "btc_grade_hand_evidence"): out.setdefault(k, None)
-        return out
+    if r.get("btc_src") == "hand":
+        out["btc_grade_hand_review_by"] = hand_review_by(r)
+        if hand_protected(r, today):
+            out["btc_grade_basis"] = BASIS_HAND   # a hand grade is never 'observed', whatever the probe saw
+            for k in ("btc_grade_hand_by", "btc_grade_hand_at", "btc_grade_hand_evidence"): out.setdefault(k, None)
+            pg, pinfo = grade_record({k: v for k, v in r.items() if k != "btc_src"}, probe)
+            return note_conflict(out, pg, pinfo.get("basis"), pinfo.get("url"), today)
+        r = {k: v for k, v in r.items() if k != "btc_src"}   # review_by reached: grade normally
+        out.pop("btc_grade_conflict", None)
+    g, info = grade_record(r, probe)
     out["btc"] = g
     out["btc_any"] = bool(info.get("quote")) and g != 0
     out["btc_src"] = "agent-evidence" if g is not None else None

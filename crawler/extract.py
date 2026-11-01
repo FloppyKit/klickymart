@@ -82,14 +82,18 @@ BADGE_RX = re.compile(r"(?i)^(" + _COIN + r"( (and|or|&) " + _COIN + r")?( netwo
 # is a list of accepted methods even without a verb (bitrefill help center, 2026-10-30 QA).
 LIST_ROW_RX = re.compile(r"(?i)\b(lightning|bitcoin|liquid) network\b|\bbitcoin\s+\(?btc\)?\s+\S")   # needs a network/ticker column, not a bare word
 
-def btc_payment_context(line, paypage, check_not_payment=True):
+def btc_payment_context(line, paypage):
     """BTC evidence must read as payment acceptance, not editorial text about bitcoin."""
     if BADGE_RX.match(line.strip()): return True
-    if check_not_payment and NOT_PAYMENT_RX.search(line): return False
+    if NOT_PAYMENT_RX.search(line): return False
     if ACCEPT_RX.search(line): return True
     if EDITORIAL_RX.search(line): return False
     if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
     return bool(paypage and CTX.search(line))
+
+def question_lends_context(prev):
+    """True when prev (the segment immediately before, same line) is a question that itself names payment (CTX)."""
+    return bool(prev) and prev.rstrip().endswith("?") and bool(CTX.search(prev))
 
 def normalize_text(t):
     """Evidence normalization (the ONE definition; evidence_sha hashes its UTF-8 bytes):
@@ -149,14 +153,16 @@ def extract_payments(texts, evidence_dir=None):
             for code, rx in TERMS:
                 if not re.search(rx, line, flags=re.I): continue
                 # sentence-level negation: "SNAP EBT is accepted online. Cash EBT is not accepted." -> one pos, one neg
-                segs = [x for x in re.split(r"(?<=[.!?])\s+", line) if re.search(rx, x, flags=re.I)] or [line]
-                for seg in segs:
+                parts = re.split(r"(?<=[.!?])\s+", line)
+                segs = [(x, parts[j - 1] if j else None) for j, x in enumerate(parts) if re.search(rx, x, flags=re.I)] or [(line, None)]
+                for seg, prev in segs:
                     # FAQ gap (spec): a sentence segment ending in '?' is a question, never BTC evidence
                     if code in BTC_STRICT and seg.rstrip().endswith("?"): continue
                     # payment context (incl. NOT_PAYMENT_RX) is judged per sentence segment, not per whole line
-                    # (the segment may still borrow payment context from its line, e.g. "Which payment methods...? Card and Bitcoin.")
+                    # a segment may borrow context ONLY from the question segment immediately before it, and only when that
+                    # question matches CTX ("Which payment methods do you take? Card and Bitcoin."); nothing else on the line lends
                     if code in BTC_STRICT and (NOT_PAYMENT_RX.search(seg) or not (btc_payment_context(seg, paypage)
-                                               or btc_payment_context(line, paypage, check_not_payment=False))): continue
+                                               or question_lends_context(prev))): continue
                     neg = bool(NEG.search(seg))
                     (no if neg else pay).add(code)
                     sc = line_scope(seg, None) or line_scope(line, head_scope)

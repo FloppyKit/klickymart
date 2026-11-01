@@ -139,6 +139,8 @@ for d, r in recs.items():
     r["checkout_probe"] = {k: p.get(k) for k in ("step_reached", "pm_visible", "btc_offered", "ts", "shot", "guest_seen", "checkout_pages")}
     r["checkout_probe"]["n"] = readable(p.get("n")) if p.get("n") and kind != "none" else (p.get("n") or None)
     if p.get("n"): r["checkout_probe"]["n_debug"] = p["n"][:600]
+def _bg_hand_review_by(at):
+    import btc_grade; return btc_grade.hand_review_by({"btc_grade_hand_at": at})
 # ---- hand-sourced fixes from the re-review (store-owned pages fetched 2026-10-30 by KlickyBot) ----
 pf = {}
 for f in ("payfetch-2026-10-30.json", "payfetch2-2026-10-30.json"):
@@ -151,7 +153,7 @@ if "bestbuy.com" in recs and has(BB, "BestBuy.com accepts these payment types:")
     r["pay_q"] = [{"c": c, "neg": False, "url": BB, "q": f"BestBuy.com accepts these payment types: ... {q}", "conf": "med", "scope": "online"} for c, q in items if has(BB, q)]
     r["pay"] = sorted({q["c"] for q in r["pay_q"]}); r["pay_online"] = r["pay"]; r["pay_instore"] = []; r["pay_unscoped"] = []
     r["evu"] = [BB]; r["pay_src"] = "store-help-page-2026-10-30"
-    r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_evidence=BB)
+    r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_review_by=_bg_hand_review_by("2026-10-30"), btc_grade_hand_evidence=BB)
     r["btc_conf"] = "med"; r["btc_ev"] = {"url": BB, "q": "BestBuy.com accepts these payment types: (16 listed, none bitcoin)", "reason": "store's own complete payment-type list names no bitcoin option"}
     note("bestbuy.com", "pay filled from payment-options help page (" + ",".join(r["pay"]) + "); evidence URL set; btc 0")
 SON = "https://www.sonos.com/en-us/shipping-faq"
@@ -161,7 +163,7 @@ if "sonos.com" in recs:
         TOS = "https://www.sonos.com/pdfs/policies/2024-11-terms-of-sale-en-us.pdf"
         r["pay_q"] = [{"c": c, "neg": False, "url": TOS, "q": "We offer various ways for you to pay for your order: Visa, MasterCard, American Express and PayPal.", "conf": "med", "scope": "online"} for c in ("card", "pp")]
         r["pay"] = ["card", "pp"]; r["pay_online"] = ["card", "pp"]; r["pay_instore"] = []; r["pay_unscoped"] = []; r["evu"] = [TOS, SON]; r["pay_src"] = "store-terms-of-sale-us"
-        r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_evidence=TOS)
+        r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_review_by=_bg_hand_review_by("2026-10-30"), btc_grade_hand_evidence=TOS)
         r["btc_conf"] = "med"; r["btc_ev"] = {"url": TOS, "q": "We offer various ways for you to pay for your order: Visa, MasterCard, American Express and PayPal.", "reason": "complete US payment list names no bitcoin"}
         note("sonos.com", "pay ['gift'] -> card, pp (US terms of sale; 'Gift Card Balance' link was not a payment statement); btc 0")
     if has(SON, "Shipping is always free on Sonos.com."):
