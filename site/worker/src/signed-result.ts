@@ -4,7 +4,7 @@
  *
  * Signing: id = sha256(DOMAIN + "\n" + canonicalJson(payload)), BIP-340 Schnorr over id with the KlickyMart result key
  * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). Key custody (M3) is being rebuilt as FROST
- * Key A + Key B certs (design/GAME-THEORY-M3-FROST-KEYS-2026-11-01.md); until then results carry key_statement_hash = null
+ * Key A + Key B certs (design doc held locally); until then results carry cert_hash = null
  * and a harness that requires one rejects them. buildResult's optional key reference + expiry cap is kept for that.
  * Switch: KM_SIGNED_RESULTS = 1|true|on enables the /open-store routes (default OFF: they do not exist; when on they 503 without a key or head).
  */
@@ -68,10 +68,10 @@ export function typedFields(s: BindingState | null | "unknown", nowS: number, sn
  * never served (no digest source exists in the Worker yet; M4). */
 export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; snapshot_digest: string | null; sequence: number; created_at: number; expires_at: number; prev_head: string | null;
   /** M3 (pending FROST rebuild): hash of the signing key's cert. Absent (not null) today, so M2 heads sign identically. */
-  key_statement_hash?: string }
+  cert_hash?: string }
 export interface ResultPayload {
   type: "klickymart-result"; v: 1; store_pubkey: string; nonce: string; snapshot_id: string; sequence: number;
-  produced_at: number; expires_at: number; key_statement_hash: string | null; binding_hash: string | null;
+  produced_at: number; expires_at: number; cert_hash: string | null; binding_hash: string | null;
   fields: TypedFields; raw_events: BEv[];
   /** Conflicts whose old side is hash-only (old bytes left the capped history). Weaker evidence, marked as such. */
   conflict_refs: ConflictRef[];
@@ -96,11 +96,11 @@ export function verifySig<P>(domain: string, s: Signed<P>, pinned: string): stri
 export const signHead = (p: HeadPayload, skHex: string) => sign(HEAD_DOMAIN, p, skHex);
 export const signResult = (p: ResultPayload, skHex: string) => sign(RESULT_DOMAIN, p, skHex);
 
-export function buildResult(s: BindingState | null | "unknown", storePubkey: string, nonce: string, head: HeadPayload, nowS: number, keyStatementHash: string | null = null, keyUntil?: number): ResultPayload {
+export function buildResult(s: BindingState | null | "unknown", storePubkey: string, nonce: string, head: HeadPayload, nowS: number, certHash: string | null = null, keyUntil?: number): ResultPayload {
   const st = s === "unknown" ? null : s;
   return {
     type: "klickymart-result", v: 1, store_pubkey: storePubkey, nonce, snapshot_id: head.snapshot_id, sequence: head.sequence,
-    produced_at: nowS, expires_at: Math.min(nowS + RESULT_TTL_S, head.expires_at, keyUntil ?? Number.MAX_SAFE_INTEGER), key_statement_hash: keyStatementHash,
+    produced_at: nowS, expires_at: Math.min(nowS + RESULT_TTL_S, head.expires_at, keyUntil ?? Number.MAX_SAFE_INTEGER), cert_hash: certHash,
     binding_hash: st?.latest ? hashHex(st.latest.content) : null, fields: typedFields(s, nowS, head.snapshot_id), raw_events: evidenceEvents(st),
     conflict_refs: (st?.conflicts ?? []).filter((c) => c.old_ref).map((c) => ({ version: c.old_ref!.version, old_hash: c.old_ref!.hash, old_id: c.old_ref!.id, old_created_at: c.old_ref!.created_at, new_id: c.events[0]!.id, marks: [...c.marks] })),
   };
@@ -117,7 +117,7 @@ export interface HarnessOpts {
   skewS?: number;
   resultTtlCapS?: number;
   headTtlCapS?: number;
-  requireKeyStatement?: boolean;  // M3; off until the key lifecycle exists
+  requireCertHash?: boolean;  // M3; off until the key lifecycle exists
 }
 export type HarnessVerdict = { ok: true; acceptUntil: number; status: BindingStatus; marks?: string[] } | { ok: false; reason: string };
 
@@ -140,7 +140,7 @@ export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayloa
   if (o.nowS - r.produced_at > maxAge) return { ok: false, reason: "result: stale (older than max age)" };
   const resUntil = Math.min(r.expires_at, r.produced_at + rCap);
   if (o.nowS > resUntil) return { ok: false, reason: "result: expired" };
-  if (o.requireKeyStatement && !r.key_statement_hash) return { ok: false, reason: "result: no key statement" };
+  if (o.requireCertHash && !r.cert_hash) return { ok: false, reason: "result: no cert hash" };
   for (const k of HARNESS_ONLY) if (r.fields?.[k]?.value !== "unknown") return { ok: false, reason: `result: harness-only field ${k} not unknown` };
   for (const [k, f] of Object.entries(r.fields ?? {})) if (!f || typeof f !== "object" || !("provenance" in f)) return { ok: false, reason: `result: field ${k} has no provenance` };
   // Re-verify the raw events: replay them from scratch; the claimed status must be what the evidence supports now.

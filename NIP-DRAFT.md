@@ -580,9 +580,10 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   result bound to the head, max age, TTL caps clamp signed expiries, harness-only fields `unknown`, raw events replayed
   to confirm any `matches`/`url_only` claim. Acceptance ends at the earliest of result, head and binding expiry. When
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
-- **Not yet:** key custody (M3; results carry `key_statement_hash: null`). PENDING: the earlier lineage and
+- **Not yet:** key custody (M3; results carry `cert_hash: null`). PENDING: the earlier lineage and
   OpenTimestamps-ordering design was withdrawn; its replacement is the FROST threshold-key plan
-  (`design/GAME-THEORY-M3-FROST-KEYS-2026-11-01.md`, v6.3), not yet specified here.
+  (design doc held locally, v6.3), not yet specified here. `cert_hash` will name the typed record that
+  authorizes the signer (the Key B cert, or Key A's pin or re-pin record).
 - **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No

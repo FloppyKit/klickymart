@@ -356,9 +356,9 @@ describe("signed results (v9.2 §1 acceptance)", () => {
     (r.fields.payment_bound_to_order as { value: unknown }).value = true;
     expect(verifyResult(signResult(r, KM_HEX), signHead(headP, KM_HEX), opts())).toMatchObject({ ok: false, reason: "result: harness-only field payment_bound_to_order not unknown" });
   });
-  it("requireKeyStatement (M3) rejects results without a key-statement hash", () => {
+  it("requireCertHash (M3) rejects results without a key-statement hash", () => {
     const { head, res } = setup(evs, store);
-    expect(verifyResult(res, head, opts({ requireKeyStatement: true }))).toMatchObject({ ok: false, reason: "result: no key statement" });
+    expect(verifyResult(res, head, opts({ requireCertHash: true }))).toMatchObject({ ok: false, reason: "result: no cert hash" });
   });
   it("liveness: cached unexpired state is used, then payments fail closed; relay-only only when opted in", () => {
     expect(paymentGate({ acceptUntil: NOW + 10 }, NOW)).toBe("use_cache");
