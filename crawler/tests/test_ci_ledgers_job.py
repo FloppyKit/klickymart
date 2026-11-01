@@ -22,6 +22,6 @@ def test_ledgers_job_base_and_permissions():
     assert "${{ github.event.before }}" in j
     assert "${{ github.event.pull_request.base.sha }}" in j
     assert re.search(r"0{40}", j) and "git merge-base origin/main HEAD" in j   # new-branch fallback
-    assert "python3 crawler/check_append_only.py \"$base\"" in j
+    assert 'check_append_only.py "$PR_BASE"' in j and 'check_append_only.py "$BEFORE"' in j
     assert re.search(r"(?m)^  pull_request:", text)
     assert "if: github.event_name == 'push'" in _job(text, "site")          # site job keeps its one-run-per-push rule

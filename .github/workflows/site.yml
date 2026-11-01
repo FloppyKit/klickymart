@@ -21,27 +21,43 @@ concurrency:
 
 jobs:
   ledgers:
-    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). Base: push -> the previous tip (github.event.before; a
-    # force-push that rewrote history makes it unreachable and the check fails closed); new branch (before = zeros) ->
-    # merge base with origin/main; pull_request -> the PR base sha. Full history so the base resolves.
+    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). r6-2: own concurrency group, never cancelled, and a stable
+    # base so a cancelled/skipped run can't hide a rewrite:
+    #   pull_request -> the PR base sha
+    #   push, non-main -> merge base with origin/main (stable across pushes)
+    #   push, main -> github.event.before (an unreachable old tip after a force-push fails closed) AND every ancestor
+    #                 commit that touched the ledgers (each must be a line prefix of today's files)
+    # Advisory until Matt marks "ledgers" a required check and disables force-push on main (branch protection).
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    concurrency:
+      group: ledgers-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Append-only ledgers vs base
+      - name: Append-only ledgers vs stable base
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"
-          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then base="$(git merge-base origin/main HEAD)"
-          else base="$BEFORE"; fi
-          echo "append-only base: $base"
-          python3 crawler/check_append_only.py "$base"
+          set -e
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 crawler/check_append_only.py "$PR_BASE"
+          elif [ "$REF" != "refs/heads/main" ]; then
+            python3 crawler/check_append_only.py "$(git merge-base origin/main HEAD)"
+          else
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              python3 crawler/check_append_only.py "$BEFORE"
+            fi
+            for c in $(git log --format=%H -- data/hand-first-seen.jsonl data/hand-anomalies.jsonl); do
+              python3 crawler/check_append_only.py "$c"
+            done
+          fi
   site:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
