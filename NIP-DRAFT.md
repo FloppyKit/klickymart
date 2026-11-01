@@ -552,13 +552,19 @@ https://github.com/nostr-protocol/nips/pulls (relay usage not checked). Implemen
 - **Binding event.** Addressable, one per store key, `["d","klickymart-endpoints"]`. Content is canonical JSON (keys
   sorted, no whitespace) with ONLY the v9.2 §2 fields: `{"endpoints":{...},"expires_at":<unix>,"version":<int>}` with
   endpoints from `bolt12_offer`, `node_id` (66 hex), `lud16`, `lnurl`, `cashu_mints` (https URLs), or
-  `{"revoked":true,"version":<int>}`. Any other field is rejected. No settlement modes: those are a per-order claim the
+  a revoke. Any other field on a non-revoke state is rejected. **Revoke:** any validly signed event from the key, on this
+  kind and d tag, with `"revoked":true` is terminal regardless of version, `created_at`, skew or extra fields;
+  `expires_at`/`endpoints` on a revoke are ignored and never used. No settlement modes: those are a per-order claim the
   harness checks (v9.2 §3). Payment strings are data: shape-checked, never fetched.
 - **Versioning.** A new state needs both `version` and `created_at` strictly higher, else `conflict`. `created_at` more than
   skew S ahead is rejected. A version jump above a threshold is `conflict`. Same version with different content is
   `conflict`, and the conflict carries both signed events. Revocation is terminal for the store key and beats any version,
   `created_at` and S; recovery is a new store key with no inherited history. **Conflict is permanent for the key**;
   results show the current state beside it (`current_binding`).
+- **Version index.** A permanent per-key index version -> (content hash, `created_at`, event id) of every accepted
+  version. A second event for a known version with different content is `conflict` regardless of `created_at`. If the
+  old bytes already left the capped history, the conflict carries the new signed event plus the stored hash and id of
+  the old one, marked `evidence_hash_only_old_side` (weaker evidence; results list it in `conflict_refs`).
 - **Evidence.** Every accepted state and all evidence is kept: the first state, every conflict pair and the revoke are
   never dropped; only ordinary superseded states are capped (last 32, a starting guess). Ignored events (after a revoke,
   future-dated, stale replays) are not stored: a per-key counter and the hash of the last one only.

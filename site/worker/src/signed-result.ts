@@ -11,7 +11,7 @@ import * as secp from "@noble/secp256k1";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import "./nostr-verify"; // installs noble hashes for secp
-import { applyBinding, bindingStatus, canonicalJson, evidenceEvents, hashHex, parseBinding, recentRotation, type BEv, type BindingState, type BindingStatus } from "./endpoint-binding";
+import { MARK_HASH_ONLY_OLD, applyBinding, bindingStatus, canonicalJson, evidenceEvents, hashHex, parseBinding, recentRotation, type BEv, type BindingState, type BindingStatus } from "./endpoint-binding";
 
 export const RESULT_DOMAIN = "klickymart-result-v1";
 export const HEAD_DOMAIN = "klickymart-head-v1";
@@ -67,7 +67,10 @@ export interface ResultPayload {
   type: "klickymart-result"; v: 1; store_pubkey: string; nonce: string; snapshot_id: string; sequence: number;
   produced_at: number; expires_at: number; key_statement_hash: string | null; binding_hash: string | null;
   fields: TypedFields; raw_events: BEv[];
+  /** Conflicts whose old side is hash-only (old bytes left the capped history). Weaker evidence, marked as such. */
+  conflict_refs: ConflictRef[];
 }
+export interface ConflictRef { version: number; old_hash: string; old_id: string; old_created_at: number; new_id: string; marks: string[] }
 export interface Signed<P> { payload: P; id: string; signer: string; sig: string }
 
 const digest = (domain: string, payload: unknown) => bytesToHex(sha256(utf8ToBytes(`${domain}\n${canonicalJson(payload)}`)));
@@ -93,6 +96,7 @@ export function buildResult(s: BindingState | null | "unknown", storePubkey: str
     type: "klickymart-result", v: 1, store_pubkey: storePubkey, nonce, snapshot_id: head.snapshot_id, sequence: head.sequence,
     produced_at: nowS, expires_at: Math.min(nowS + RESULT_TTL_S, head.expires_at), key_statement_hash: null,
     binding_hash: st?.latest ? hashHex(st.latest.content) : null, fields: typedFields(s, nowS, head.snapshot_id), raw_events: evidenceEvents(st),
+    conflict_refs: (st?.conflicts ?? []).filter((c) => c.old_ref).map((c) => ({ version: c.old_ref!.version, old_hash: c.old_ref!.hash, old_id: c.old_ref!.id, old_created_at: c.old_ref!.created_at, new_id: c.events[0]!.id, marks: [...c.marks] })),
   };
 }
 
@@ -109,7 +113,7 @@ export interface HarnessOpts {
   headTtlCapS?: number;
   requireKeyStatement?: boolean;  // M3; off until the key lifecycle exists
 }
-export type HarnessVerdict = { ok: true; acceptUntil: number; status: BindingStatus } | { ok: false; reason: string };
+export type HarnessVerdict = { ok: true; acceptUntil: number; status: BindingStatus; marks?: string[] } | { ok: false; reason: string };
 
 export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayload>, o: HarnessOpts): HarnessVerdict {
   const S = o.skewS ?? 60, maxAge = o.maxAgeS ?? 900, rCap = o.resultTtlCapS ?? RESULT_TTL_S, hCap = o.headTtlCapS ?? HEAD_TTL_S;
@@ -133,14 +137,25 @@ export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayloa
   for (const k of HARNESS_ONLY) if (r.fields?.[k]?.value !== "unknown") return { ok: false, reason: `result: harness-only field ${k} not unknown` };
   for (const [k, f] of Object.entries(r.fields ?? {})) if (!f || typeof f !== "object" || !("provenance" in f)) return { ok: false, reason: `result: field ${k} has no provenance` };
   // Re-verify the raw events: replay them from scratch; the claimed status must be what the evidence supports now.
+  // Hash-only conflicts: the new side must be a valid event from the store key, same version, different hash.
+  const marks: string[] = [];
+  const refNew = new Set<string>();
+  for (const cr of r.conflict_refs ?? []) {
+    const nev = (r.raw_events ?? []).find((e) => e.id === cr.new_id);
+    if (!nev || nev.pubkey !== r.store_pubkey) return { ok: false, reason: "result: conflict_ref new event missing" };
+    const p = parseBinding(nev);
+    if (!p.ok || p.value.c.revoked || p.value.c.version !== cr.version || p.value.hash === cr.old_hash) return { ok: false, reason: "result: conflict_ref does not show a conflict" };
+    if (!cr.marks.includes(MARK_HASH_ONLY_OLD)) return { ok: false, reason: "result: conflict_ref not marked as hash-only evidence" };
+    refNew.add(nev.id); if (!marks.includes(MARK_HASH_ONLY_OLD)) marks.push(MARK_HASH_ONLY_OLD);
+  }
   let st: BindingState | undefined;
-  for (const ev of [...(r.raw_events ?? [])].sort((a, b) => a.created_at - b.created_at)) {
+  for (const ev of [...(r.raw_events ?? [])].filter((e) => !refNew.has(e.id)).sort((a, b) => a.created_at - b.created_at)) {
     if (ev.pubkey !== r.store_pubkey) return { ok: false, reason: "result: raw event from another key" };
     const p = parseBinding(ev); if (!p.ok) return { ok: false, reason: `result: raw event invalid (${p.reason})` };
     st = applyBinding(st, ev, o.nowS).state;
   }
   const claimed = r.fields.endpoint_binding.value;
-  const evidence = bindingStatus(st ?? null, o.nowS);
+  const evidence = refNew.size && !(st?.revoked) ? "conflict" : bindingStatus(st ?? null, o.nowS);
   let status: BindingStatus = claimed as BindingStatus;
   if (claimed === "matches_observed_binding" || claimed === "url_only") {
     if (evidence !== claimed) return { ok: false, reason: `result: claims ${claimed} but raw events say ${evidence}` };
@@ -153,7 +168,7 @@ export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayloa
   }
   let until = Math.min(headUntil, resUntil);
   if (st?.latest && status === "matches_observed_binding") until = Math.min(until, (JSON.parse(st.latest.content) as { expires_at: number }).expires_at);
-  return { ok: true, acceptUntil: until, status };
+  return { ok: true, acceptUntil: until, status, ...(marks.length ? { marks } : {}) };
 }
 
 /** Liveness (v9.2 §1): cached unexpired state may be used; after that, KlickyMart-dependent payments fail closed;

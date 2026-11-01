@@ -18,6 +18,16 @@ CREATE TABLE IF NOT EXISTS endpoint_binding_state (
   last_ignored_hash TEXT,                     -- event id (hash) of the last ignored event
   updated_at INTEGER NOT NULL
 );
+-- Permanent per-key index of every version ever accepted (never capped): a second event for a known version with
+-- different content is a conflict regardless of created_at, even after the old bytes left the capped history.
+CREATE TABLE IF NOT EXISTS endpoint_binding_versions (
+  pubkey TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  event_id TEXT NOT NULL,
+  PRIMARY KEY (pubkey, version)
+);
 -- One sequence per KlickyMart root identity, strictly increasing. Written by the snapshot step (M4); M2 only reads it.
 CREATE TABLE IF NOT EXISTS snapshot_heads (
   sequence INTEGER PRIMARY KEY,

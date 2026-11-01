@@ -4,7 +4,7 @@
  *
  * Event: one addressable event per store key, kind NOSTR_KIND_ENDPOINT_BINDING (PROVISIONAL, see nostr-kinds.ts), fixed
  * d tag BINDING_D. Content is canonical JSON (keys sorted, no whitespace) with a monotonic integer `version`, `expires_at`
- * and `endpoints` {bolt12_offer?, node_id?, lud16?, lnurl?, cashu_mints?}, or {revoked:true, version}.
+ * and `endpoints` {bolt12_offer?, node_id?, lud16?, lnurl?, cashu_mints?}, or a revoke ({revoked:true}; nothing else is read).
  *
  * Rules (spec text, not invented): a new state needs BOTH version and created_at strictly higher, else `conflict`; a
  * created_at more than skew S ahead is rejected; an implausible version jump is `conflict`; same version + different
@@ -28,12 +28,19 @@ export type BindingStatus = "matches_observed_binding" | "url_only" | "mismatch"
 export interface Endpoints { bolt12_offer?: string; node_id?: string; lud16?: string; lnurl?: string; cashu_mints?: string[] }
 export interface BindingContent { version: number; expires_at?: number; endpoints?: Endpoints; revoked?: true }
 export interface Parsed { ev: BEv; c: BindingContent; hash: string }
+export interface VersionRef { hash: string; created_at: number; id: string }
+/** Both signed events when we still hold the old bytes. If the old side already left the capped history, `events` holds
+ * only the new signed event and `old_ref` the stored hash+id of the old one, marked evidence_hash_only_old_side (weaker:
+ * a harness can't re-verify the old signature, only that the new event's hash differs). */
+export interface Conflict { events: BEv[]; old_ref: (VersionRef & { version: number }) | null; marks: string[] }
+export const MARK_HASH_ONLY_OLD = "evidence_hash_only_old_side";
 export interface BindingState {
   pubkey: string;
   latest: BEv | null;            // last accepted (non-revoke) state
   revoked: BEv | null;           // terminal once set
   first: BEv | null;             // first accepted state: kept forever (evidence)
-  conflicts: [BEv, BEv][];       // every conflict pair, both signed events; never dropped. Conflict is PERMANENT for the key
+  conflicts: Conflict[];         // every conflict; never dropped. Conflict is PERMANENT for the key
+  versions: Record<string, VersionRef>;  // permanent index: every version ever accepted -> (hash, created_at, id)
   seen: { version: number; hash: string; ev: BEv }[];  // ordinary superseded/accepted states only; capped at historyCap
   ignored: { count: number; last_hash: string | null };  // post-revoke, future-dated, stale replays: counted, not stored
   first_seen: number;            // KlickyMart's clock, never created_at
@@ -72,12 +79,12 @@ export function parseBinding(ev: BEv): { ok: true; value: Parsed } | { ok: false
   let c: Record<string, unknown>;
   try { c = JSON.parse(ev.content); } catch { return { ok: false, reason: "content not JSON" }; }
   if (!c || typeof c !== "object" || Array.isArray(c)) return { ok: false, reason: "content not an object" };
+  // Revoke (Satoshi 2026-11-01): signature, kind, d tag (and author = key, checked by the reducer) are the ONLY checks.
+  // Version, created_at, skew, canonical form and extra fields don't matter; expires_at/endpoints on a revoke are never used.
+  if (c.revoked === true) return { ok: true, value: { ev, c: { version: isInt(c.version) ? c.version : -1, revoked: true }, hash: hashHex(ev.content) } };
+  if (c.revoked !== undefined) return { ok: false, reason: "bad revoke" };
   if (canonicalJson(c) !== ev.content) return { ok: false, reason: "content not canonical" };
   if (!isInt(c.version)) return { ok: false, reason: "bad version" };
-  if (c.revoked !== undefined) {
-    if (c.revoked !== true || Object.keys(c).some((k) => k !== "revoked" && k !== "version")) return { ok: false, reason: "bad revoke" };
-    return { ok: true, value: { ev, c: c as unknown as BindingContent, hash: hashHex(ev.content) } };
-  }
   if (Object.keys(c).some((k) => !["version", "expires_at", "endpoints"].includes(k))) return { ok: false, reason: "unknown content field" };
   if (!isInt(c.expires_at)) return { ok: false, reason: "missing expires_at" };
   const e = c.endpoints as Record<string, unknown> | undefined;
@@ -91,7 +98,7 @@ export function parseBinding(ev: BEv): { ok: true; value: Parsed } | { ok: false
 }
 
 export function emptyState(pubkey: string, nowS: number): BindingState {
-  return { pubkey, latest: null, revoked: null, first: null, conflicts: [], seen: [], ignored: { count: 0, last_hash: null }, first_seen: nowS, changed_at: null };
+  return { pubkey, latest: null, revoked: null, first: null, conflicts: [], versions: {}, seen: [], ignored: { count: 0, last_hash: null }, first_seen: nowS, changed_at: null };
 }
 
 /** Pure reducer. `prev` undefined = first sighting of this store key. */
@@ -99,24 +106,34 @@ export function applyBinding(prev: BindingState | undefined, ev: BEv, nowS: numb
   const parsed = parseBinding(ev);
   if (!parsed.ok) return { state: prev ?? emptyState(ev.pubkey, nowS), outcome: `rejected:${parsed.reason}` };
   const { c, hash } = parsed.value;
-  const s: BindingState = prev ? { ...prev, seen: [...prev.seen], conflicts: [...prev.conflicts], ignored: { ...prev.ignored } } : emptyState(ev.pubkey, nowS);
+  const s: BindingState = prev ? { ...prev, seen: [...prev.seen], conflicts: [...prev.conflicts], versions: { ...(prev.versions ?? {}) }, ignored: { ...prev.ignored } } : emptyState(ev.pubkey, nowS);
   if (s.pubkey !== ev.pubkey) return { state: s, outcome: "rejected:wrong store key" };
   const ignore = (o: Outcome) => { s.ignored.count++; s.ignored.last_hash = ev.id; return { state: s, outcome: o }; };
   if (s.revoked) return ignore("ignored_after_revoke");
-  // Revocation beats version, created_at and skew S. Only a far-future event beyond S is refused (revoke or not).
-  if (ev.created_at > nowS + p.skewS) return ignore("ignored_future");
+  // Revocation is terminal and beats version, created_at AND skew S (Satoshi 2026-11-01): checked before the future gate.
   if (c.revoked) { s.revoked = ev; return { state: s, outcome: "revoked" }; }
-  const known: { version: number; hash: string; ev: BEv }[] = [...s.seen, ...[s.first, s.latest, ...s.conflicts.flat()].filter((e): e is BEv => !!e).map((e) => ({ version: (JSON.parse(e.content) as BindingContent).version, hash: hashHex(e.content), ev: e }))];
+  if (ev.created_at > nowS + p.skewS) return ignore("ignored_future");
+  const known: { version: number; hash: string; ev: BEv }[] = [...s.seen, ...[s.first, s.latest, ...s.conflicts.flatMap((x) => x.events)].filter((e): e is BEv => !!e).map((e) => ({ version: (JSON.parse(e.content) as BindingContent).version, hash: hashHex(e.content), ev: e }))];
   const sameVersion = known.filter((x) => x.version === c.version);
   if (sameVersion.some((x) => x.ev.id === ev.id || x.hash === hash)) return { state: s, outcome: "duplicate" };
   const remember = () => { s.seen.push({ version: c.version, hash, ev }); if (s.seen.length > p.historyCap) s.seen.splice(0, s.seen.length - p.historyCap); };
-  const conflict = (a: BEv) => { s.conflicts.push([a, ev]); return { state: s, outcome: "conflict" as Outcome }; };
+  const conflict = (a: BEv) => { s.conflicts.push({ events: [a, ev], old_ref: null, marks: [] }); return { state: s, outcome: "conflict" as Outcome }; };
+  // Permanent index: a known version with different content is a conflict regardless of created_at.
+  const ref = s.versions[String(c.version)];
+  if (ref && ref.hash === hash) return { state: s, outcome: "duplicate" };
+  if (ref) {
+    const old = known.find((x) => x.ev.id === ref.id);
+    if (old) return conflict(old.ev);
+    s.conflicts.push({ events: [ev], old_ref: { ...ref, version: c.version }, marks: [MARK_HASH_ONLY_OLD] });
+    return { state: s, outcome: "conflict" };
+  }
   if (sameVersion.length) return conflict(sameVersion[0]!.ev);
   const L = s.latest ? parseBinding(s.latest) : null;
-  if (!L || !L.ok) { s.latest = ev; s.first ??= ev; remember(); return { state: s, outcome: "accepted" }; }
+  const index = () => { s.versions[String(c.version)] = { hash, created_at: ev.created_at, id: ev.id }; };
+  if (!L || !L.ok) { s.latest = ev; s.first ??= ev; index(); remember(); return { state: s, outcome: "accepted" }; }
   const lv = L.value.c.version, lc = s.latest!.created_at;
   if (c.version > lv && ev.created_at > lc && c.version - lv <= p.maxVersionJump) {
-    s.latest = ev; s.changed_at = nowS; remember(); return { state: s, outcome: "accepted" };
+    s.latest = ev; s.changed_at = nowS; index(); remember(); return { state: s, outcome: "accepted" };
   }
   if (c.version > lv || ev.created_at > lc) return conflict(s.latest!);
   return ignore("stale");
@@ -159,7 +176,7 @@ export function recentRotation(s: BindingState | null | undefined | "unknown", n
 /** The raw signed events a result must carry so a harness can re-verify (first, latest, revoke, every conflict pair). */
 export function evidenceEvents(s: BindingState | null | undefined): BEv[] {
   if (!s) return [];
-  const out = [s.first, s.latest, s.revoked, ...(s.conflicts ?? []).flat()].filter((e): e is BEv => !!e && typeof e.sig === "string");
+  const out = [s.first, s.latest, s.revoked, ...(s.conflicts ?? []).flatMap((x) => x.events)].filter((e): e is BEv => !!e && typeof e.sig === "string");
   return [...new Map(out.map((e) => [e.id, e])).values()];
 }
 
@@ -190,6 +207,7 @@ export async function recordBindings(db: D1Database, evs: BEv[], nowS: number, p
       let version = -1; try { version = (JSON.parse(ev.content) as BindingContent).version; } catch { /* parsed above */ }
       await db.batch([
         ...(keep ? [db.prepare("INSERT OR IGNORE INTO endpoint_binding_events (id,pubkey,version,created_at,content_hash,outcome,raw_json,seen_at) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, ev.pubkey, version, ev.created_at, hashHex(ev.content), outcome, JSON.stringify(ev), nowS)] : []),
+        ...(outcome === "accepted" ? [db.prepare("INSERT OR IGNORE INTO endpoint_binding_versions (pubkey,version,content_hash,created_at,event_id) VALUES (?,?,?,?,?)").bind(ev.pubkey, version, hashHex(ev.content), ev.created_at, ev.id)] : []),
         db.prepare("INSERT OR REPLACE INTO endpoint_binding_state (pubkey,state_json,ignored_count,last_ignored_hash,updated_at) VALUES (?,?,?,?,?)").bind(ev.pubkey, JSON.stringify(state), state.ignored.count, state.ignored.last_hash, nowS),
       ]);
     } catch { counts.store_error = (counts.store_error ?? 0) + 1; }

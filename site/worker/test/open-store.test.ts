@@ -4,7 +4,7 @@ import * as secp from "@noble/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { nostrEventId } from "../src/nostr-verify";
 import { NOSTR_KIND_ENDPOINT_BINDING as K } from "../src/nostr-kinds";
-import { applyBinding, bindingStatus, bindingsEnabled, BINDING_D, canonicalJson, loadBindingState, matchEndpoint, type BEv, type BindingState } from "../src/endpoint-binding";
+import { applyBinding, bindingStatus, hashHex, bindingsEnabled, BINDING_D, canonicalJson, loadBindingState, matchEndpoint, type BEv, type BindingState } from "../src/endpoint-binding";
 import { buildResult, paymentGate, recordSnapshotHead, latestHead, signHead, signResult, signedResultsEnabled, typedFields, verifyResult, type HeadPayload, type ResultPayload, type Signed } from "../src/signed-result";
 import { openStoreRoute } from "../src/open-store";
 import { buildFilters, ingestEvents, type IngestCtx } from "../src/relay-ingest";
@@ -54,8 +54,8 @@ describe("endpoint bindings (v9.2 §2 acceptance)", () => {
     const a = ev(sk, bind(4), NOW - 200), b = ev(sk, bind(4, { node_id: NODE2 }), NOW - 100);
     const { s, outs } = run([a, b]);
     expect(outs[1]).toBe("conflict");
-    expect(s!.conflicts[0]!.map((e) => e.id).sort()).toEqual([a.id, b.id].sort());
-    expect(s!.conflicts[0]!.every((e) => typeof e.sig === "string" && e.sig.length === 128)).toBe(true);
+    expect(s!.conflicts[0]!.events.map((e) => e.id).sort()).toEqual([a.id, b.id].sort());
+    expect(s!.conflicts[0]!.events.every((e) => typeof e.sig === "string" && e.sig.length === 128)).toBe(true);
   });
   it("the same event twice is a duplicate, not a conflict", () => {
     const a = ev(sk, bind(1));
@@ -142,7 +142,6 @@ describe("Satoshi m2 answers", () => {
   it("content carries ONLY v9.2 §2 fields: anything else is rejected", () => {
     expect(run([ev(sk, { ...bind(1), settlement_modes: ["prepay"] })]).outs[0]).toBe("rejected:unknown content field");
     expect(run([ev(sk, bind(1, { node_id: NODE, settlement_mode: "prepay" }))]).outs[0]).toBe("rejected:unknown endpoint settlement_mode");
-    expect(run([ev(sk, { revoked: true, version: 1, endpoints: { node_id: NODE } })]).outs[0]).toBe("rejected:bad revoke");
     expect(run([ev(sk, { revoked: false, version: 1 })]).outs[0]).toBe("rejected:bad revoke");
     expect(run([ev(sk, { version: 1, endpoints: { node_id: NODE } })]).outs[0]).toBe("rejected:missing expires_at");
     for (const e of [{ bolt12_offer: "lno1" + "q".repeat(40) }, { node_id: NODE }, { lud16: "a@b.example" }, { lnurl: "lnurl1" + "d".repeat(40) }, { cashu_mints: ["https://mint.test"] }])
@@ -185,6 +184,100 @@ describe("Satoshi m2 answers", () => {
   });
   it("lower version + newer created_at stays a conflict", () => {
     expect(run([ev(sk, bind(9), NOW - 200), ev(sk, bind(8), NOW - 100)]).outs[1]).toBe("conflict");
+  });
+});
+
+describe("Satoshi follow-ups: permanent version index, terminal revoke", () => {
+  const H = (seq = 4): HeadPayload => ({ type: "klickymart-head", v: 1, snapshot_id: `snap-${seq}`, sequence: seq, created_at: NOW, expires_at: NOW + 3600, prev_head: null });
+  const check = (res: ResultPayload, head = H()) => verifyResult(signResult(res, KM_HEX), signHead(head, KM_HEX), { pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 1, highWater: head.sequence });
+  it("the reported gap: equivocation on a version whose bytes left the 32-state history, with an OLDER created_at, is a conflict (hash-only old side, marked)", () => {
+    const sk = key(); const evs: BEv[] = [];
+    for (let v = 1; v <= 40; v++) evs.push(ev(sk, bind(v), NOW - 10_000 + v * 10));
+    const old5 = evs[4]!;
+    const twin = ev(sk, bind(5, { node_id: NODE2 }), NOW - 10_000 + 5);   // older created_at than the v5 we accepted
+    const { s, outs } = run([...evs, twin]);
+    expect(s!.seen.some((x) => x.ev.id === old5.id)).toBe(false);          // old bytes are gone from the capped list
+    expect(outs[40]).toBe("conflict");
+    expect(bindingStatus(s, NOW)).toBe("conflict");
+    const c = s!.conflicts[0]!;
+    expect(c.events.map((e) => e.id)).toEqual([twin.id]);
+    expect(c.old_ref).toEqual({ hash: hashHex(old5.content), created_at: old5.created_at, id: old5.id, version: 5 });
+    expect(c.marks).toEqual(["evidence_hash_only_old_side"]);
+    // results carry the shape; the wallet check accepts it and surfaces the weaker-evidence mark
+    const res = buildResult(s!, pk(sk), "nonce-abc-123", H(), NOW);
+    expect(res.conflict_refs).toEqual([{ version: 5, old_hash: hashHex(old5.content), old_id: old5.id, old_created_at: old5.created_at, new_id: twin.id, marks: ["evidence_hash_only_old_side"] }]);
+    expect(res.raw_events.some((e) => e.id === twin.id)).toBe(true);
+    expect(check(res)).toMatchObject({ ok: true, status: "conflict", marks: ["evidence_hash_only_old_side"] });
+    // tampering with the ref shape is caught
+    const noMark = structuredClone(res); noMark.conflict_refs[0]!.marks = [];
+    expect(check(noMark)).toMatchObject({ ok: false, reason: "result: conflict_ref not marked as hash-only evidence" });
+    const sameHash = structuredClone(res); sameHash.conflict_refs[0]!.old_hash = hashHex(twin.content);
+    expect(check(sameHash)).toMatchObject({ ok: false, reason: "result: conflict_ref does not show a conflict" });
+    const missing = structuredClone(res); missing.raw_events = missing.raw_events.filter((e) => e.id !== twin.id);
+    expect(check(missing)).toMatchObject({ ok: false, reason: "result: conflict_ref new event missing" });
+  });
+  it("known version + different content is a conflict regardless of created_at; while the old bytes are held, both events are carried", () => {
+    const sk = key();
+    for (const at of [NOW - 500, NOW - 100]) {
+      const { s, outs } = run([ev(sk, bind(1), NOW - 300), ev(sk, bind(2), NOW - 200), ev(sk, bind(1, { node_id: NODE2 }), at)]);
+      expect(outs[2]).toBe("conflict");
+      expect(s!.conflicts[0]!.events.length).toBe(2); expect(s!.conflicts[0]!.marks).toEqual([]);
+    }
+    expect(run([ev(sk, bind(1), NOW - 300), ev(sk, bind(1), NOW - 300)]).outs[1]).toBe("duplicate");
+  });
+  it("the version index is permanent (kept in state and in D1, never capped)", async () => {
+    const sk = key(); const t = Math.floor(Date.now() / 1000);
+    const evs = Array.from({ length: 40 }, (_, i) => ev(sk, { version: i + 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 1000 + i));
+    for (const e of evs) await ingestEvents(env.DB, [{ ev: e, relay: "r" }], ctx());
+    const s = await loadBindingState(env.DB, pk(sk)) as BindingState;
+    expect(Object.keys(s.versions).length).toBe(40);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS c FROM endpoint_binding_versions WHERE pubkey = ?").bind(pk(sk)).first<{ c: number }>())!.c).toBe(40);
+    // v1 is the first state (kept forever, full bytes); v2 has left the capped history (hash-only old side)
+    const twin = ev(sk, { version: 2, expires_at: t + 86400, endpoints: { node_id: NODE2 } }, t - 2000);
+    await ingestEvents(env.DB, [{ ev: twin, relay: "r" }], ctx());
+    const s2 = await loadBindingState(env.DB, pk(sk)) as BindingState;
+    expect(bindingStatus(s2, t)).toBe("conflict");
+    expect(s2.conflicts[0]!.marks).toEqual(["evidence_hash_only_old_side"]);
+  });
+  it("revoke is terminal with a stale version, a future created_at, or extra fields (expires_at/endpoints never used)", () => {
+    const sk = key();
+    const cases = [
+      ev(sk, { revoked: true, version: 0 }, NOW - 50),                                     // stale version
+      ev(sk, { revoked: true }, NOW + 86400 * 365),                                        // far-future created_at, no version
+      ev(sk, null, NOW - 50, { raw: JSON.stringify({ revoked: true, version: 7, expires_at: NOW + 99, endpoints: { node_id: NODE2 }, note: "x" }) }), // extra fields, non-canonical
+    ];
+    for (const rv of cases) {
+      const { s, outs } = run([ev(sk, bind(5), NOW - 100), rv, ev(sk, bind(6), NOW - 10)]);
+      expect(outs).toEqual(["accepted", "revoked", "ignored_after_revoke"]);
+      expect(bindingStatus(s, NOW)).toBe("revoked");
+      expect(matchEndpoint(s, NOW, { node_id: NODE2 })).toBe("revoked");
+      expect(s!.latest!.content).toBe(canonicalJson(bind(5)));                        // revoke's endpoints never adopted
+    }
+    // a revoke as the very first event also ends the key
+    expect(run([ev(sk, { revoked: true }, NOW), ev(sk, bind(1), NOW + 1)]).outs).toEqual(["revoked", "ignored_after_revoke"]);
+  });
+  it("revoke on the wrong kind, wrong d tag, bad signature or another author is rejected", () => {
+    const sk = key();
+    const base = run([ev(sk, bind(1), NOW - 100)]).s!;
+    const wrongKind = ev(sk, { revoked: true }, NOW - 10, { kind: 30078 });
+    const wrongD = ev(sk, { revoked: true }, NOW - 10, { d: "other" });
+    const good = ev(sk, { revoked: true }, NOW - 10);
+    const badSig = { ...good, sig: "00".repeat(64) };
+    const otherAuthor = ev(key(), { revoked: true }, NOW - 10);
+    expect(applyBinding(base, wrongKind, NOW).outcome).toMatch(/^rejected:wrong kind/);
+    expect(applyBinding(base, wrongD, NOW).outcome).toBe("rejected:wrong d tag");
+    expect(applyBinding(base, badSig, NOW).outcome).toMatch(/^rejected:/);
+    expect(applyBinding(base, otherAuthor, NOW).outcome).toBe("rejected:wrong store key");
+    for (const e of [wrongKind, wrongD, badSig, otherAuthor]) expect(bindingStatus(applyBinding(base, e, NOW).state, NOW)).toBe("matches_observed_binding");
+  });
+  it("ingest: a far-future revoke is stored as terminal evidence", async () => {
+    const sk = key(); const now = Date.now(); const t = Math.floor(now / 1000);
+    await ingestEvents(env.DB, [{ ev: ev(sk, { version: 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 100), relay: "r" }], ctx({ now }));
+    const rv = ev(sk, { revoked: true, version: 0 }, t + 86400);
+    const r = await ingestEvents(env.DB, [{ ev: rv, relay: "r" }], ctx({ now }));
+    expect(r.accepted).toBe(1);
+    expect(bindingStatus(await loadBindingState(env.DB, pk(sk)), t)).toBe("revoked");
+    expect((await env.DB.prepare("SELECT outcome FROM endpoint_binding_events WHERE id = ?").bind(rv.id).first<{ outcome: string }>())!.outcome).toBe("revoked");
   });
 });
 
