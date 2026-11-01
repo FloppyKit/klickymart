@@ -3,6 +3,7 @@
 Outputs: out/records.v4.jsonl, out/offers.jsonl, out/offers.events.draft.jsonl (unsigned kind 31421), out/v4-diff-2026-10-30.md"""
 import glob, json, os, re, sys, time, datetime, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+import ledger_commit; _LEDGER_PASS = ledger_commit.begin_pass()   # r5-4: hold the ledger lock for the whole build
 from kinds import KIND_OFFER, KIND_SITE, NS
 from extract import scope_split
 O = lambda *p: os.path.join(HERE, "out", *p)
@@ -383,4 +384,4 @@ with open(O("v4-diff-2026-10-30.md"), "w") as f:
     f.write("## New index entries\n" + "".join(f"- {d} ({recs[d].get('status')}, seed {recs[d].get('seed_source')})\n" for d in added) + "\n## Notable changes\n")
     for d, ns in sorted(diff.items()): f.write(f"- **{d}**: " + "; ".join(ns) + "\n")
 print(f"records {len(recs)} new {len(added)} changed {len(changed)} offers {len(offers)} stores_with_offers {len({x['domain'] for x in offers})} drafts {len(drafts)}")
-import ledger_commit; ledger_commit.flush_and_commit()   # one ledger commit per pass (gated on KM_LEDGER_AUTOCOMMIT=1)
+ledger_commit.end_pass(_LEDGER_PASS)   # r5-4: commit this pass's ledger rows under the lock; failure exits non-zero

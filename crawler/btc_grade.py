@@ -270,6 +270,11 @@ def _apply_graded(out, g, info):
     return out
 
 def main(src, dst, probes="out/checkout.jsonl"):
+    import ledger_commit
+    with ledger_commit.ledger_pass():   # r5-4: one locked append+commit pass; a commit failure exits non-zero
+        _main(src, dst, probes)
+
+def _main(src, dst, probes):
     import os
     pm = {}
     if os.path.exists(probes):
@@ -284,5 +289,4 @@ def main(src, dst, probes="out/checkout.jsonl"):
                 r = apply(r, pm.get(r["d"])); n += 1; graded += r.get("btc") is not None
             f.write(json.dumps(r, separators=(",", ":")) + "\n")
     print(f"evaluated={n} graded={graded} -> {dst}")
-    import ledger_commit; ledger_commit.flush_and_commit()   # one ledger commit per pass (gated on KM_LEDGER_AUTOCOMMIT=1)
 if __name__ == "__main__": main(*sys.argv[1:])

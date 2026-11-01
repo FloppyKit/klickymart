@@ -41,5 +41,14 @@ def read(p):
     return evs, bad
 
 def append(p, ev):
+    """Append one whole line under an flock (no interleaved half-lines) and note it in the active ledger pass."""
+    import fcntl
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-    with open(p, "a") as f: f.write(json.dumps(ev, separators=(",", ":")) + "\n")
+    data = (json.dumps(ev, separators=(",", ":")) + "\n").encode()
+    with open(p, "ab") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try: f.write(data); f.flush()
+        finally: fcntl.flock(f, fcntl.LOCK_UN)
+    try:
+        import ledger_commit; ledger_commit.journal_append(p, data)
+    except ImportError: pass

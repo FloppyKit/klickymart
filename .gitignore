@@ -12,3 +12,5 @@ site/worker/node_modules/
 crawler/probe.local.json
 crawler/out/checkout-shots/
 crawler/out/evidence-text/
+
+data/.ledger.lock
