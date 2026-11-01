@@ -56,10 +56,28 @@ def public_host(host, resolve=None):
         with _lock: _cache[h] = (ok, now)
     return ok
 
+_ANY_URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+")
+def redact(s):
+    """P2-1: the ONE redact helper for refusal urls and reasons, any scheme: drop userinfo, query and fragment, then the
+    url_redact token rules. Never raises."""
+    s = str(s)
+    def _one(m):
+        u = m.group(0)
+        try:
+            sp = urllib.parse.urlsplit(u)
+            return urllib.parse.urlunsplit((sp.scheme, sp.netloc.rsplit("@", 1)[-1], sp.path, "", ""))
+        except ValueError: return "[redacted-url]"
+    s = _ANY_URL.sub(_one, s)
+    s = re.sub(r"(?i)\b(macaroon|token|preimage|authorization)=\S+", r"\1=[redacted]", s)
+    try:
+        from url_redact import redact_str
+        return redact_str(s)
+    except Exception: return s
+
 def egress_check(url):
     sp = urllib.parse.urlsplit(url)
     if sp.scheme in ("data", "blob", "about"): return
-    if sp.scheme not in ("http", "https", "ws", "wss"): raise EgressRefused(f"egress: scheme {sp.scheme!r} not allowed: {url[:120]}")
+    if sp.scheme not in ("http", "https", "ws", "wss"): raise EgressRefused(f"egress: scheme {sp.scheme!r} not allowed: {redact(url)[:120]}")
     if sp.username or sp.password: raise EgressRefused("egress: credentials in URL")
     if not public_host(sp.hostname): raise EgressRefused(f"egress: not a public internet host: {sp.hostname}")
 

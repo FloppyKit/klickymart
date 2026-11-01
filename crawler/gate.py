@@ -41,7 +41,7 @@ def public_host(host, resolve=None):
 
 def egress_check(url):
     try: _egress.egress_check(url)
-    except _egress.EgressRefused as e: _refuse(url, str(e).split(": http", 1)[0])
+    except _egress.EgressRefused as e: _refuse(url, str(e), cause=e)
 
 def host_of(url):
     h = (urllib.parse.urlsplit(url).hostname or "").lower()
@@ -137,24 +137,21 @@ def _override_terms_url(url):
     q = urllib.parse.urlsplit(url)
     return (q.netloc.lower(), q.path.rstrip("/")) in _override
 
-def _refuse(url, why):
-    url = _redact_url(url)  # R-C-006: never write captured tokens to the refusal log or exception text
+def redact(s):
+    """One redact helper (egress.redact) for both the refusal url and its reason text."""
+    return _egress.redact(s)
+
+def _refuse(url, why, cause=None):
+    url, why = redact(url), redact(why)  # R-C-006 / P2-1: never write captured tokens to the refusal log or exception text
     os.makedirs(O("runs"), exist_ok=True)
     with open(O("runs", "gate-refusals.log"), "a") as f:
         f.write(json.dumps({"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "url": url, "why": why}) + "\n")
-    raise GateRefused(f"{url}: {why}")
-
-def _redact_url(url):
-    try:
-        from url_redact import clean_url, redact_str
-        return redact_str(clean_url(str(url)))
-    except Exception:
-        return str(url).split("?", 1)[0][:200]
+    raise GateRefused(f"{url}: {why}") from cause
 
 def vetted_addr(host, url=None):
     """R-C-003: one vetted public address (egress.vetted_addr); refusals are logged redacted and raised as GateRefused."""
     try: return _egress.vetted_addr(host, url)
-    except _egress.EgressRefused as e: _refuse(url or f"https://{host}/", str(e))
+    except _egress.EgressRefused as e: _refuse(url or f"https://{host}/", str(e), cause=e)
 
 def start_egress_proxy():
     """One pinning proxy per process, shared with egress.install() (egress.start_egress_proxy)."""
