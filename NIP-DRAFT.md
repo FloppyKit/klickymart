@@ -580,69 +580,9 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   result bound to the head, max age, TTL caps clamp signed expiries, harness-only fields `unknown`, raw events replayed
   to confirm any `matches`/`url_only` claim. Acceptance ends at the earliest of result, head and binding expiry. When
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
-- **Key lifecycle (M3, `KM_KEY_LIFECYCLE`, default OFF; `site/worker/src/key-lifecycle.ts`; Satoshi final M3 rules,
-  Matt OK 2026-11-01).** Hash-linked key statements (`klickymart-keystmt-v1`: key, seq, prev hash, `next_key_digest` =
-  sha256 of the next x-only key, revocation key, `created_at`, `expires_at`). A handover is valid only to the
-  pre-announced successor and carries the previous key's signature plus the new key's proof of possession. Statements
-  are immutable. Nothing is published to Nostr.
-  1. **TTL cap.** `HARD_MAX_S` = 604800 (7 days) is compiled into the verifier. Config (`KM_KEY_TTL_CAP_S`, harness
-     `ttlCapS`) may lower it, never raise it. Effective expiry = min(`expires_at`, `created_at` + min(`HARD_MAX_S`, config));
-     an over-long expiry is clamped, not rejected and not trusted. Raising the cap is a code change.
-  2. **Overlap 0.** The old key stops verifying the moment the handover statement is accepted. Normal path: stage the
-     handover (`stageHandover`, not yet in the lineage) and load the successor's secret as `KM_RESULT_SK_NEXT_HEX`; the
-     existing daily cron (`writeDailyHead` -> `cronHandover`) promotes it right before writing the day's head, and the
-     Worker signs with whichever loaded key the current statement names, so there is no 503 gap. A handover stored any
-     other way is allowed and fails closed (503) until the Worker holds the new key. No new cron, no higher frequency.
-  3. **Revocation key.** A revoke (`klickymart-keyrevoke-v1`) only revokes, covers the target and all descendants and
-     beats any handover regardless of timestamps. Only the CURRENT revocation key can revoke; a replaced one can't.
-     Rotating it needs both the signing key and the old revocation key, and takes effect when accepted.
-  4. **Fork = terminal.** Two validly signed, conflicting statements at one lineage position make the whole lineage
-     terminal: every result under it stops verifying, and both statements are kept as evidence.
-  5. **Heads.** With the switch on, `key_statement_hash` is mandatory on heads and results; the Worker refuses to sign
-     (503) without a current, unrevoked statement for a loaded key. Pre-M3 heads are not migrated; they expire by
-     their 25 h TTL. With the switch off, results keep `key_statement_hash: null`.
-  6. **Rotation fork.** Two valid but conflicting revocation-key rotations for one statement are a fork: terminal, fail
-     closed, both kept. "Most recent" is never picked (`created_at` is self-asserted).
-  7. **Revoke-to-disown.** A revoke stops future verification but does not erase the past: a result validly signed
-     under a later-revoked statement is classified `signed_then_revoked` (also `signed_then_superseded`,
-     `signed_then_expired`, `signed_under_compromised_lineage`) so a harness can show KlickyMart signed it. A revoke
-     carries exactly `type`, `v`, `target`, `revocation_key`, `created_at`: no store field, no claim about any store.
-  Harnesses persist revokes (restoring an older backup cannot undo one) and pin the root on two or more agreeing
-  channels.
-- **OpenTimestamps for key records (M3, `KM_KEY_OTS`, default OFF; `site/worker/src/key-ots.ts`, migration 0021).**
-  With it off nothing changes (records carry no `notbefore`, nothing is stamped). With it on:
-  1. Every key statement, revoke and revocation-key rotation is stamped (digest = record hash); proofs are stored beside
-     the record (`km_key_ots`) and upgraded by the existing daily cron. Stamping runs in the background and never blocks
-     signing; a failure leaves the record unstamped. An anchor counts only at >= `CONF` = 6 confirmations.
-  2. Records embed `notbefore` = {height, hash} of a recent Bitcoin block. A confirmed anchor more than `FRESH_K` blocks
-     after `notbefore` (default 36, `KM_KEY_OTS_FRESH_K`, compiled max 144, confirmed by Satoshi; TODO measure real
-     calendar-to-block latency) = stale and invalid for key statements, rotations and OLD-key revokes. Revokes from the
-     CURRENT revocation key are exempt from staleness. A record is rejected outright if its `notbefore` disagrees with a
-     known header or is more than `CONF` above the tip.
-     **Pre-OTS records** (no `notbefore`) stay valid chain history but are unbounded: never strictly before or after
-     anything, so in a dispute they fall to the tie rule (the revoke wins). **Activation:** turning `KM_KEY_OTS` on takes
-     effect only in the daily cron run that promotes (and stamps) a fresh statement carrying `notbefore`
-     (`km_key_ots_state`); after that every stored lifecycle record must carry `notbefore` (others are rejected), and
-     harnesses reject later statements, rotations and old-key revokes without one.
-     **Header-eclipse cap:** harnesses latch `first_seen_tip` per record. If no header source knows a record's
-     `notbefore` block by `first_seen_tip` + `FRESH_K` + `CONF`, a rotation or key statement is invalid and ignored, and an
-     old-key revoke counts as a tie (the revoke wins, terminal). An eclipse may delay a resolution but never turns a valid
-     revoke into an ignored one; the dispute deadline below fires only once both `notbefore` blocks are header-known.
-  3. A is strictly before B only if anchor(A) < notbefore(B), heights only, never block timestamps; overlap = tie.
-  4. Forks stay terminal for the whole lineage. Archived results record the key statement's anchor height as an
-     `observed` provenance field only; no salvage.
-  5. Conflicting rotations / a fork at one position: unchanged, fail closed, no anchor tiebreak.
-  6. Old revocation key R1 after R1 -> R2: an R1 revoke strictly before the rotation is valid and terminal; strictly
-     after is ignored as stale; tie, overlap or unconfirmed = the revoke wins. A rotation never erases a revoke unless it is
-     strictly before it.
-  7. In that dispute only, results fail closed (`disputed`) while anchors are pending. It resolves when all relevant
-     anchors have `CONF` confirmations, or at newest `notbefore` + `FRESH_K` + `CONF` blocks, when an unanchored record is
-     stale. A revoke judged stale was never valid (the lineage resumes); a valid revoke is latched terminal forever.
-  8. Verifiers inject Bitcoin block headers (`BlockHeaderSource`; several sources combine, a header counts only if all
-     answering sources agree, tip = lowest). No headers = anchors unconfirmed, which fails closed only in a dispute;
-     normal operation never needs OTS.
-  Proof verification and calendars are injected interfaces (`OtsProofVerifier`, `OtsCalendar`); no OTS library is
-  bundled and no calendar client ships yet (PENDING). Nothing is published (no NIP-03 kind 1040 events). `GET /open-store/keys` serves the stored records (both switches on).
+- **Not yet:** key custody (M3; results carry `key_statement_hash: null`). PENDING: the earlier lineage and
+  OpenTimestamps-ordering design was withdrawn; its replacement is the FROST threshold-key plan
+  (`design/GAME-THEORY-M3-FROST-KEYS-2026-11-01.md`, v6.3), not yet specified here.
 - **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
