@@ -30,7 +30,7 @@ function chain(tip: number | null): BlockHeaderSource & { setTip(t: number | nul
 const mockVerifier: OtsProofVerifier = { verify(p, d) { try { const x = JSON.parse(p); return x.d === d ? { height: x.h, block_hash: x.b } : null; } catch { return null; } } };
 const proof = (d: string, h: number, b = bh(h)) => JSON.stringify({ d, h, b });
 function ctx(tip: number | null, freshK?: number | string) {
-  const headers = tip === undefined ? null : chain(tip);
+  const headers = chain(tip);
   const c: OtsContext & { anchor(hash: string, h: number): void; H: ReturnType<typeof chain> } = {
     proofs: {}, verifier: mockVerifier, headers, freshK, H: headers,
     anchor(hash, h) { (this.proofs[hash] ??= []).push(proof(hash, h)); },
