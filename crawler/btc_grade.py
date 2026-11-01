@@ -20,7 +20,10 @@ BASIS_ORDER = (BASIS_BOUND, BASIS_OBSERVED, BASIS_HAND, BASIS_CLAIMED)   # order
 CLAIMED_CAP = 2              # default scorer: basis 'claimed' caps at 2; 3 and 4 need 'observed' or 'bound'
 
 def bound_basis(r, probe=None):
-    """Hook for 'bound' (signed endpoint binding that resolves when probed). Not implemented: always False."""
+    """Hook for 'bound' (signed endpoint binding that resolves when probed). Not implemented: always False until a probe
+    module exists (Satoshi, 2026-11-01). Future meaning: a live probe returned an invoice whose payee matches the binding's
+    node id or offer key (status matches_observed_binding). A binding alone, a URL-only binding, or a self-minted
+    preimage/zap receipt is never 'bound'."""
     return False
 
 def probe_observed(probe):

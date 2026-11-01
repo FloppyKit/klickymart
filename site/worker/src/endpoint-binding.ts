@@ -19,7 +19,8 @@ import { NOSTR_KIND_ENDPOINT_BINDING } from "./nostr-kinds";
 
 export type BEv = { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string };
 export const BINDING_D = "klickymart-endpoints";
-/** Starting guesses (v9.2 says every number is one). */
+/** Starting guesses (v9.2: every number is one), not tuned values: skew S, version-jump threshold, rotation window, and the
+ * cap on ORDINARY superseded states only (first state, conflict pairs and the revoke are never capped). */
 export const BINDING_PARAMS = { skewS: 600, maxVersionJump: 1000, recentRotationS: 30 * 86400, historyCap: 32 };
 export type BindingParams = typeof BINDING_PARAMS;
 
@@ -31,12 +32,15 @@ export interface BindingState {
   pubkey: string;
   latest: BEv | null;            // last accepted (non-revoke) state
   revoked: BEv | null;           // terminal once set
-  conflict: [BEv, BEv] | null;   // both signed events; sticky (open question for Satoshi: does a later clean state clear it?)
-  seen: { version: number; hash: string; ev: BEv }[];  // every state seen, per version (equivocation evidence), capped
+  first: BEv | null;             // first accepted state: kept forever (evidence)
+  conflicts: [BEv, BEv][];       // every conflict pair, both signed events; never dropped. Conflict is PERMANENT for the key
+  seen: { version: number; hash: string; ev: BEv }[];  // ordinary superseded/accepted states only; capped at historyCap
+  ignored: { count: number; last_hash: string | null };  // post-revoke, future-dated, stale replays: counted, not stored
   first_seen: number;            // KlickyMart's clock, never created_at
   changed_at: number | null;     // when KlickyMart saw the last accepted change after the first
 }
-export type Outcome = "accepted" | "duplicate" | "stale" | "conflict" | "revoked" | "ignored_after_revoke" | `rejected:${string}`;
+export type Outcome = "accepted" | "duplicate" | "stale" | "conflict" | "revoked" | "ignored_after_revoke" | "ignored_future" | `rejected:${string}`;
+export const IGNORED_OUTCOMES: ReadonlySet<Outcome> = new Set<Outcome>(["stale", "ignored_after_revoke", "ignored_future"]);
 
 export function bindingsEnabled(env: { KM_ENDPOINT_BINDINGS?: string }): boolean {
   const v = (env.KM_ENDPOINT_BINDINGS ?? "").trim().toLowerCase();
@@ -87,7 +91,7 @@ export function parseBinding(ev: BEv): { ok: true; value: Parsed } | { ok: false
 }
 
 export function emptyState(pubkey: string, nowS: number): BindingState {
-  return { pubkey, latest: null, revoked: null, conflict: null, seen: [], first_seen: nowS, changed_at: null };
+  return { pubkey, latest: null, revoked: null, first: null, conflicts: [], seen: [], ignored: { count: 0, last_hash: null }, first_seen: nowS, changed_at: null };
 }
 
 /** Pure reducer. `prev` undefined = first sighting of this store key. */
@@ -95,39 +99,37 @@ export function applyBinding(prev: BindingState | undefined, ev: BEv, nowS: numb
   const parsed = parseBinding(ev);
   if (!parsed.ok) return { state: prev ?? emptyState(ev.pubkey, nowS), outcome: `rejected:${parsed.reason}` };
   const { c, hash } = parsed.value;
-  const s: BindingState = prev ? { ...prev, seen: [...prev.seen] } : emptyState(ev.pubkey, nowS);
+  const s: BindingState = prev ? { ...prev, seen: [...prev.seen], conflicts: [...prev.conflicts], ignored: { ...prev.ignored } } : emptyState(ev.pubkey, nowS);
   if (s.pubkey !== ev.pubkey) return { state: s, outcome: "rejected:wrong store key" };
-  if (s.revoked) return { state: s, outcome: "ignored_after_revoke" };
-  if (c.revoked) {
-    // Revocation beats version, created_at and skew S. Only a far-future revoke beyond S is refused like any event.
-    if (ev.created_at > nowS + p.skewS) return { state: s, outcome: "rejected:future created_at" };
-    s.revoked = ev; return { state: s, outcome: "revoked" };
-  }
-  if (ev.created_at > nowS + p.skewS) return { state: s, outcome: "rejected:future created_at" };
-  const sameVersion = s.seen.filter((x) => x.version === c.version);
+  const ignore = (o: Outcome) => { s.ignored.count++; s.ignored.last_hash = ev.id; return { state: s, outcome: o }; };
+  if (s.revoked) return ignore("ignored_after_revoke");
+  // Revocation beats version, created_at and skew S. Only a far-future event beyond S is refused (revoke or not).
+  if (ev.created_at > nowS + p.skewS) return ignore("ignored_future");
+  if (c.revoked) { s.revoked = ev; return { state: s, outcome: "revoked" }; }
+  const known: { version: number; hash: string; ev: BEv }[] = [...s.seen, ...[s.first, s.latest, ...s.conflicts.flat()].filter((e): e is BEv => !!e).map((e) => ({ version: (JSON.parse(e.content) as BindingContent).version, hash: hashHex(e.content), ev: e }))];
+  const sameVersion = known.filter((x) => x.version === c.version);
   if (sameVersion.some((x) => x.ev.id === ev.id || x.hash === hash)) return { state: s, outcome: "duplicate" };
   const remember = () => { s.seen.push({ version: c.version, hash, ev }); if (s.seen.length > p.historyCap) s.seen.splice(0, s.seen.length - p.historyCap); };
-  if (sameVersion.length) {
-    s.conflict = [sameVersion[0]!.ev, ev]; remember(); return { state: s, outcome: "conflict" };
-  }
+  const conflict = (a: BEv) => { s.conflicts.push([a, ev]); return { state: s, outcome: "conflict" as Outcome }; };
+  if (sameVersion.length) return conflict(sameVersion[0]!.ev);
   const L = s.latest ? parseBinding(s.latest) : null;
-  if (!L || !L.ok) { s.latest = ev; remember(); return { state: s, outcome: "accepted" }; }
+  if (!L || !L.ok) { s.latest = ev; s.first ??= ev; remember(); return { state: s, outcome: "accepted" }; }
   const lv = L.value.c.version, lc = s.latest!.created_at;
   if (c.version > lv && ev.created_at > lc && c.version - lv <= p.maxVersionJump) {
     s.latest = ev; s.changed_at = nowS; remember(); return { state: s, outcome: "accepted" };
   }
-  if (c.version > lv || ev.created_at > lc) { s.conflict = [s.latest!, ev]; remember(); return { state: s, outcome: "conflict" }; }
-  remember(); return { state: s, outcome: "stale" };
+  if (c.version > lv || ev.created_at > lc) return conflict(s.latest!);
+  return ignore("stale");
 }
 
 const urlOnly = (e: Endpoints) => !e.node_id && !e.bolt12_offer && !!(e.lud16 || e.lnurl);
 
 /** Status of a store key's binding at nowS. `unknown` = no trustworthy state (e.g. storage error / state loss). */
-export function bindingStatus(s: BindingState | null | undefined | "unknown", nowS: number): BindingStatus {
+export function bindingStatus(s: BindingState | null | undefined | "unknown", nowS: number, opts: { ignoreConflict?: boolean } = {}): BindingStatus {
   if (s === "unknown") return "unknown";
   if (!s) return "none";
   if (s.revoked) return "revoked";
-  if (s.conflict) return "conflict";
+  if (!opts.ignoreConflict && s.conflicts?.length) return "conflict";
   if (!s.latest) return "none";
   const p = parseBinding(s.latest);
   if (!p.ok) return "unknown";
@@ -154,14 +156,14 @@ export function recentRotation(s: BindingState | null | undefined | "unknown", n
   return s.changed_at !== null && nowS - s.changed_at <= p.recentRotationS;
 }
 
-/** The raw signed events a result must carry so a harness can re-verify (latest, revoke, both conflict events). */
+/** The raw signed events a result must carry so a harness can re-verify (first, latest, revoke, every conflict pair). */
 export function evidenceEvents(s: BindingState | null | undefined): BEv[] {
   if (!s) return [];
-  const out = [s.latest, s.revoked, ...(s.conflict ?? [])].filter((e): e is BEv => !!e && typeof e.sig === "string");
+  const out = [s.first, s.latest, s.revoked, ...(s.conflicts ?? []).flat()].filter((e): e is BEv => !!e && typeof e.sig === "string");
   return [...new Map(out.map((e) => [e.id, e])).values()];
 }
 
-// ---------- D1 storage (snapshot history is normative; every seen state is kept as evidence) ----------
+// ---------- D1 storage (snapshot history is normative; every accepted state and all evidence is kept) ----------
 
 export async function loadBindingState(db: D1Database, pubkey: string): Promise<BindingState | null | "unknown"> {
   try {
@@ -183,11 +185,12 @@ export async function recordBindings(db: D1Database, evs: BEv[], nowS: number, p
     const k = outcome.split(":")[0]!; counts[k] = (counts[k] ?? 0) + 1;
     if (outcome.startsWith("rejected") || outcome === "duplicate") continue;
     states.set(ev.pubkey, state);
+    const keep = !IGNORED_OUTCOMES.has(outcome); // ignored events: counter + last hash only, never stored
     try {
       let version = -1; try { version = (JSON.parse(ev.content) as BindingContent).version; } catch { /* parsed above */ }
       await db.batch([
-        db.prepare("INSERT OR IGNORE INTO endpoint_binding_events (id,pubkey,version,created_at,content_hash,outcome,raw_json,seen_at) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, ev.pubkey, version, ev.created_at, hashHex(ev.content), outcome, JSON.stringify(ev), nowS),
-        db.prepare("INSERT OR REPLACE INTO endpoint_binding_state (pubkey,state_json,updated_at) VALUES (?,?,?)").bind(ev.pubkey, JSON.stringify(state), nowS),
+        ...(keep ? [db.prepare("INSERT OR IGNORE INTO endpoint_binding_events (id,pubkey,version,created_at,content_hash,outcome,raw_json,seen_at) VALUES (?,?,?,?,?,?,?,?)").bind(ev.id, ev.pubkey, version, ev.created_at, hashHex(ev.content), outcome, JSON.stringify(ev), nowS)] : []),
+        db.prepare("INSERT OR REPLACE INTO endpoint_binding_state (pubkey,state_json,ignored_count,last_ignored_hash,updated_at) VALUES (?,?,?,?,?)").bind(ev.pubkey, JSON.stringify(state), state.ignored.count, state.ignored.last_hash, nowS),
       ]);
     } catch { counts.store_error = (counts.store_error ?? 0) + 1; }
   }

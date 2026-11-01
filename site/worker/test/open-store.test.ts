@@ -45,7 +45,7 @@ describe("endpoint bindings (v9.2 §2 acceptance)", () => {
     expect(outs[1]).toBe("conflict"); expect(bindingStatus(s, NOW)).toBe("conflict");
   });
   it("far-future created_at is rejected", () => {
-    expect(run([ev(sk, bind(1), NOW + 3600)]).outs[0]).toBe("rejected:future created_at");
+    expect(run([ev(sk, bind(1), NOW + 3600)]).outs[0]).toBe("ignored_future");
   });
   it("a huge version jump -> conflict", () => {
     expect(run([ev(sk, bind(1), NOW - 200), ev(sk, bind(1_000_000), NOW - 100)]).outs[1]).toBe("conflict");
@@ -54,8 +54,8 @@ describe("endpoint bindings (v9.2 §2 acceptance)", () => {
     const a = ev(sk, bind(4), NOW - 200), b = ev(sk, bind(4, { node_id: NODE2 }), NOW - 100);
     const { s, outs } = run([a, b]);
     expect(outs[1]).toBe("conflict");
-    expect(s!.conflict!.map((e) => e.id).sort()).toEqual([a.id, b.id].sort());
-    expect(s!.conflict!.every((e) => typeof e.sig === "string" && e.sig.length === 128)).toBe(true);
+    expect(s!.conflicts[0]!.map((e) => e.id).sort()).toEqual([a.id, b.id].sort());
+    expect(s!.conflicts[0]!.every((e) => typeof e.sig === "string" && e.sig.length === 128)).toBe(true);
   });
   it("the same event twice is a duplicate, not a conflict", () => {
     const a = ev(sk, bind(1));
@@ -134,6 +134,57 @@ describe("one operator with ten keys", () => {
     const sb = run([ev(b, bind(1))]).s;
     expect(bindingStatus(sa, NOW)).toBe("revoked");
     expect(bindingStatus(sb, NOW)).toBe("matches_observed_binding");
+  });
+});
+
+describe("Satoshi m2 answers", () => {
+  const sk = key();
+  it("content carries ONLY v9.2 §2 fields: anything else is rejected", () => {
+    expect(run([ev(sk, { ...bind(1), settlement_modes: ["prepay"] })]).outs[0]).toBe("rejected:unknown content field");
+    expect(run([ev(sk, bind(1, { node_id: NODE, settlement_mode: "prepay" }))]).outs[0]).toBe("rejected:unknown endpoint settlement_mode");
+    expect(run([ev(sk, { revoked: true, version: 1, endpoints: { node_id: NODE } })]).outs[0]).toBe("rejected:bad revoke");
+    expect(run([ev(sk, { revoked: false, version: 1 })]).outs[0]).toBe("rejected:bad revoke");
+    expect(run([ev(sk, { version: 1, endpoints: { node_id: NODE } })]).outs[0]).toBe("rejected:missing expires_at");
+    for (const e of [{ bolt12_offer: "lno1" + "q".repeat(40) }, { node_id: NODE }, { lud16: "a@b.example" }, { lnurl: "lnurl1" + "d".repeat(40) }, { cashu_mints: ["https://mint.test"] }])
+      expect(run([ev(sk, bind(1, e))]).outs[0]).toBe("accepted");
+  });
+  it("history cap never drops evidence: first state, every conflict pair and the revoke survive; only ordinary states are capped at 32", () => {
+    const evs: BEv[] = [];
+    for (let v = 1; v <= 40; v++) evs.push(ev(sk, bind(v), NOW - 10_000 + v * 10));
+    const c1 = ev(sk, bind(5, { node_id: NODE2 }), NOW - 1000);          // equivocation on an old, already-capped version
+    const c2 = ev(sk, bind(41), NOW - 10_000 + 400);                       // higher version, created_at not higher
+    const rv = ev(sk, { revoked: true, version: 99 }, NOW - 500);
+    const { s, outs } = run([...evs, c1, c2, rv]);
+    expect(outs.slice(40)).toEqual(["conflict", "conflict", "revoked"]);
+    expect(s!.seen.length).toBe(32);
+    expect(s!.first!.id).toBe(evs[0]!.id);
+    expect(s!.conflicts.length).toBe(2);
+    expect(s!.revoked!.id).toBe(rv.id);
+    const ids = new Set(evs.slice(0, 1).concat(c1, c2, rv, evs[39]!).map((e) => e.id));
+    const evidence = new Set(run([...evs, c1, c2, rv]).s!.seen.map((x) => x.ev.id));
+    for (const e of [evs[0]!, c1, c2, rv]) expect(evidence.has(e.id)).toBe(false); // they live outside the capped list...
+    const carried = new Set((buildResult(s!, pk(sk), "nonce-xyz-1", { type: "klickymart-head", v: 1, snapshot_id: "s", sequence: 1, created_at: NOW, expires_at: NOW + 60, prev_head: null }, NOW).raw_events).map((e) => e.id));
+    for (const id of ids) expect(carried.has(id)).toBe(true);              // ...and are always carried as evidence
+  });
+  it("conflict is permanent for the key, and the current state is shown beside it", () => {
+    const a = ev(sk, bind(1), NOW - 300), b = ev(sk, bind(1, { node_id: NODE2 }), NOW - 200), up = ev(sk, bind(2), NOW - 100);
+    const { s, outs } = run([a, b, up]);
+    expect(outs).toEqual(["accepted", "conflict", "accepted"]);
+    expect(bindingStatus(s, NOW)).toBe("conflict");
+    expect(bindingStatus(s, NOW, { ignoreConflict: true })).toBe("matches_observed_binding");
+    const f = typedFields(s!, NOW, "snap");
+    expect(f.endpoint_binding.value).toBe("conflict");
+    expect(f.current_binding).toEqual({ value: "matches_observed_binding", provenance: "observed" });
+    expect(s!.latest!.id).toBe(up.id);
+    // and the harness accepts it, checking current_binding against the raw events too
+    const head: HeadPayload = { type: "klickymart-head", v: 1, snapshot_id: "snap-c", sequence: 3, created_at: NOW, expires_at: NOW + 3600, prev_head: null };
+    const res = buildResult(s!, pk(sk), "nonce-abc-123", head, NOW);
+    expect(verifyResult(signResult(res, KM_HEX), signHead(head, KM_HEX), { pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 1, highWater: 3 })).toMatchObject({ ok: true, status: "conflict" });
+    const lie = structuredClone(res); lie.raw_events = lie.raw_events.filter((e) => e.id !== up.id && e.id !== a.id && e.id !== b.id);
+    expect(verifyResult(signResult(lie, KM_HEX), signHead(head, KM_HEX), { pinned: KM_PK, nonce: "nonce-abc-123", nowS: NOW + 1, highWater: 3 })).toMatchObject({ ok: false });
+  });
+  it("lower version + newer created_at stays a conflict", () => {
+    expect(run([ev(sk, bind(9), NOW - 200), ev(sk, bind(8), NOW - 100)]).outs[1]).toBe("conflict");
   });
 });
 
@@ -250,6 +301,28 @@ describe("KM_ENDPOINT_BINDINGS kill switch", () => {
     expect(r.accepted).toBe(0); expect(r.reasons["kind not followed"]).toBe(1);
     expect(JSON.stringify(buildFilters(ctx({ endpointBindings: false }), 0))).not.toContain(`"kinds":[${K}]`);
     for (const tb of ["endpoint_binding_events", "endpoint_binding_state"]) expect((await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${tb}`).first<{ c: number }>())!.c).toBe(0);
+  });
+});
+
+describe("ignored events are counted, not stored", () => {
+  it("post-revocation, future-dated and stale replays: per-key counter + last ignored hash only", async () => {
+    const sk = key(); const now = Date.now(); const t = Math.floor(now / 1000);
+    const mk = (c: unknown, at: number) => ev(sk, c, at);
+    const v2 = mk({ version: 2, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 500);
+    const stale = mk({ version: 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 900);
+    const fut = mk({ version: 3, expires_at: t + 86400, endpoints: { node_id: NODE } }, t + 7200);
+    await ingestEvents(env.DB, [{ ev: v2, relay: "r" }], ctx({ now }));
+    await ingestEvents(env.DB, [{ ev: stale, relay: "r" }], ctx({ now })); // replayed later: older version and older created_at
+    await ingestEvents(env.DB, [{ ev: fut, relay: "r" }], ctx({ now }));
+    const rv = mk({ revoked: true, version: 2 }, t - 100);
+    await ingestEvents(env.DB, [{ ev: rv, relay: "r" }], ctx({ now }));
+    const after = mk({ version: 4, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 50);
+    await ingestEvents(env.DB, [{ ev: after, relay: "r" }], ctx({ now }));
+    const stored = (await env.DB.prepare("SELECT id, outcome FROM endpoint_binding_events ORDER BY created_at").all<{ id: string; outcome: string }>()).results;
+    expect(stored.map((x) => [x.id, x.outcome])).toEqual([[v2.id, "accepted"], [rv.id, "revoked"]]);
+    const row = await env.DB.prepare("SELECT ignored_count, last_ignored_hash FROM endpoint_binding_state WHERE pubkey = ?").bind(pk(sk)).first<{ ignored_count: number; last_ignored_hash: string }>();
+    expect(row).toEqual({ ignored_count: 3, last_ignored_hash: after.id });
+    expect(JSON.stringify(await loadBindingState(env.DB, pk(sk)))).not.toContain(after.sig);
   });
 });
 

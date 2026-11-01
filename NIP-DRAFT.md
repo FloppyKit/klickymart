@@ -543,17 +543,25 @@ Submitter reputation = submissions whose store reached `seen` or `verified`, min
 
 ## Endpoint binding (provisional kind 31421) and signed results (KlickyMart M2)
 
-**Status: draft, kind number provisional** (the design picks no number and rules out 30078; 31421 is a placeholder until
-the kind-collision check). Implemented in `site/worker/src/endpoint-binding.ts` and `site/worker/src/signed-result.ts`.
+**Status: draft, kind number provisional.** The design picks no number and rules out 30078. 31421 is one placeholder
+constant (`NOSTR_KIND_ENDPOINT_BINDING`). **Before anything public it needs the nips kind-list + open-PR collision check
+re-run** (plus live relay usage). Read-only check 2026-11-01: `31421` absent from
+https://github.com/nostr-protocol/nips/blob/master/README.md and from the diffs of all 482 open PRs at
+https://github.com/nostr-protocol/nips/pulls (relay usage not checked). Implemented in `site/worker/src/endpoint-binding.ts` and `site/worker/src/signed-result.ts`.
 
 - **Binding event.** Addressable, one per store key, `["d","klickymart-endpoints"]`. Content is canonical JSON (keys
-  sorted, no whitespace): `{"endpoints":{...},"expires_at":<unix>,"version":<int>}` with endpoints from `bolt12_offer`,
-  `node_id` (66 hex), `lud16`, `lnurl`, `cashu_mints` (https URLs), or `{"revoked":true,"version":<int>}`. Payment strings
-  are data: shape-checked, never fetched.
+  sorted, no whitespace) with ONLY the v9.2 §2 fields: `{"endpoints":{...},"expires_at":<unix>,"version":<int>}` with
+  endpoints from `bolt12_offer`, `node_id` (66 hex), `lud16`, `lnurl`, `cashu_mints` (https URLs), or
+  `{"revoked":true,"version":<int>}`. Any other field is rejected. No settlement modes: those are a per-order claim the
+  harness checks (v9.2 §3). Payment strings are data: shape-checked, never fetched.
 - **Versioning.** A new state needs both `version` and `created_at` strictly higher, else `conflict`. `created_at` more than
   skew S ahead is rejected. A version jump above a threshold is `conflict`. Same version with different content is
   `conflict`, and the conflict carries both signed events. Revocation is terminal for the store key and beats any version,
-  `created_at` and S; recovery is a new store key with no inherited history.
+  `created_at` and S; recovery is a new store key with no inherited history. **Conflict is permanent for the key**;
+  results show the current state beside it (`current_binding`).
+- **Evidence.** Every accepted state and all evidence is kept: the first state, every conflict pair and the revoke are
+  never dropped; only ordinary superseded states are capped (last 32, a starting guess). Ignored events (after a revoke,
+  future-dated, stale replays) are not stored: a per-key counter and the hash of the last one only.
 - **Status** (observed): `matches_observed_binding`, `url_only`, `mismatch`, `conflict`, `expired`, `revoked`, `none`,
   `unknown`. Expired, revoked and `url_only` are never a match. The strongest claim is "matches the latest binding
   KlickyMart saw". A signature gives accountability, not truth.

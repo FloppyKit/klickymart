@@ -225,9 +225,9 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   if (ctx.endpointBindings !== false && valid.some((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING)) {
     const bevs = valid.filter((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING).map((x) => x.ev as BEv);
     const c = await recordBindings(db, bevs, nowS);
-    res.accepted += (c.accepted ?? 0) + (c.conflict ?? 0) + (c.revoked ?? 0) + (c.stale ?? 0);
+    res.accepted += (c.accepted ?? 0) + (c.conflict ?? 0) + (c.revoked ?? 0); // ignored ones (stale, post-revoke, future) land in reasons
     res.duplicate += c.duplicate ?? 0;
-    for (const [k, n] of Object.entries(c)) if (!["accepted", "conflict", "revoked", "stale", "duplicate"].includes(k)) { res.rejected += n; res.reasons[`binding ${k}`] = (res.reasons[`binding ${k}`] ?? 0) + n; }
+    for (const [k, n] of Object.entries(c)) if (!["accepted", "conflict", "revoked", "duplicate"].includes(k)) { res.rejected += n; res.reasons[`binding ${k}`] = (res.reasons[`binding ${k}`] ?? 0) + n; }
     for (let k = valid.length - 1; k >= 0; k--) if (valid[k]!.ev.kind === NOSTR_KIND_ENDPOINT_BINDING) valid.splice(k, 1);
   }
   const dels = valid.filter((x) => x.ev.kind === DELETION_KIND);

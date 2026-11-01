@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS endpoint_binding_events (
   version INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
-  outcome TEXT NOT NULL,        -- accepted | stale | conflict | revoked | ignored_after_revoke
+  outcome TEXT NOT NULL,        -- accepted | conflict | revoked (ignored events are never stored)
   raw_json TEXT NOT NULL,       -- the signed event, kept as evidence (relays may drop older addressable versions)
   seen_at INTEGER NOT NULL
 );
@@ -14,6 +14,8 @@ CREATE INDEX IF NOT EXISTS idx_ebe_pubkey_version ON endpoint_binding_events (pu
 CREATE TABLE IF NOT EXISTS endpoint_binding_state (
   pubkey TEXT PRIMARY KEY,
   state_json TEXT NOT NULL,
+  ignored_count INTEGER NOT NULL DEFAULT 0,   -- post-revoke, future-dated and stale-replay events: counted, not stored
+  last_ignored_hash TEXT,                     -- event id (hash) of the last ignored event
   updated_at INTEGER NOT NULL
 );
 -- One sequence per KlickyMart root identity, strictly increasing. Written by the snapshot step (M4); M2 only reads it.

@@ -31,6 +31,8 @@ export interface TypedFields {
   offered_settlement_modes: Field<string[]>;
   prepay_required: Field<boolean>;
   endpoint_binding: Field<BindingStatus>;
+  /** Conflict is permanent per key, so endpoint_binding stays `conflict`; this shows the latest state beside the mark. */
+  current_binding: Field<BindingStatus>;
   key_first_seen: Field<number>;
   recent_rotation: Field<boolean>;
   payment_bound_to_order: Field<never>;
@@ -45,10 +47,11 @@ export function typedFields(s: BindingState | null | "unknown", nowS: number, sn
   const st = bindingStatus(s, nowS);
   const rot = recentRotation(s, nowS);
   return {
-    // The binding format carries no settlement modes; nothing store-asserted is known here yet.
+    // Settlement modes are a per-order claim the harness checks (v9.2 §3), never part of the binding.
     offered_settlement_modes: { value: "unknown", provenance: "store-asserted" },
     prepay_required: { value: "unknown", provenance: "store-asserted" },
     endpoint_binding: { value: st, provenance: "observed" },
+    current_binding: { value: bindingStatus(s, nowS, { ignoreConflict: true }), provenance: "observed" },
     key_first_seen: { value: s && s !== "unknown" ? s.first_seen : "unknown", provenance: "observed" },
     recent_rotation: { value: rot, provenance: "observed" },
     payment_bound_to_order: { value: "unknown", provenance: "harness-must-verify" },
@@ -143,6 +146,11 @@ export function verifyResult(res: Signed<ResultPayload>, head: Signed<HeadPayloa
     if (evidence !== claimed) return { ok: false, reason: `result: claims ${claimed} but raw events say ${evidence}` };
     if (!st?.latest || hashHex(st.latest.content) !== r.binding_hash) return { ok: false, reason: "result: binding_hash does not match raw events" };
   } else if (evidence === "revoked" || evidence === "conflict") status = evidence; // stronger negative evidence wins
+  const cur = r.fields.current_binding?.value;
+  if (cur === "matches_observed_binding" || cur === "url_only") {
+    const curEv = bindingStatus(st ?? null, o.nowS, { ignoreConflict: true });
+    if (curEv !== cur) return { ok: false, reason: `result: current_binding claims ${cur} but raw events say ${curEv}` };
+  }
   let until = Math.min(headUntil, resUntil);
   if (st?.latest && status === "matches_observed_binding") until = Math.min(until, (JSON.parse(st.latest.content) as { expires_at: number }).expires_at);
   return { ok: true, acceptUntil: until, status };
