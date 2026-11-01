@@ -6,6 +6,7 @@ import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
 import { cronHandover, currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, pubFromSkHex, statementStatus } from "./key-lifecycle";
 export { signedResultsEnabled } from "./signed-result";
+import { CONF, effectiveFreshK, loadOtsProofs, otsEnabled, stampInBackground, upgradeStamps, type OtsCalendar } from "./key-ots";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
 const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
@@ -58,10 +59,19 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
  * KM_SIGNED_RESULTS is on; otherwise does nothing. snapshot_id = "<snapshot data version>@<cron unix seconds>": the spec
  * does not yet define what a head commits to, so this is a LABEL (which data version + when), not a content commitment
  * (no Merkle root / digest). Flagged for Satoshi; M4 owns the real snapshot step. */
-export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string; KM_KEY_LIFECYCLE?: string; KM_KEY_ROOT?: string; KM_RESULT_SK_NEXT_HEX?: string; KM_KEY_TTL_CAP_S?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
+/** OTS deps (KM_KEY_OTS on). No calendar client is bundled: production passes none, so nothing is stamped until one is
+ * wired in (PENDING). Tests inject mocks. */
+export interface OtsDeps { calendars?: OtsCalendar[]; waitUntil?: (p: Promise<unknown>) => void }
+export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string; KM_KEY_LIFECYCLE?: string; KM_KEY_ROOT?: string; KM_RESULT_SK_NEXT_HEX?: string; KM_KEY_TTL_CAP_S?: string; KM_KEY_OTS?: string }, snapshotVersion: string, nowS: number, ots: OtsDeps = {}): Promise<number | null> {
   if (!_sre(env) || !env.DB) return null;
+  const db = env.DB;
+  const otsOn = keyLifecycleEnabled(env) && otsEnabled(env);
+  const cals = otsOn ? ots.calendars ?? [] : [];
   // M3: a staged handover is promoted in this same daily run, right before the head is written (no 503 gap).
-  if (keyLifecycleEnabled(env)) { try { await cronHandover(env.DB, env, nowS); } catch { /* lineage unchanged; fails closed if needed */ } }
+  // OTS: the promoted statement is stamped in the background (never blocks the head).
+  if (keyLifecycleEnabled(env)) { try { await cronHandover(db, env, nowS, otsOn ? (h) => stampInBackground(ots.waitUntil, db, h, cals, nowS) : undefined); } catch { /* lineage unchanged; fails closed if needed */ } }
+  // OTS: one upgrade pass per daily run (no new cron, no polling).
+  if (otsOn) { try { await upgradeStamps(db, cals, nowS); } catch { /* next day */ } }
   try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
 }
 
@@ -73,5 +83,6 @@ async function keysRoute(env: Env): Promise<Response> {
   if (!/^[0-9a-f]{64}$/.test(root) || !env.DB) return unavailable("no KM_KEY_ROOT pinned");
   const ks = await loadKeyState(env.DB, root);
   if (!ks) return unavailable("key records unreadable");
-  return new Response(exportKeyState(ks), { headers: { ...H, "Content-Type": "application/json" } });
+  const body = otsEnabled(env) ? JSON.stringify({ ...JSON.parse(exportKeyState(ks)), ots_proofs: await loadOtsProofs(env.DB), ots_params: { conf: CONF, fresh_k: effectiveFreshK(env.KM_KEY_OTS_FRESH_K) } }) : exportKeyState(ks);
+  return new Response(body, { headers: { ...H, "Content-Type": "application/json" } });
 }

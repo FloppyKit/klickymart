@@ -124,6 +124,10 @@ export interface Env {
   KM_KEY_ROOT?: string;
   /** M3: optional lower TTL cap for key statements, seconds. Can only LOWER the compiled HARD_MAX_S (7 days). */
   KM_KEY_TTL_CAP_S?: string;
+  /** M3 OTS switch: "1"/"true"/"on" stamps key records with OpenTimestamps (default OFF). Needs KM_KEY_LIFECYCLE on. */
+  KM_KEY_OTS?: string;
+  /** M3 OTS: FRESH_K in blocks (default 36, compiled max 144). */
+  KM_KEY_OTS_FRESH_K?: string;
   /** M3: the pre-announced successor's secret key (wrangler secret, 64 hex), loaded ahead of a cron handover. Never logged. */
   KM_RESULT_SK_NEXT_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
