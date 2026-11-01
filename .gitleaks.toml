@@ -1,0 +1,10 @@
+# gitleaks config for .github/workflows/secret-scan.yml (blocking, full git history).
+# Default rules plus an allowlist. Per-finding false positives live in .gitleaksignore (commit:file:rule:line
+# fingerprints), so a new hit anywhere still fails; this file only skips third-party vendored bundles, which are
+# SRI-pinned (site/worker/src/render/pages.ts) and checked by site/scripts/secret-scan.py's FILE_ALLOW.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "SRI-pinned third-party vendor bundles"
+paths = ['''^site/public/vendor/[a-z0-9.-]+\.bundle\.js$''']

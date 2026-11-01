@@ -1,0 +1,5 @@
+# Reviewed gitleaks false positives (fingerprint = commit:file:rule:line). Add only with review.
+# fake "Bearer sk_live..." string in a redaction test table
+b3656eece9b18462f805dc59343cd12b7d7dfa8f:crawler/tests/test_redact_table.py:stripe-access-token:12
+# KlickyMart's public Nostr key (npub + hex) in the README
+a09972ccbcc8b9cf9b5cee12add6d3110c049df4:site/README.md:generic-api-key:55
