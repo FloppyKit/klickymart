@@ -181,6 +181,9 @@ export function evaluate(st: KeyState, _nowS: number): LineageView {
       // Same position, different statement signed by the same key (an "edited" statement) also counts, even if it does not chain.
       chain.push(kids[0]!); revKeys.push(nextRevKey(cur, revKeys[i]!, st) ?? revKeys[i]!);
     }
+    for (let i = 0; i < chain.length; i++) {
+      if (revRotations(chain[i]!, revKeys[i]!, st).fork) { compromised = compromised ?? `revocation-key rotation fork at seq ${chain[i]!.payload.seq}`; break; }
+    }
     for (const c of chain) {
       const twins = st.stmts.filter((s) => s.hash !== c.hash && s.payload.seq === c.payload.seq && s.payload.key === c.payload.key);
       if (twins.length) { compromised = compromised ?? `two statements at seq ${c.payload.seq} for one key (edited or re-issued)`; break; }
@@ -188,26 +191,32 @@ export function evaluate(st: KeyState, _nowS: number): LineageView {
   }
   if (compromised && !st.compromised) st.compromised = compromised;
   const effectiveRevKey = (i: number) => (i >= 0 && i < revKeys.length ? revKeys[i]! : null);
+  // Current revocation key: the newest statement's, or the key it was rotated to (the rotation takes effect when accepted).
+  const lastI = chain.length - 1;
+  const currentRev = lastI >= 0 ? (nextRevKey(chain[lastI]!, revKeys[lastI]!, st) ?? revKeys[lastI]!) : null;
   let revokedFrom: number | null = null;
   for (const r of st.revokes) {
     const i = chain.findIndex((c) => c.hash === r.payload.target);
     if (i < 0) continue; // kept; applies if the target joins the chain later
-    // Valid only from the revocation key in force for the target, or one in force for a later statement (a rotated
-    // key can revoke what came before it). The revocation key never certifies anything.
-    // PENDING SATOSHI: a revocation key that was later rotated away can still revoke (kill switch only, never a forgery).
-    const ok = revKeys.slice(i).includes(r.payload.revocation_key);
+    // The revocation key never certifies anything.
+    // Only the CURRENT revocation key (the one in force for the newest statement) can revoke. A replaced revocation key
+    // can't (Satoshi final M3 rule 3): keys are rolled because they expired or were compromised.
+    const ok = r.payload.revocation_key === currentRev;
     if (ok && (revokedFrom === null || i < revokedFrom)) revokedFrom = i;
   }
   return { chain, revokedFrom, compromised, effectiveRevKey };
 }
 
-/** Revocation key in force after `cur`: a rotation for cur signed by cur's key AND the old revocation key. More than one
- * valid rotation for the same statement is ambiguous -> keep the old key (conservative). */
-function nextRevKey(cur: KeyStatement, oldRev: string, st: KeyState): string | null {
+/** Revocation key in force after `cur`: a rotation for cur signed by cur's key AND the old revocation key. Two valid
+ * rotations naming different new keys for one statement are a FORK (Satoshi final M3 rule 6): the caller marks the
+ * lineage terminal. We never pick "the most recent": created_at is self-asserted, so whoever holds both keys could
+ * always out-date the other side. */
+function revRotations(cur: KeyStatement, oldRev: string, st: KeyState): { key: string | null; fork: boolean } {
   const rs = st.revkeyRotations.filter((r) => r.payload.stmt === cur.hash && r.payload.old_revocation_key === oldRev && ver(r.sig_signing, r.hash, cur.payload.key) && ver(r.sig_old_rev, r.hash, oldRev));
   const keys = new Set(rs.map((r) => r.payload.new_revocation_key));
-  return keys.size === 1 ? [...keys][0]! : null;
+  return keys.size === 1 ? { key: [...keys][0]!, fork: false } : { key: null, fork: keys.size > 1 };
 }
+const nextRevKey = (cur: KeyStatement, oldRev: string, st: KeyState) => revRotations(cur, oldRev, st).key;
 
 function validHandover(prev: KeyStatement, s: KeyStatement, prevRev: string, st: KeyState): boolean {
   if (shapeStatement(s)) return false;

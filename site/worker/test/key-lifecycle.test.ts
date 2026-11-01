@@ -182,6 +182,51 @@ describe("v9.2 §4 acceptance: revocation", () => {
   });
 });
 
+describe("rules 3, 4, 6: current revocation key only; forks are terminal", () => {
+  it("rule 3: a replaced revocation key can't revoke; the current one can", () => {
+    const { sks, rev, stmts, st } = lineage(2);
+    const rev2 = key();
+    addRevkeyRotate(st, makeRevkeyRotate(stmts[1]!, sks[1]!, rev, pk(rev2), NOW));
+    expect(addRevoke(st, makeRevoke(rev, stmts[1]!.hash, NOW)).outcome).toBe("accepted"); // stored, but has no effect
+    expect(statementStatus(st, stmts[1]!.hash, NOW).status).toBe("current");
+    addRevoke(st, makeRevoke(rev, stmts[0]!.hash, NOW)); // not even on statements from its own era
+    expect(currentStatement(st, NOW)?.hash).toBe(stmts[1]!.hash);
+    addRevoke(st, makeRevoke(rev2, stmts[1]!.hash, NOW));
+    expect(statementStatus(st, stmts[1]!.hash, NOW).status).toBe("revoked");
+  });
+  it("rule 4: a statement fork is terminal for the whole lineage; both statements kept as evidence", () => {
+    const { sks, rev, stmts, st } = lineage(3);
+    const good = signedPair(sks[2]!, stmts[2]!.hash);
+    expect(verifyResultWithKeys(good.res, good.head, st, HO).ok).toBe(true);
+    const twin = makeHandover(stmts[1]!, sks[1]!, sks[2]!, pk(key()), pk(rev), stmts[2]!.payload.created_at, NOW + DAY);
+    addStatement(st, twin);
+    expect(evaluate(st, NOW).compromised).toBeTruthy();
+    for (const s of [...stmts, twin]) expect(statementStatus(st, s.hash, NOW).status).toBe("compromised");
+    expect(verifyResultWithKeys(good.res, good.head, st, HO)).toMatchObject({ ok: false, keyStatus: "compromised" });
+    const kept = importKeyState(exportKeyState(st)).stmts.map((s) => s.hash);
+    expect(kept).toEqual(expect.arrayContaining([stmts[2]!.hash, twin.hash]));
+  });
+  it("rule 6: two valid conflicting revocation-key rotations for one statement = fork, terminal; both kept", () => {
+    const { sks, rev, stmts, st } = lineage(2);
+    const a = makeRevkeyRotate(stmts[1]!, sks[1]!, rev, pk(key()), NOW - 10);
+    const b = makeRevkeyRotate(stmts[1]!, sks[1]!, rev, pk(key()), NOW); // "more recent" wins nothing
+    addRevkeyRotate(st, a);
+    expect(currentStatement(st, NOW)?.hash).toBe(stmts[1]!.hash);
+    addRevkeyRotate(st, b);
+    expect(evaluate(st, NOW).compromised).toMatch(/rotation fork/);
+    expect(currentStatement(st, NOW)).toBeNull();
+    const good = signedPair(sks[1]!, stmts[1]!.hash);
+    expect(verifyResultWithKeys(good.res, good.head, st, HO)).toMatchObject({ ok: false, keyStatus: "compromised" });
+    expect(importKeyState(exportKeyState(st)).revkeyRotations.map((r) => r.hash)).toEqual(expect.arrayContaining([a.hash, b.hash]));
+  });
+  it("rule 6: the same rotation seen twice is not a fork", () => {
+    const { sks, rev, stmts, st } = lineage(1);
+    const a = makeRevkeyRotate(stmts[0]!, sks[0]!, rev, pk(key()), NOW);
+    addRevkeyRotate(st, a); addRevkeyRotate(st, a);
+    expect(evaluate(st, NOW).compromised).toBeNull();
+  });
+});
+
 describe("v9.2 §4 acceptance: first pin", () => {
   const R = "ab".repeat(32), R2 = "cd".repeat(32);
   it("needs two or more agreeing channels; any disagreement or gap fails closed", () => {
