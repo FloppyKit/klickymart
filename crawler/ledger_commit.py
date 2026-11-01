@@ -13,6 +13,7 @@ later add."""
 import contextlib, datetime, fcntl, os, subprocess, sys, threading
 
 GIT_TIMEOUT = 30   # r5-7: seconds per git subprocess; a timeout fails the pass
+LOCK_TIMEOUT = 60  # seconds to wait for data/.ledger.lock before failing the pass
 
 class LedgerCommitError(RuntimeError):
     """The pass's ledger commit failed or was tampered with: the pass must exit non-zero."""
@@ -51,7 +52,14 @@ def ledger_pass(paths=None):
     os.makedirs(os.path.dirname(lock), exist_ok=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        import time
+        deadline = time.monotonic() + LOCK_TIMEOUT
+        while True:
+            try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise LedgerCommitError(f"ledger lock {lock} still held by another pass after {LOCK_TIMEOUT}s; failing this pass")
+                time.sleep(0.1)
         _pass.journal = {}
         try:
             yield
