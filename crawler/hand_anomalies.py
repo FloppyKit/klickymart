@@ -2,15 +2,19 @@
 """Ledger of anomalous hand overrides, keyed by who set them (btc_grade_hand_by).
 
 Append-only JSONL: a 'record' event opens an entry (status 'open'); a 'clear' event, written only by clear(), closes it.
-Nothing is rewritten in place. Default path crawler/out/hand-anomalies.jsonl (untracked); KM_HAND_ANOMALIES overrides.
+Nothing is rewritten in place. Default path crawler/out/hand-anomalies.jsonl (untracked); KM_HAND_ANOMALIES overrides
+(validated: must resolve under crawler/out/ or a tmp dir). Corrupt lines are skipped and counted (corrupt_lines()).
+clear() is NOT authenticated: anyone who can call it or append to the file can close an entry. Operator-local only;
+not an audit trail.
 The ledger is decoupled from store grades: an open entry never keeps a record's btc_grade_needs_review set."""
 import datetime, hashlib, json, os, threading
+import jsonl_store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _lock = threading.Lock()
 
 def path():
-    return os.environ.get("KM_HAND_ANOMALIES") or os.path.join(HERE, "out", "hand-anomalies.jsonl")
+    return jsonl_store.resolve("KM_HAND_ANOMALIES", "hand-anomalies.jsonl")
 
 def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -18,13 +22,12 @@ def _now():
 def entry_id(author, domain, kind, hand_at):
     return hashlib.sha256(json.dumps([author, domain, kind, hand_at]).encode()).hexdigest()[:16]
 
-def _events(p):
-    if not os.path.exists(p): return []
-    with open(p) as f: return [json.loads(l) for l in f if l.strip()]
+def _events(p): return jsonl_store.read(p)[0]
+_append = jsonl_store.append
 
-def _append(p, ev):
-    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-    with open(p, "a") as f: f.write(json.dumps(ev, separators=(",", ":")) + "\n")
+def corrupt_lines(path=None):
+    """Number of unreadable lines skipped in the ledger."""
+    return jsonl_store.read(path or globals()["path"]())[1]
 
 def record(entry, path=None):
     """Open an entry; idempotent on (author, domain, kind, hand_at). Returns its id."""
@@ -39,8 +42,8 @@ def record(entry, path=None):
 def _state(p):
     entries, cleared = {}, set()
     for ev in _events(p):
-        if ev.get("event") == "record": entries.setdefault(ev["id"], ev)
-        elif ev.get("event") == "clear": cleared.add(ev["id"])
+        if ev.get("event") == "record" and ev.get("id"): entries.setdefault(ev["id"], ev)
+        elif ev.get("event") == "clear" and ev.get("id"): cleared.add(ev["id"])
     return entries, cleared
 
 def open_by_author(path=None):
@@ -53,6 +56,7 @@ def open_by_author(path=None):
 
 def clear(id, cleared_by, note, path=None):
     """The only way an entry closes: appends a 'clear' event. KeyError for an unknown id."""
+    if not isinstance(cleared_by, str) or not cleared_by.strip(): raise ValueError("cleared_by must be non-empty")
     p = path or globals()["path"]()
     with _lock:
         entries, cleared = _state(p)
