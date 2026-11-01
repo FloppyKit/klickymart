@@ -1,6 +1,6 @@
 import { keyRankStatus, MIN_RANK_KEY_AGE_S } from "./key-age";
 import { setCustodialZapperKeys } from "./tips";
-import { openStoreRoute, signedResultsEnabled } from "./open-store";
+import { keyRecordsRoute, openStoreRoute, signedResultsEnabled } from "./open-store";
 import { pendingKeyAllowance, loadKeyRecord } from "./pending-allowance";
 import { isSpecialUseHost } from "./special-names";
 import { loadCheckoutQuotes, applyCheckoutQuote, RULES as CHECKOUT_RULES, quoteSeedKeys, validZip3, publicQuoteView, applyQuotesToRows } from "./checkout-quotes";
@@ -116,6 +116,8 @@ export interface Env {
   KM_ENDPOINT_BINDINGS?: string;
   /** M2 switch: "1"/"true"/"on" enables /open-store/* (signed results). Default OFF; when on, 503 without key or fresh head. */
   KM_SIGNED_RESULTS?: string;
+  /** M3 switch: "1"/"true"/"on" enables GET /open-store/keys and cert_hash on heads/results. Default OFF. */
+  KM_KEY_RECORDS?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -945,6 +947,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return Response.json(await agentStats(env.DB), { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=30" } });
   }
 
+  if (path === "/open-store/keys" && request.method === "GET") return keyRecordsRoute(env);
   if (path.startsWith("/open-store/") && request.method === "GET" && signedResultsEnabled(env)) return openStoreRoute(path, url, env);
 
   if (path === "/q" && request.method === "GET") {

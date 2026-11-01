@@ -6,6 +6,18 @@ import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
 export { signedResultsEnabled } from "./signed-result";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
+import * as secp from "@noble/secp256k1";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { keyRecordsEnabled, loadKeyRecords, verifyKeyRecords } from "./key-records";
+
+/** M3: GET /open-store/keys (only when KM_KEY_RECORDS is on; else 404). Public records in order, no secrets. */
+export async function keyRecordsRoute(env: Env): Promise<Response> {
+  if (!keyRecordsEnabled(env)) return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
+  if (!env.DB) return unavailable("no database");
+  const records = await loadKeyRecords(env.DB);
+  const st = verifyKeyRecords(records);
+  return Response.json({ records, state: st.ok ? { current: st.current, status: st.status, cert_hash: st.cert_hash } : { error: st.error } }, { headers: H });
+}
 
 const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 const unavailable = (why: string) => Response.json({ ok: false, error: "unavailable", reason: why }, { status: 503, headers: H });
@@ -21,6 +33,14 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   // Guard (Satoshi 2026-11-01): a label-only head must never be public. Until the snapshot step can commit to the data
   // (snapshot_digest; M4), KM_SIGNED_RESULTS=on still serves nothing.
   if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (digest pending M4)");
+  // M3: with KM_KEY_RECORDS on, the signing key must be the active current key of the records; cert_hash names its pin
+  // or latest rotate. Anything else fails closed (503).
+  if (keyRecordsEnabled(env)) {
+    const st = verifyKeyRecords(await loadKeyRecords(env.DB));
+    if (!st.ok) return unavailable(`key records do not verify: ${st.error}`);
+    if (st.status !== "active" || st.current !== bytesToHex(secp.schnorr.getPublicKey(hexToBytes(sk)))) return unavailable("signing key is not the active key in the key records");
+    head.cert_hash = st.cert_hash;
+  }
   const sh = signHead(head, sk);
   if (path === "/open-store/head") return Response.json(sh, { headers: H });
   const pubkey = url.searchParams.get("pubkey") ?? "";
@@ -28,7 +48,7 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   if (!/^[0-9a-f]{64}$/.test(pubkey)) return Response.json({ ok: false, error: "pubkey must be 64 lowercase hex" }, { status: 400, headers: H });
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(nonce)) return Response.json({ ok: false, error: "nonce required (8-128 chars A-Za-z0-9_-)" }, { status: 400, headers: H });
   const state = await loadBindingState(env.DB, pubkey);
-  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS), sk) }, { headers: H });
+  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS, head.cert_hash ?? null), sk) }, { headers: H });
 }
 
 /** Daily snapshot step (M2): called once from the existing daily cron after relay catch-up. Writes one head row only when
