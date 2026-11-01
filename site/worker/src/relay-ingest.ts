@@ -1,6 +1,7 @@
 import { markFacilitatedHistory, revokeFacilitated, FACILITATOR_PUBKEY } from "./facilitate";
 import { refreshFlagCache } from "./flags";
 import { nip05Pass } from "./nip05";
+import { recordHandshakeMarks } from "./handshake-marks";
 /** Relay ingest core: filters, validation, storage, proof checks, catch-up. Transport-agnostic (socket injected). */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
@@ -35,6 +36,10 @@ export interface IngestCtx {
   facilitationEnabled?: boolean;
   /** Outbound fetch for NIP-57 LNURL lookups (tests inject a fake). */
   fetcher?: Fetcher;
+  /** KM_HANDSHAKE_MARKS kill switch (default on). false = the 420/421/422 validator is not called at all. Marks only. */
+  handshakeMarks?: boolean;
+  /** Test hook: replaces checkThreads. */
+  handshakeChecker?: typeof import("./handshake").checkThreads;
 }
 
 export type Ev = Required<Pick<NostrEventLine, "id" | "pubkey" | "sig" | "kind" | "created_at" | "tags" | "content">>;
@@ -338,6 +343,8 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
   if (res.accepted) await refreshFlagCache(db, ctx.flagStatic);
   const touched = new Set([...reviews, ...exps, ...valid.filter((x) => x.ev.kind === NOSTR_KIND_FULFILLMENT).map((x) => x.ev)].map((e) => eventDomain(e, ctx) ?? tagv(e.tags, "r")).filter((x): x is string => !!x));
   for (const d of touched) await markFacilitatedHistory(db, d);
+  // M1: factual marks on 420/421/422 (display/audit only; no ranking or visibility effect).
+  if (ctx.handshakeMarks !== false) await recordHandshakeMarks(db, valid.map((x) => x.ev), nowS, ctx.handshakeChecker);
   return res;
 }
 

@@ -108,6 +108,8 @@ export interface Env {
   PENDING_QUEUE_ENABLED?: string;
   FACILITATOR_SK_HEX?: string;
   FACILITATE_ENABLED?: string;
+  /** M1 kill switch: "0"/"false"/"off" stops the 420/421/422 marks validator from running at ingest. Default on. */
+  KM_HANDSHAKE_MARKS?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
   SUBMIT_SALT?: string;
   /** "production" in [env.production.vars]; with it, a missing SUBMIT_SALT makes rate-limited endpoints refuse (503). */

@@ -170,7 +170,7 @@ describe("handshake: validation only marks", () => {
   });
   it("is not imported by ranking code", async () => {
     const files = (import.meta as unknown as { glob: (p: string, o: object) => unknown }).glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-    const importers = Object.entries(files).filter(([p, s]) => !p.endsWith("handshake.ts") && /from "\.\/handshake"/.test(s)).map(([p]) => p);
+    const importers = Object.entries(files).filter(([p, s]) => !/handshake(-marks)?\.ts$/.test(p) && /from "\.\/handshake"/.test(s)).map(([p]) => p);
     expect(importers).toEqual([]);
   });
 });
