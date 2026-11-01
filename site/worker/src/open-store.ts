@@ -4,6 +4,9 @@
 import type { Env } from "./router";
 import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
+import { currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, statementStatus } from "./key-lifecycle";
+import * as secp from "@noble/secp256k1";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 export { signedResultsEnabled } from "./signed-result";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
@@ -11,6 +14,8 @@ const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 const unavailable = (why: string) => Response.json({ ok: false, error: "unavailable", reason: why }, { status: 503, headers: H });
 
 export async function openStoreRoute(path: string, url: URL, env: Env): Promise<Response> {
+  const lifecycle = keyLifecycleEnabled(env);
+  if (path === "/open-store/keys" && lifecycle) return keysRoute(env);
   if (path !== "/open-store/head" && path !== "/open-store/binding") return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
   const sk = env.KM_RESULT_SK_HEX;
   if (!sk || !/^[0-9a-f]{64}$/.test(sk)) return unavailable("no result-signing key configured");
@@ -21,6 +26,24 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   // Guard (Satoshi 2026-11-01): a label-only head must never be public. Until the snapshot step can commit to the data
   // (snapshot_digest; M4), KM_SIGNED_RESULTS=on still serves nothing.
   if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (digest pending M4)");
+  // M3 (KM_KEY_LIFECYCLE on): sign only under a current, unrevoked, unexpired key statement whose key IS this signing
+  // key; the head and every result name that statement's hash. Anything else fails closed (503).
+  let ksh: string | null = null, keyUntil: number | undefined;
+  if (lifecycle) {
+    const root = (env.KM_KEY_ROOT ?? "").trim();
+    if (!/^[0-9a-f]{64}$/.test(root)) return unavailable("key lifecycle on but no KM_KEY_ROOT pinned");
+    const ks = await loadKeyState(env.DB, root);
+    if (!ks) return unavailable("key records unreadable");
+    if (ks.compromised) return unavailable("key lineage compromised");
+    const cur = currentStatement(ks, nowS);
+    if (!cur) return unavailable("no current key statement (expired, revoked or missing)");
+    let signer = "";
+    try { signer = bytesToHex(secp.schnorr.getPublicKey(hexToBytes(sk))); } catch { /* fall through */ }
+    if (cur.payload.key !== signer) return unavailable("signing key is not the key named by the current statement");
+    ksh = cur.hash; keyUntil = statementStatus(ks, cur.hash, nowS).until;
+    head.key_statement_hash = ksh;
+    head.expires_at = Math.min(head.expires_at, keyUntil ?? head.expires_at);
+  }
   const sh = signHead(head, sk);
   if (path === "/open-store/head") return Response.json(sh, { headers: H });
   const pubkey = url.searchParams.get("pubkey") ?? "";
@@ -28,7 +51,7 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   if (!/^[0-9a-f]{64}$/.test(pubkey)) return Response.json({ ok: false, error: "pubkey must be 64 lowercase hex" }, { status: 400, headers: H });
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(nonce)) return Response.json({ ok: false, error: "nonce required (8-128 chars A-Za-z0-9_-)" }, { status: 400, headers: H });
   const state = await loadBindingState(env.DB, pubkey);
-  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS), sk) }, { headers: H });
+  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS, ksh, keyUntil), sk) }, { headers: H });
 }
 
 /** Daily snapshot step (M2): called once from the existing daily cron after relay catch-up. Writes one head row only when
@@ -38,4 +61,15 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
 export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
   if (!_sre(env) || !env.DB) return null;
   try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
+}
+
+/** GET /open-store/keys (only when KM_SIGNED_RESULTS and KM_KEY_LIFECYCLE are both on): the pinned root and every stored
+ * key record. Records are self-verifying, so the response itself is not signed; harnesses must cross-check the root on
+ * a second channel (v9.2 TOFU) and keep revokes they have already seen. */
+async function keysRoute(env: Env): Promise<Response> {
+  const root = (env.KM_KEY_ROOT ?? "").trim();
+  if (!/^[0-9a-f]{64}$/.test(root) || !env.DB) return unavailable("no KM_KEY_ROOT pinned");
+  const ks = await loadKeyState(env.DB, root);
+  if (!ks) return unavailable("key records unreadable");
+  return new Response(exportKeyState(ks), { headers: { ...H, "Content-Type": "application/json" } });
 }

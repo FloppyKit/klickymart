@@ -3,8 +3,8 @@
  * harness checks. A signature gives accountability, not truth. Results never carry a score, rank or weight.
  *
  * Signing: id = sha256(DOMAIN + "\n" + canonicalJson(payload)), BIP-340 Schnorr over id with the KlickyMart result key
- * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). The key-statement lifecycle (M3) is not built: results carry
- * key_statement_hash = null until then, and a harness that requires one rejects them.
+ * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). Key-statement lifecycle: key-lifecycle.ts (M3, KM_KEY_LIFECYCLE,
+ * default off). With it off, results carry key_statement_hash = null and a harness that requires one rejects them.
  * Switch: KM_SIGNED_RESULTS = 1|true|on enables the /open-store routes (default OFF: they do not exist; when on they 503 without a key or head).
  */
 import * as secp from "@noble/secp256k1";
@@ -65,7 +65,9 @@ export function typedFields(s: BindingState | null | "unknown", nowS: number, sn
 
 /** snapshot_digest: sha256 commitment over the snapshot data, signed inside the head. null = label-only head, which is
  * never served (no digest source exists in the Worker yet; M4). */
-export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; snapshot_digest: string | null; sequence: number; created_at: number; expires_at: number; prev_head: string | null }
+export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; snapshot_digest: string | null; sequence: number; created_at: number; expires_at: number; prev_head: string | null;
+  /** M3: hash of the signing key's statement. Absent (not null) when KM_KEY_LIFECYCLE is off, so M2 heads sign identically. */
+  key_statement_hash?: string }
 export interface ResultPayload {
   type: "klickymart-result"; v: 1; store_pubkey: string; nonce: string; snapshot_id: string; sequence: number;
   produced_at: number; expires_at: number; key_statement_hash: string | null; binding_hash: string | null;
@@ -93,11 +95,11 @@ function verifySig<P>(domain: string, s: Signed<P>, pinned: string): string | nu
 export const signHead = (p: HeadPayload, skHex: string) => sign(HEAD_DOMAIN, p, skHex);
 export const signResult = (p: ResultPayload, skHex: string) => sign(RESULT_DOMAIN, p, skHex);
 
-export function buildResult(s: BindingState | null | "unknown", storePubkey: string, nonce: string, head: HeadPayload, nowS: number): ResultPayload {
+export function buildResult(s: BindingState | null | "unknown", storePubkey: string, nonce: string, head: HeadPayload, nowS: number, keyStatementHash: string | null = null, keyUntil?: number): ResultPayload {
   const st = s === "unknown" ? null : s;
   return {
     type: "klickymart-result", v: 1, store_pubkey: storePubkey, nonce, snapshot_id: head.snapshot_id, sequence: head.sequence,
-    produced_at: nowS, expires_at: Math.min(nowS + RESULT_TTL_S, head.expires_at), key_statement_hash: null,
+    produced_at: nowS, expires_at: Math.min(nowS + RESULT_TTL_S, head.expires_at, keyUntil ?? Number.MAX_SAFE_INTEGER), key_statement_hash: keyStatementHash,
     binding_hash: st?.latest ? hashHex(st.latest.content) : null, fields: typedFields(s, nowS, head.snapshot_id), raw_events: evidenceEvents(st),
     conflict_refs: (st?.conflicts ?? []).filter((c) => c.old_ref).map((c) => ({ version: c.old_ref!.version, old_hash: c.old_ref!.hash, old_id: c.old_ref!.id, old_created_at: c.old_ref!.created_at, new_id: c.events[0]!.id, marks: [...c.marks] })),
   };

@@ -118,6 +118,10 @@ export interface Env {
   KM_SIGNED_RESULTS?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
+  /** M3 switch: "1"/"true"/"on" turns on the signing-key lifecycle (default OFF). Needs KM_SIGNED_RESULTS on too. */
+  KM_KEY_LIFECYCLE?: string;
+  /** M3: hash of the pinned inception key statement (public, not a secret). */
+  KM_KEY_ROOT?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
   SUBMIT_SALT?: string;
   /** "production" in [env.production.vars]; with it, a missing SUBMIT_SALT makes rate-limited endpoints refuse (503). */
