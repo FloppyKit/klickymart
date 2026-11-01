@@ -4,13 +4,16 @@
 Base selection:
   pull_request          -> the PR base sha
   push, not main        -> --before if it is a real sha, else (all zeros = new branch) merge-base with --main-ref
-  push, main            -> --before must resolve (an unreachable old tip after a force-push fails closed, exit 2);
+  push, main            -> --before must resolve AND be an ancestor of HEAD (git merge-base --is-ancestor); if it is
+                           unreachable or not an ancestor (force-push), exit 2 WITHOUT scanning. Same ancestor rule for
+                           branch pushes and for the PR base (the PR merge ref's first parent is the base sha, so a
+                           non-ancestor base means a stale/rewritten base; fail closed, a re-run fixes a race);
                            then the WHOLE ledger history reachable from HEAD is scanned (a cancelled/skipped run can't hide
                            a rewrite)
 Scan: every commit in the range that touched a ledger is checked against ITS OWN parent(s) only:
   - one parent: the parent's file must be an exact line prefix of the child's (check_append_only.check_bytes)
-  - merge (merge=union): every parent's rows must still be present (multiset containment), no \\r, terminated last line;
-    extra rows are appends.
+  - merge: the first parent's file must be an exact line prefix of the result (no reordering, so git blame keeps each
+    row's commit date); every other parent's rows must be present after it (multiset); extra rows are appends.
 Why sound: rows in the base are in every first commit of the range's parents; by induction each step keeps all of its
 parents' rows (prefix, or multiset superset for merges), so no row reachable from base is ever edited or dropped by HEAD.
 A union merge result (base+M+S) contains both base+M and base+S, so normal merges pass.
@@ -36,14 +39,21 @@ def blob(rev, path):
     return r.stdout
 
 def check_merge(parents_bytes, child):
-    if b"\r" in child: return "contains \\r"
-    if child and not child.endswith(b"\n"): return "last line has no trailing newline"
-    have = collections.Counter(child.split(b"\n")[:-1])
-    for i, pb in enumerate(parents_bytes, 1):
+    """First parent's file must be an exact line prefix of the result (no reorder, so blame keeps each row's date);
+    every other parent's rows must appear after that prefix (multiset); anything else is an append."""
+    why = check_bytes(parents_bytes[0], child)
+    if why: return f"first parent not an exact prefix: {why}"
+    have = collections.Counter(child[len(parents_bytes[0]):].split(b"\n")[:-1])
+    for i, pb in enumerate(parents_bytes[1:], 2):
         need = collections.Counter(pb.split(b"\n")[:-1] if pb else [])
+        # rows parent i shares with parent 1 are already in the prefix
+        need -= collections.Counter(parents_bytes[0].split(b"\n")[:-1] if parents_bytes[0] else [])
         missing = need - have
         if missing: return f"merge dropped or edited {sum(missing.values())} row(s) of parent {i}"
     return None
+
+def is_ancestor(base):
+    return git("merge-base", "--is-ancestor", base, "HEAD").returncode == 0
 
 def scan(rng):
     """rng: rev-list arguments. Returns list of violation strings."""
@@ -70,7 +80,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.event == "pull_request":
         base = a.pr_base
-        if not base or not resolves(base): print(f"FAIL: PR base {base!r} does not resolve"); return 2
+        if not base or not resolves(base) or not is_ancestor(base):
+            print(f"FAIL: PR base {base!r} does not resolve or is not an ancestor of HEAD; no scan"); return 2
         rng = [f"{base}..HEAD"]
     elif a.ref != "refs/heads/main":
         if a.before and a.before != ZERO:
@@ -79,12 +90,14 @@ def main(argv=None):
             mb = git("merge-base", a.main_ref, "HEAD")
             if mb.returncode != 0: print(f"FAIL: no merge-base with {a.main_ref}"); return 2
             base = mb.stdout.strip()
-        if not resolves(base): print(f"FAIL: base {base!r} does not resolve (force-push / shallow clone?)"); return 2
+        if not resolves(base) or not is_ancestor(base):
+            print(f"FAIL: base {base!r} does not resolve or is not an ancestor of HEAD (force-push?); no scan"); return 2
         rng = [f"{base}..HEAD"]
     else:
         base = a.before if a.before and a.before != ZERO else None
-        if base and not resolves(base):
-            print(f"FAIL: before {base!r} is unreachable (force-push rewrote main?)"); return 2
+        if base and (not resolves(base) or not is_ancestor(base)):
+            print(f"FAIL: before {base!r} is unreachable or not an ancestor of HEAD (force-push rewrote main?); no scan")
+            return 2
         rng = ["HEAD"]   # whole reachable ledger history, each commit vs its own parents
     print(f"append-only scan: event {a.event} ref {a.ref} base {base} range {' '.join(rng)}")
     try: bad = scan(rng)
