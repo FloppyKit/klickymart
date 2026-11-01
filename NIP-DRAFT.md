@@ -580,10 +580,23 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   result bound to the head, max age, TTL caps clamp signed expiries, harness-only fields `unknown`, raw events replayed
   to confirm any `matches`/`url_only` claim. Acceptance ends at the earliest of result, head and binding expiry. When
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
-- **Not yet:** key custody (M3; results carry `cert_hash: null`). PENDING: the earlier lineage and
-  OpenTimestamps-ordering design was withdrawn; its replacement is the FROST threshold-key plan
-  (design doc held locally, v6.3), not yet specified here. `cert_hash` will name the typed record that
-  authorizes the signer (the Key B cert, or Key A's pin or re-pin record).
+- **M3 key records (v1, single key).** The one result-signing key gets three typed records. Each has a fixed, required
+  field set (unknown fields are rejected); `id` = sha256(JCS(body)) (RFC 8785); each signature is BIP-340 over
+  sha256(tag + "\n" + JCS(body)) with a per-type tag (`klickymart-key-pin-v1`, `-rotate-v1`, `-revoke-v1`).
+  - `km-key-pin` {type, v:1, pubkey, created_at}: self-signed (`sig`). Exactly one.
+  - `km-key-rotate` {type, v:1, old_pubkey, new_pubkey, prev, last_good_head, created_at}: `prev` = id of the pin or
+    previous rotate; signed by the old key (`sig_old`) AND the new key (`sig_new`, proof of possession). Both required.
+  - `km-key-revoke` {type, v:1, pubkey, last_good_head, created_at}: signed by the revoked key; final for that key.
+  - Verify: walk pin → rotates by `prev`; the last link is the current key. Bad signature, id mismatch, broken `prev`
+    link, unknown type or field, or two rotates from the same `prev` (fork) → fail closed (nothing verifies).
+    A result signed by a revoked or rotated-away key is `ok` only if its head is that record's `last_good_head` or
+    provably before it in the head `prev_head` chain; otherwise `signed_then_revoked`. Unknown signer → `unknown_key`.
+    A revoke with no rotate leaves no active key: anything new fails closed.
+  - `cert_hash` in heads and results = id of the pin or latest rotate that authorizes the signer (set when
+    `KM_KEY_RECORDS` is on). Records are served read-only at `GET /open-store/keys` (off by default).
+  - Residual (accepted): whoever holds the current key can rotate to a key they choose. The honest operator's
+    kill switch is a conflicting rotate from the same `prev` (fork → fail closed), plus revoke.
+  - FROST threshold custody is planned later as its own milestone, entered via the same rotate step.
 - **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
