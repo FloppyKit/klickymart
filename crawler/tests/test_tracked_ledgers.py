@@ -26,9 +26,12 @@ def test_conftest_redirects_to_tmp():
         assert os.path.realpath(os.environ[v]).startswith(os.path.realpath(tempfile.gettempdir()))
 
 def _head(path):
-    if not shutil.which("git"): pytest.skip("git unavailable")
+    if not shutil.which("git"):
+        pytest.skip(f"append-only check for {path} needs git: not a git checkout (git unavailable); run check_append_only.py in CI")
+    if subprocess.run(["git", "-C", REPO, "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True).returncode != 0:
+        pytest.skip(f"append-only check for {path} needs git: not a git checkout (no HEAD at {REPO})")
     r = subprocess.run(["git", "-C", REPO, "show", f"HEAD:{path}"], capture_output=True)
-    if r.returncode != 0: pytest.skip(f"{path} not at HEAD")
+    if r.returncode != 0: pytest.skip(f"append-only check for {path}: file not committed at HEAD yet (new file)")
     return r.stdout
 
 @pytest.mark.parametrize("path", TRACKED)
@@ -112,3 +115,25 @@ def _check_ref(d, ref):
 def test_ci_workflow_runs_append_only_check():
     wf = open(os.path.join(REPO, ".github", "workflows", "site.yml")).read()
     assert "check_append_only.py" in wf and "fetch-depth: 0" in wf
+
+def test_gitattributes_union_merge():
+    if not shutil.which("git"): pytest.skip("git unavailable")
+    for p in TRACKED:
+        r = subprocess.run(["git", "-C", REPO, "check-attr", "merge", "--", p], capture_output=True, text=True)
+        assert r.stdout.strip().endswith("merge: union"), r.stdout
+
+def test_tmp_env_refused_without_test_flag(monkeypatch, tmp_path):
+    monkeypatch.delenv("KM_TEST_LEDGERS", raising=False)
+    monkeypatch.setenv("KM_HAND_ANOMALIES", str(tmp_path / "x.jsonl"))
+    with pytest.raises(ValueError, match="KM_TEST_LEDGERS"): HA.path()
+    monkeypatch.setenv("KM_HAND_FIRST_SEEN", str(tmp_path / "y.jsonl"))
+    with pytest.raises(ValueError): FS.path()
+    monkeypatch.setenv("KM_HAND_ANOMALIES", os.path.join(REPO, "data", "x.jsonl")); HA.path()   # data/ always ok
+    monkeypatch.setenv("KM_TEST_LEDGERS", "1"); monkeypatch.setenv("KM_HAND_ANOMALIES", str(tmp_path / "x.jsonl")); HA.path()
+
+def test_conftest_sets_test_flag():
+    assert os.environ.get("KM_TEST_LEDGERS") == "1"
+
+def test_append_only_skip_reason_is_explicit(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    with pytest.raises(pytest.skip.Exception, match="not a git checkout"): _head(TRACKED[0])

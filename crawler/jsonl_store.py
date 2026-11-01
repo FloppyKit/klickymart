@@ -9,18 +9,22 @@ import json, os, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(HERE), "data")
 
-def _roots():
-    roots = {os.path.realpath(DATA), os.path.realpath(tempfile.gettempdir()), os.path.realpath("/tmp")}
-    return [r.rstrip(os.sep) + os.sep for r in roots]
+def _under(real, root):
+    root = os.path.realpath(root).rstrip(os.sep) + os.sep
+    return real.startswith(root)
 
 def resolve(env, default_name):
-    """Path for a store: $env if set and safe, else data/<default_name>. Raises ValueError for an unsafe $env."""
+    """Path for a store: $env if set and safe, else data/<default_name>. Raises ValueError for an unsafe $env.
+    Production accepts only the tracked data/ dir. A tmp dir is accepted only with KM_TEST_LEDGERS=1 (tests/conftest.py),
+    so a prod run can never silently use a throwaway ledger."""
     v = os.environ.get(env)
     if not v: return os.path.join(DATA, default_name)
     real = os.path.realpath(v)
-    if not any(real.startswith(r) for r in _roots()):
-        raise ValueError(f"{env}={v!r} resolves to {real!r}, outside the tracked data/ dir or a tmp dir; refused")
-    return v
+    if _under(real, DATA): return v
+    if any(_under(real, t) for t in (tempfile.gettempdir(), "/tmp")):
+        if os.environ.get("KM_TEST_LEDGERS") == "1": return v
+        raise ValueError(f"{env}={v!r} is under a tmp dir; refused outside tests (set KM_TEST_LEDGERS=1 only in tests)")
+    raise ValueError(f"{env}={v!r} resolves to {real!r}, outside the tracked data/ dir; refused")
 
 def read(p):
     """(events, corrupt_count). Missing file -> ([], 0)."""
