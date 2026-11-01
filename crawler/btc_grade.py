@@ -58,6 +58,7 @@ def _date(x):
 
 # Starting guess, modeled on the v9.2 event created_at skew check: a hand_at further than this in the future is an anomaly.
 HAND_AT_SKEW = datetime.timedelta(minutes=10)
+MAX_ANOMALIES = 10   # n-4: records are signed whole (sign_events.py), so the history is bounded
 
 def _dt(x):
     """Aware UTC datetime of x (date-only -> midnight UTC), or None."""
@@ -109,15 +110,23 @@ def mark_first_seen(out, today=None, anomaly_sink=None):
         fs = min(_date(v) for v in cands).isoformat() if cands else _today(today).isoformat()
         out["btc_grade_hand_first_seen"] = hand_first_seen.put(k, fs)
     if future:
-        a = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"), "hand_by": out.get("btc_grade_hand_by"),
+        import hand_first_seen
+        a = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"),
+             "hand_at_norm": hand_first_seen.norm_at(out.get("btc_grade_hand_at")), "hand_by": out.get("btc_grade_hand_by"),
              "clamped_to": out["btc_grade_hand_first_seen"], "seen_at": now.isoformat()}
-        # append-only history, never cleared (not even by a post-review overwrite); one entry per (kind, hand_at, hand_by)
+        # append-only history, never cleared (not even by a post-review overwrite); one entry per (kind, hand_at, hand_by),
+        # hand_at normalized to UTC ISO seconds (n-4); bounded at MAX_ANOMALIES (first + most recent kept)
         hist = out["btc_grade_anomalies"] = list(out.get("btc_grade_anomalies") or [])
-        if not any((x.get("kind"), x.get("hand_at"), x.get("hand_by")) == (a["kind"], a["hand_at"], a["hand_by"]) for x in hist):
+        akey = lambda x: (x.get("kind"), x.get("hand_at_norm") or hand_first_seen.norm_at(x.get("hand_at")), x.get("hand_by"))
+        if not any(akey(x) == akey(a) for x in hist):
             hist.append(a)
+            if len(hist) > MAX_ANOMALIES:
+                drop = len(hist) - MAX_ANOMALIES
+                del hist[1:1 + drop]
+                out["btc_grade_anomalies_truncated"] = int(out.get("btc_grade_anomalies_truncated") or 0) + drop
             out["btc_grade_needs_review"] = True
         (anomaly_sink or _default_anomaly_sink)({"author": a["hand_by"], "domain": out.get("d"), "kind": a["kind"],
-                                                 "hand_at": a["hand_at"], "clamped_to": a["clamped_to"], "seen_at": a["seen_at"]})
+                                                 "hand_at": a["hand_at_norm"], "clamped_to": a["clamped_to"], "seen_at": a["seen_at"]})
     return at is None
 
 def _default_anomaly_sink(entry):
