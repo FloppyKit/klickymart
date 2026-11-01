@@ -30,12 +30,13 @@ import json,sys,datetime,zoneinfo
 z=zoneinfo.ZoneInfo("America/Chicago")
 for r in json.load(sys.stdin):
   t=datetime.datetime.fromisoformat(r["createdAt"].replace("Z","+00:00")).astimezone(z)
-  print(f"  {r[\"headSha\"][:7]}  {r[\"workflowName\"]:<20} {r[\"status\"]}/{r[\"conclusion\"] or \"-\":<10} {t:%Y-%m-%d %H:%M CT}  {r[\"headBranch\"]}")'
+  sha,wf,st,co,br=r["headSha"][:7],r["workflowName"],r["status"],r["conclusion"] or "-",r["headBranch"]
+  print(f"  {sha}  {wf:<20} {st}/{co:<10} {t:%Y-%m-%d %H:%M} CT  {br}")'
   echo "  CI on HEAD ${HEAD:0:7}:"; $T gh run list -R "$SLUG" --commit "$HEAD" --json workflowName,status,conclusion 2>&1 | python3 -c '
 import json,sys
 r=json.load(sys.stdin)
 ok=bool(r) and all(x["status"]=="completed" and x["conclusion"]=="success" for x in r)
-for x in r: print(f"    {x[\"workflowName\"]}: {x[\"status\"]}/{x[\"conclusion\"]}")
+for x in r: print("    %s: %s/%s" % (x["workflowName"],x["status"],x["conclusion"]))
 print("  CHECK ci_green_on_head:", "PASS" if ok else "FAIL" + (" (no runs)" if not r else ""))'
 else echo "  GitHub: unavailable (gh missing or not authenticated)"; echo "  CHECK ci_green_on_head: FAIL (unverifiable)"; fi
 
@@ -99,15 +100,16 @@ rows=[("Workers requests",S("w","requests"),100000),("DO requests",S("o","reques
       ("D1 rows read",S("q","rowsRead"),5000000),("D1 rows written",S("q","rowsWritten"),100000)]
 ok=True
 for n,v,l in rows:
-  p=100*v/l; ok&=p<50; print(f"  {n:<18} {v:>12,} / {l:>10,}  {p:5.1f}%  {\"OK\" if p<50 else (\"OVER 80%: ROLLBACK ONLY\" if p>=80 else \"OVER 50% BUDGET\")}")
+  p=100*v/l; ok&=p<50; tag="OK" if p<50 else ("OVER 80%: ROLLBACK ONLY" if p>=80 else "OVER 50% BUDGET")
+  print(f"  {n:<18} {v:>12,} / {l:>10,}  {p:5.1f}%  {tag}")
 print("  CHECK usage_under_50pct:", "PASS" if ok else "FAIL")'
 }
 jobs_and_keys(){
 echo; echo "== Own background jobs (wrangler/esbuild/workerd/node under /workspace)"
-ps -eo pid,lstart,etime,cmd | grep -E 'wrangler|esbuild|workerd|node .*/workspace|mock-servers|lnurlp' | grep -vE 'grep|km-status' | cut -c1-180 | sed 's/^/  /' || true
-[ -z "$(ps -eo cmd | grep -E 'wrangler|esbuild|workerd|mock-servers|lnurlp' | grep -vE 'grep|km-status')" ] && echo "  (none)"
+J=$(ps -eo pid,lstart,etime,cmd | grep -E 'wrangler|esbuild|workerd|klickymart|km-verify|nostr-market|mock-servers|lnurlp' | grep -vE 'grep|km-status' | cut -c1-180)
+if [ -n "$J" ]; then echo "$J" | sed 's/^/  /'; else echo "  (none)"; fi
 echo; echo "== Key files under /workspace (paths only, never contents)"
-K=$(find /workspace -xdev \( -name node_modules -o -name .venv -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
+K=$(find /workspace -xdev \( -name node_modules -o -name '.venv*' -o -name site-packages -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
 if [ -n "$K" ]; then echo "$K" | sed 's/^/  /'; echo "  CHECK no_keys_under_workspace: FAIL ($(echo "$K" | wc -l) file(s))"; else echo "  CHECK no_keys_under_workspace: PASS"; fi
 }
 { main; jobs_and_keys; } 2>&1 | scrub
