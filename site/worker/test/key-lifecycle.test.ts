@@ -5,7 +5,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   HARD_MAX_S, KEY_STATEMENT_TTL_CAP_S, effectiveExpiry, effectiveTtlCap, addRevkeyRotate, addRevoke, addStatement, currentStatement, evaluate, exportKeyState, handoverProblem,
   importKeyState, keyLifecycleEnabled, makeHandover, makeInception, makeRevkeyRotate, makeRevoke, newKeyState, paymentGateWithKeys,
-  pinFromChannels, repin, statementHash, statementStatus, storeKeyRecord, verifyResultWithKeys, type KeyState, type KeyStatement,
+  pinFromChannels, repin, classifyPastResult, archiveResult, statementHash, statementStatus, storeKeyRecord, verifyResultWithKeys, type KeyState, type KeyStatement,
 } from "../src/key-lifecycle";
 import { buildResult, signHead, signResult, type HeadPayload } from "../src/signed-result";
 import { openStoreRoute } from "../src/open-store";
@@ -224,6 +224,52 @@ describe("rules 3, 4, 6: current revocation key only; forks are terminal", () =>
     const a = makeRevkeyRotate(stmts[0]!, sks[0]!, rev, pk(key()), NOW);
     addRevkeyRotate(st, a); addRevkeyRotate(st, a);
     expect(evaluate(st, NOW).compromised).toBeNull();
+  });
+});
+
+describe("rule 5: key_statement_hash mandatory on heads when the lifecycle is on", () => {
+  it("a head without key_statement_hash is rejected even if the result names a current statement", () => {
+    const { sks, stmts, st } = lineage(2);
+    const p = signedPair(sks[1]!, stmts[1]!.hash, { headKsh: null });
+    expect("key_statement_hash" in p.head.payload).toBe(false);
+    expect(verifyResultWithKeys(p.res, p.head, st, HO)).toMatchObject({ ok: false, reason: expect.stringMatching(/head/) });
+  });
+});
+
+describe("rule 7: revoke-to-disown keeps the past attributable; revokes name no store", () => {
+  it("a result signed before a revoke stops verifying but is classified signed_then_revoked", () => {
+    const { sks, rev, stmts, st } = lineage(2);
+    const p = signedPair(sks[1]!, stmts[1]!.hash);
+    expect(classifyPastResult(p.res, st, NOW)).toBe("valid_now");
+    addRevoke(st, makeRevoke(rev, stmts[1]!.hash, NOW));
+    expect(verifyResultWithKeys(p.res, p.head, st, HO).ok).toBe(false);
+    expect(classifyPastResult(p.res, st, NOW)).toBe("signed_then_revoked");
+    const a = archiveResult(p.res, importKeyState(exportKeyState(st)), NOW);
+    expect(a).toMatchObject({ id: p.res.id, key_statement_hash: stmts[1]!.hash, status: "signed_then_revoked" });
+  });
+  it("a forged result naming the statement is unattributable, not signed_then_revoked", () => {
+    const { rev, stmts, st } = lineage(2);
+    const fake = signedPair(key(), stmts[1]!.hash);
+    addRevoke(st, makeRevoke(rev, stmts[1]!.hash, NOW));
+    expect(classifyPastResult(fake.res, st, NOW)).toBe("unattributable");
+  });
+  it("superseded and compromised pasts are attributable too", () => {
+    const { sks, rev, stmts, st } = lineage(2);
+    const old = signedPair(sks[0]!, stmts[0]!.hash);
+    expect(classifyPastResult(old.res, st, NOW)).toBe("signed_then_superseded");
+    addStatement(st, makeHandover(stmts[0]!, sks[0]!, sks[1]!, pk(key()), pk(rev), NOW - 5, NOW + DAY));
+    expect(classifyPastResult(old.res, st, NOW)).toBe("signed_under_compromised_lineage");
+  });
+  it("revoke records carry no store reference: exactly {type, v, target, revocation_key, created_at}", () => {
+    const { rev, stmts } = lineage(1);
+    const r = makeRevoke(rev, stmts[0]!.hash, NOW);
+    expect(Object.keys(r).sort()).toEqual(["hash", "payload", "sig"]);
+    expect(Object.keys(r.payload).sort()).toEqual(["created_at", "revocation_key", "target", "type", "v"]);
+    expect(JSON.stringify(r)).not.toMatch(/store|pubkey|domain|binding/i);
+    // a revoke with a smuggled store field is rejected (payload must be exactly the five fields)
+    const st = newKeyState(stmts[0]!.hash);
+    const bad = { ...r, payload: { ...r.payload, store_pubkey: "ee".repeat(32) } } as never;
+    expect(addRevoke(st, bad).outcome).toBe("rejected");
   });
 });
 

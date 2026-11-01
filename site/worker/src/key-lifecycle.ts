@@ -22,7 +22,7 @@ import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import "./nostr-verify";
 import { canonicalJson } from "./endpoint-binding";
-import { verifyResult, type HarnessOpts, type HarnessVerdict, type HeadPayload, type ResultPayload, type Signed } from "./signed-result";
+import { HEAD_DOMAIN, RESULT_DOMAIN, verifyResult, verifySig, type HarnessOpts, type HarnessVerdict, type HeadPayload, type ResultPayload, type Signed } from "./signed-result";
 
 export const KEYSTMT_DOMAIN = "klickymart-keystmt-v1";
 export const REVOKE_DOMAIN = "klickymart-keyrevoke-v1";
@@ -140,7 +140,8 @@ export function addStatement(st: KeyState, s: KeyStatement): { outcome: AddOutco
 }
 export function addRevoke(st: KeyState, r: Revoke): { outcome: AddOutcome; reason?: string } {
   const p = r?.payload;
-  if (!p || p.type !== "klickymart-key-revoke" || p.v !== 1 || !HEX64.test(p.target) || !HEX64.test(p.revocation_key) || !isInt(p.created_at)) return { outcome: "rejected", reason: "malformed" };
+  if (!p || Object.keys(p).sort().join() !== "created_at,revocation_key,target,type,v") return { outcome: "rejected", reason: "revoke must carry exactly type, v, target, revocation_key, created_at (no store field)" };
+  if (p.type !== "klickymart-key-revoke" || p.v !== 1 || !HEX64.test(p.target) || !HEX64.test(p.revocation_key) || !isInt(p.created_at)) return { outcome: "rejected", reason: "malformed" };
   if (dg(REVOKE_DOMAIN, p) !== r.hash || !ver(r.sig, r.hash, p.revocation_key)) return { outcome: "rejected", reason: "bad signature" };
   if (st.revokes.some((x) => x.hash === r.hash)) return { outcome: "duplicate" };
   st.revokes.push(r); return { outcome: "accepted" };
@@ -308,6 +309,36 @@ export function verifyResultWithKeys(res: Signed<ResultPayload>, head: Signed<He
   if (!v.ok) return v;
   return { ...v, acceptUntil: Math.min(v.acceptUntil, s.until!), keyStatus: s.status };
 }
+
+/** Rule 7 (revoke-to-disown): a revoke stops FUTURE verification but never erases the past. A result whose signature
+ * checks against the key of a statement in the pinned lineage is still attributable to KlickyMart:
+ *  - "valid_now": its statement is current (use verifyResultWithKeys for acceptance);
+ *  - "signed_then_revoked": validly signed under a statement that has since been revoked (keep it; show "KlickyMart
+ *    signed this"; never accept it for payment);
+ *  - "signed_then_superseded" / "signed_then_expired" / "signed_under_compromised_lineage": likewise attributable;
+ *  - "unattributable": the signature or the statement does not check out.
+ * A revoke names only a key statement (target + revocation key + time): it carries no store field and says nothing
+ * about any store, so it can't be used to mark a store down. */
+export type PastResultStatus = "valid_now" | "signed_then_revoked" | "signed_then_superseded" | "signed_then_expired" | "signed_under_compromised_lineage" | "unattributable";
+export function classifyPastResult(res: Signed<ResultPayload>, ks: KeyState, nowS: number, o: KeyOpts = {}): PastResultStatus {
+  const ksh = res?.payload?.key_statement_hash;
+  if (!ksh) return "unattributable";
+  const stmt = ks.stmts.find((s) => s.hash === ksh);
+  if (!stmt || verifySig(RESULT_DOMAIN, res, stmt.payload.key)) return "unattributable";
+  const st = statementStatus(ks, ksh, nowS, o).status;
+  if (st === "compromised") return "signed_under_compromised_lineage";
+  if (st === "revoked") return "signed_then_revoked";
+  if (st === "superseded") return "signed_then_superseded";
+  if (st === "expired") return "signed_then_expired";
+  if (st === "current") return "valid_now";
+  return "unattributable";
+}
+/** Harness-side archive of results it once saw, with their current attribution status (persist alongside KeyState). */
+export interface ArchivedResult { id: string; key_statement_hash: string | null; produced_at: number; status: PastResultStatus }
+export function archiveResult(res: Signed<ResultPayload>, ks: KeyState, nowS: number, o: KeyOpts = {}): ArchivedResult {
+  return { id: res.id, key_statement_hash: res.payload?.key_statement_hash ?? null, produced_at: res.payload?.produced_at, status: classifyPastResult(res, ks, nowS, o) };
+}
+void HEAD_DOMAIN;
 
 /** Liveness at payment time: cached acceptance only while its key statement is still current in the (persisted) lineage;
  * a revoke seen after caching kills it. Otherwise fail closed (relay-only reading stays opt-in). */

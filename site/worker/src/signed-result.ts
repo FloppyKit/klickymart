@@ -84,7 +84,7 @@ function sign<P>(domain: string, payload: P, skHex: string): Signed<P> {
   const id = digest(domain, payload);
   return { payload, id, signer: bytesToHex(secp.schnorr.getPublicKey(sk)), sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) };
 }
-function verifySig<P>(domain: string, s: Signed<P>, pinned: string): string | null {
+export function verifySig<P>(domain: string, s: Signed<P>, pinned: string): string | null {
   try {
     if (s.signer !== pinned) return "not signed by the pinned KlickyMart key";
     if (digest(domain, s.payload) !== s.id) return "id does not match payload";
