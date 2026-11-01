@@ -12,3 +12,11 @@ ledger fails closed.
 - A GitHub push-time floor (server-side receive date) is optional.
 - Reopen this if anyone other than Matt gets commit access to the ledger, or if hand overrides grow past a handful
   (2 today: bestbuy.com, sonos.com).
+
+
+## Duplicate rows (set semantics, 2026-11-01)
+
+Byte-identical rows in `data/hand-*.jsonl` are one row. The CI checker (`crawler/ci_ledger_check.py`,
+`crawler/check_append_only.py`) reports them as a WARNING, never a failure, and never rewrites a ledger file. Reordered or
+dropped distinct rows (including the same-second criss-cross tie) still fail closed. **Consumers:** count distinct keys,
+not rows; `first_seen` is the earliest row per key.

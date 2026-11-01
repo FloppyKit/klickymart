@@ -152,3 +152,34 @@ def test_r9_1_criss_cross_same_second_tie_reorders_and_fails_closed(repo):
     if merged[:len(first)] == first: pytest.skip("this git version keeps first-parent order here; nothing to document")
     r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
     assert r.returncode == 1 and "first parent not an exact prefix" in r.stdout, r.stdout + r.stderr
+
+
+def test_duplicate_rows_are_set_semantics_warning_not_failure(repo):
+    """Satoshi 2026-11-01: byte-identical rows count once. Side repeats X; the hand-resolved merge keeps X once."""
+    d, g = repo
+    before = g("rev-parse", "HEAD")
+    g("checkout", "-qb", "side"); app(d, g, '{"r":"X"}', "x"); app(d, g, '{"r":"S"}', "s"); app(d, g, '{"r":"X"}', "x again")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"M"}', "m")
+    subprocess.run(["git", "-C", str(d), "merge", "-q", "--no-commit", "side"], capture_output=True)
+    (d / F).write_text('{"r":"base"}\n{"r":"M"}\n{"r":"X"}\n{"r":"S"}\n'); g("add", F); g("commit", "-qm", "merge, X once")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "WARNING" in r.stdout and "duplicate" in r.stdout, r.stdout
+    assert (d / F).read_text().count('{"r":"X"}') == 1   # checker never rewrites the ledger
+
+def test_duplicate_append_on_one_branch_warns_and_passes(repo):
+    d, g = repo
+    before = g("rev-parse", "HEAD"); app(d, g, '{"r":"base"}', "dup of base row")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 0 and "WARNING" in r.stdout and "1 byte-identical duplicate" in r.stdout, r.stdout
+    assert (d / F).read_text() == '{"r":"base"}\n{"r":"base"}\n'
+
+def test_dropping_a_distinct_row_still_fails(repo):
+    d, g = repo
+    before = g("rev-parse", "HEAD")
+    g("checkout", "-qb", "side"); app(d, g, '{"r":"S1"}', "s1"); app(d, g, '{"r":"S2"}', "s2")
+    g("checkout", "-q", "main"); app(d, g, '{"r":"M"}', "m")
+    subprocess.run(["git", "-C", str(d), "merge", "-q", "--no-commit", "side"], capture_output=True)
+    (d / F).write_text('{"r":"base"}\n{"r":"M"}\n{"r":"S1"}\n'); g("add", F); g("commit", "-qm", "drops S2")
+    r = run(d, "--event", "push", "--ref", "refs/heads/main", "--before", before)
+    assert r.returncode == 1 and "parent 2" in r.stdout, r.stdout

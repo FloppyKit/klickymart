@@ -20,7 +20,10 @@ parents' rows (prefix, or multiset superset for merges), so no row reachable fro
 A union merge result (base+M+S) contains both base+M and base+S, so normal merges pass.
 TODO(scale): the main scan walks all ledger-touching commits (unbounded but small: one per pass). If it grows, checkpoint
 on a signed/protected "last verified" tag once v9.2 operator signing lands.
-Exit: 0 ok, 1 violation, 2 usage/unresolvable base."""
+Duplicates (set semantics, Satoshi 2026-11-01): byte-identical rows are one row. A repeated row is a WARNING, never a
+failure, and ledger files are never rewritten. Consumers must count DISTINCT rows/keys, not lines, and take first_seen as
+the earliest row per key. Reordered first-parent rows (e.g. the same-second criss-cross tie) still fail closed.
+Exit: 0 ok (warnings allowed), 1 violation, 2 usage/unresolvable base."""
 import argparse, collections, subprocess, sys
 from check_append_only import check_bytes
 
@@ -52,22 +55,32 @@ def check_merge(parents_bytes, child):
     subsequence (original order kept; rows of different parents may interleave); anything else is an append."""
     why = check_bytes(parents_bytes[0], child)
     if why: return f"first parent not an exact prefix: {why}"
-    tail = _lines(child[len(parents_bytes[0]):])
+    # Set semantics (Satoshi 2026-11-01): byte-identical rows are one row. A parent's own rows are its distinct rows not
+    # already in the first parent; they must follow the prefix as an ordered subsequence of the tail's distinct rows.
+    first = set(_lines(parents_bytes[0]))
+    tail = _dedupe(ln for ln in _lines(child[len(parents_bytes[0]):]) if ln not in first)
     for i, pb in enumerate(parents_bytes[1:], 2):
-        shared = collections.Counter(_lines(parents_bytes[0]))
-        own = []
-        for ln in _lines(pb):
-            if shared[ln]: shared[ln] -= 1
-            else: own.append(ln)
+        own = _dedupe(ln for ln in _lines(pb) if ln not in first)
         if not _is_subsequence(own, tail):
             return f"merge dropped, edited or reordered row(s) of parent {i}"
     return None
 
+def _dedupe(lines):
+    seen, out = set(), []
+    for ln in lines:
+        if ln not in seen: seen.add(ln); out.append(ln)
+    return out
+
+def duplicate_rows(b):
+    """Byte-identical repeated rows in a ledger blob (set semantics: they count as one row; WARNING, never a failure)."""
+    c = collections.Counter(_lines(b))
+    return sum(n - 1 for n in c.values() if n > 1)
+
 def is_ancestor(base):
     return git("merge-base", "--is-ancestor", base, "HEAD").returncode == 0
 
-def scan(rng):
-    """rng: rev-list arguments. Returns list of violation strings."""
+def scan(rng, warns=None):
+    """rng: rev-list arguments. Returns list of violation strings; duplicate-row warnings go to `warns` if given."""
     out = git("rev-list", "--full-history", "--parents", *rng, "--", *PATHS)
     if out.returncode != 0: raise RuntimeError(f"git rev-list failed: {out.stderr.strip()}")
     bad = []
@@ -81,6 +94,9 @@ def scan(rng):
             else:
                 why = check_merge(pbs, child)
             if why: bad.append(f"{c[:12]} {p}: {why}")
+            elif warns is not None:
+                new_d = duplicate_rows(child) - max([duplicate_rows(x) for x in pbs] or [0])
+                if new_d > 0: warns.append(f"{c[:12]} {p}: {new_d} byte-identical duplicate row(s) (counted once)")
     return bad
 
 def main(argv=None):
@@ -111,8 +127,10 @@ def main(argv=None):
             return 2
         rng = ["HEAD"]   # whole reachable ledger history, each commit vs its own parents
     print(f"append-only scan: event {a.event} ref {a.ref} base {base} range {' '.join(rng)}")
-    try: bad = scan(rng)
+    warns = []
+    try: bad = scan(rng, warns)
     except (RuntimeError, subprocess.TimeoutExpired) as e: print(f"FAIL: {e}"); return 2
+    for w in warns: print("WARNING " + w)
     for b in bad: print("FAIL " + b)
     if not bad: print("ok   all ledger commits are appends of their parents")
     return 1 if bad else 0

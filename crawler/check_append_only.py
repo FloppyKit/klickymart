@@ -5,6 +5,9 @@ resolving base counts as new (all appends).
 
     python3 crawler/check_append_only.py <base-ref> [--paths data/hand-anomalies.jsonl ...]
 
+Byte-identical duplicate rows are one row (set semantics): WARNING only. Consumers count distinct keys, not rows;
+first_seen = earliest row per key.
+
 Exit 0 ok, 1 violation, 2 usage/git error. Intended for CI."""
 import os, subprocess, sys
 
@@ -51,7 +54,10 @@ def main(argv):
         if cur is None: print(f"FAIL {p}: deleted (was {len(r.stdout)} bytes at {base})"); bad += 1; continue
         why = check_bytes(r.stdout, cur)
         if why: print(f"FAIL {p}: {why} vs {base}"); bad += 1
-        else: print(f"ok   {p}: +{len(cur) - len(r.stdout)} bytes appended")
+        else:
+            print(f"ok   {p}: +{len(cur) - len(r.stdout)} bytes appended")
+            ln = cur.split(b"\n")[:-1]; d = len(ln) - len(set(ln))
+            if d: print(f"WARNING {p}: {d} byte-identical duplicate row(s); set semantics, counted once (not a failure)")
     return 1 if bad else 0
 
 if __name__ == "__main__": sys.exit(main(sys.argv[1:]))
