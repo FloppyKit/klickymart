@@ -35,6 +35,8 @@ new_sqlite_classes = ["RelayIngester"]
 crons = ["15 6 * * *"]
 
 [vars]
+KM_ENDPOINT_BINDINGS = "off"  # M2: default OFF until Matt approves; code also defaults off when unset
+KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
@@ -77,6 +79,8 @@ new_sqlite_classes = ["RelayIngester"]
 crons = ["15 6 * * *"]
 
 [env.production.vars]
+KM_ENDPOINT_BINDINGS = "off"  # M2: default OFF until Matt approves; code also defaults off when unset
+KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 SITE_ORIGIN = "https://klickymart.com"
 ENVIRONMENT = "production"  # R12-005: with this, a missing SUBMIT_SALT secret makes rate-limited endpoints return 503
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).

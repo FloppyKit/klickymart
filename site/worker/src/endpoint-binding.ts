@@ -10,7 +10,7 @@
  * created_at more than skew S ahead is rejected; an implausible version jump is `conflict`; same version + different
  * content is `conflict` carrying both events; revocation is terminal per store key and beats any version, created_at and
  * skew; expired, revoked and url_only are never a match. Store-authored payment strings are data: validated by shape only,
- * never fetched. Kill switch: KM_ENDPOINT_BINDINGS = 0|false|off (default on).
+ * never fetched. Switch: KM_ENDPOINT_BINDINGS = 1|true|on enables it (default OFF; anything else is off).
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
@@ -51,7 +51,7 @@ export const IGNORED_OUTCOMES: ReadonlySet<Outcome> = new Set<Outcome>(["stale",
 
 export function bindingsEnabled(env: { KM_ENDPOINT_BINDINGS?: string }): boolean {
   const v = (env.KM_ENDPOINT_BINDINGS ?? "").trim().toLowerCase();
-  return !(v === "0" || v === "false" || v === "off");
+  return v === "1" || v === "true" || v === "on"; // default OFF (Matt 2026-11-01): only an explicit on enables it
 }
 
 export function canonicalJson(x: unknown): string {

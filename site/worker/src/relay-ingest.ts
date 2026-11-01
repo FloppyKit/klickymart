@@ -42,7 +42,7 @@ export interface IngestCtx {
   handshakeMarks?: boolean;
   /** Test hook: replaces checkThreads. */
   handshakeChecker?: typeof import("./handshake").checkThreads;
-  /** M2 KM_ENDPOINT_BINDINGS kill switch (default on). false = the binding kind is not subscribed, validated or stored. */
+  /** M2 KM_ENDPOINT_BINDINGS switch (default OFF). Only true subscribes, validates and stores the binding kind (31421, placeholder pending NIP check). */
   endpointBindings?: boolean;
 }
 
@@ -76,7 +76,7 @@ export function buildFilters(ctx: IngestCtx, since: number, fulfillmentIds: stri
   // Community store suggestions (Path 3): signed kind 1423 with an r tag; queued for the gated crawl, never trusted for facts.
   f.push({ kinds: [NOSTR_KIND_STORE_SUGGESTION], since });
   // M2 endpoint bindings (observation only; never ranking).
-  if (ctx.endpointBindings !== false) f.push({ kinds: [NOSTR_KIND_ENDPOINT_BINDING], "#d": [BINDING_D], since });
+  if (ctx.endpointBindings === true) f.push({ kinds: [NOSTR_KIND_ENDPOINT_BINDING], "#d": [BINDING_D], since });
   return f;
 }
 
@@ -105,7 +105,7 @@ export function validateRelayEvent(input: unknown, ctx: IngestCtx): Verdict {
   if (!input || typeof input !== "object") return { ok: false, reason: "not an object" };
   const ev = input as Ev;
   if (JSON.stringify(ev).length > INGEST_LIMITS.maxEventBytes) return { ok: false, reason: "too large" };
-  if (ev.kind === NOSTR_KIND_ENDPOINT_BINDING && ctx.endpointBindings !== false) {
+  if (ev.kind === NOSTR_KIND_ENDPOINT_BINDING && ctx.endpointBindings === true) {
     const v = verifyNostrEvent(ev, ev.kind);
     return v.ok ? { ok: true, d: null } : { ok: false, reason: v.reason }; // content rules + future skew: endpoint-binding.ts
   }
@@ -222,7 +222,7 @@ export async function ingestEvents(db: D1Database, batch: { ev: unknown; relay: 
     valid.push({ ev: raw as Ev, relay, d: v.d });
     res.maxCreated = Math.max(res.maxCreated, (raw as Ev).created_at);
   }
-  if (ctx.endpointBindings !== false && valid.some((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING)) {
+  if (ctx.endpointBindings === true && valid.some((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING)) {
     const bevs = valid.filter((x) => x.ev.kind === NOSTR_KIND_ENDPOINT_BINDING).map((x) => x.ev as BEv);
     const c = await recordBindings(db, bevs, nowS);
     res.accepted += (c.accepted ?? 0) + (c.conflict ?? 0) + (c.revoked ?? 0); // ignored ones (stale, post-revoke, future) land in reasons

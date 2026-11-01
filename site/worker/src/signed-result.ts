@@ -5,7 +5,7 @@
  * Signing: id = sha256(DOMAIN + "\n" + canonicalJson(payload)), BIP-340 Schnorr over id with the KlickyMart result key
  * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). The key-statement lifecycle (M3) is not built: results carry
  * key_statement_hash = null until then, and a harness that requires one rejects them.
- * Kill switch: KM_SIGNED_RESULTS = 0|false|off removes the /open-store routes (default on; they 503 without a key or head).
+ * Switch: KM_SIGNED_RESULTS = 1|true|on enables the /open-store routes (default OFF: they do not exist; when on they 503 without a key or head).
  */
 import * as secp from "@noble/secp256k1";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
@@ -22,7 +22,7 @@ export const HEAD_TTL_S = 3600;
 
 export function signedResultsEnabled(env: { KM_SIGNED_RESULTS?: string }): boolean {
   const v = (env.KM_SIGNED_RESULTS ?? "").trim().toLowerCase();
-  return !(v === "0" || v === "false" || v === "off");
+  return v === "1" || v === "true" || v === "on"; // default OFF (Matt 2026-11-01): only an explicit on enables it
 }
 
 export type Provenance = "observed" | "store-asserted" | "harness-must-verify" | "constant";

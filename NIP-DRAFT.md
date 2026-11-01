@@ -582,7 +582,7 @@ https://github.com/nostr-protocol/nips/pulls (relay usage not checked). Implemen
   cached state lapses, KlickyMart-dependent payments fail closed; relay-only reading is opt-in.
 - **Not yet:** key statements and pre-rotation (M3; results carry `key_statement_hash: null`), snapshot heads written
   by the daily snapshot step (M4).
-- **Kill switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` (`0`/`false`/`off`; default on).
+- **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31421 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.
 
 ## Numbering and kind checks (checked 2026-10-29)
 

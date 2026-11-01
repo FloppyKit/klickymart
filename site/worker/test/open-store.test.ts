@@ -368,13 +368,23 @@ describe("signed results (v9.2 §1 acceptance)", () => {
 });
 
 // ---------- ingest + routes + kill switches ----------
-const ctx = (extra: Partial<IngestCtx> = {}): IngestCtx => ({ domains: new Set(["example.com"]), ourPubkey: null, ...extra });
+const ctx = (extra: Partial<IngestCtx> = {}): IngestCtx => ({ domains: new Set(["example.com"]), ourPubkey: null, endpointBindings: true, ...extra });
 beforeEach(async () => { for (const t of ["endpoint_binding_events", "endpoint_binding_state", "snapshot_heads"]) await env.DB.prepare(`DELETE FROM ${t}`).run(); });
 
 describe("KM_ENDPOINT_BINDINGS kill switch", () => {
-  it("parses the flag (default on)", () => {
-    expect(bindingsEnabled({})).toBe(true);
-    for (const v of ["0", "false", "off", " OFF "]) expect(bindingsEnabled({ KM_ENDPOINT_BINDINGS: v })).toBe(false);
+  it("parses the flag (default OFF; only explicit on enables)", () => {
+    expect(bindingsEnabled({})).toBe(false);
+    for (const v of ["", "0", "false", "off", " OFF ", "yes"]) expect(bindingsEnabled({ KM_ENDPOINT_BINDINGS: v })).toBe(false);
+    for (const v of ["1", "true", "on", " ON "]) expect(bindingsEnabled({ KM_ENDPOINT_BINDINGS: v })).toBe(true);
+    expect(bindingsEnabled(env as never)).toBe(false); // wrangler.toml vars ship it off
+  });
+  it("unset in the ingest ctx: kind not followed, nothing stored", async () => {
+    const sk = key(); const now = Date.now(); const t = Math.floor(now / 1000);
+    const a = ev(sk, { version: 1, expires_at: t + 86400, endpoints: { node_id: NODE } }, t - 100);
+    const r = await ingestEvents(env.DB, [{ ev: a, relay: "wss://r.test" }], { domains: new Set(["example.com"]), ourPubkey: null, now });
+    expect(r.accepted).toBe(0);
+    expect(JSON.stringify(buildFilters({ domains: new Set(["example.com"]), ourPubkey: null }, 0))).not.toContain(`"kinds":[${K}]`);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS c FROM endpoint_binding_events").first<{ c: number }>())!.c).toBe(0);
   });
   it("on: ingest stores state + evidence; conflicts keep both events", async () => {
     const sk = key(); const now = Date.now(); const t = Math.floor(now / 1000);
@@ -420,9 +430,11 @@ describe("ignored events are counted, not stored", () => {
 });
 
 describe("open-store routes + KM_SIGNED_RESULTS kill switch", () => {
-  it("parses the flag (default on)", () => {
-    expect(signedResultsEnabled({})).toBe(true);
-    for (const v of ["0", "false", "off"]) expect(signedResultsEnabled({ KM_SIGNED_RESULTS: v })).toBe(false);
+  it("parses the flag (default OFF; only explicit on enables)", () => {
+    expect(signedResultsEnabled({})).toBe(false);
+    for (const v of ["", "0", "false", "off"]) expect(signedResultsEnabled({ KM_SIGNED_RESULTS: v })).toBe(false);
+    for (const v of ["1", "true", "on"]) expect(signedResultsEnabled({ KM_SIGNED_RESULTS: v })).toBe(true);
+    expect(signedResultsEnabled(env as never)).toBe(false); // wrangler.toml vars ship it off
   });
   it("503 without a key or without a fresh head; never an unsigned fact", async () => {
     const u = new URL("https://x/open-store/head");
@@ -450,7 +462,11 @@ describe("open-store routes + KM_SIGNED_RESULTS kill switch", () => {
     const unknown = await handleRequest(new Request("https://x/open-store-nope"), { ...env } as never);
     expect(off.status).toBe(unknown.status);
     expect(await off.text()).not.toContain("klickymart-head");
-    const on = await handleRequest(new Request("https://x/open-store/head"), { ...env, KM_RESULT_SK_HEX: KM_HEX } as never);
+    for (const p of ["/open-store/head", "/open-store/binding?pubkey=" + "a".repeat(64) + "&nonce=n"]) {
+      const dflt = await handleRequest(new Request("https://x" + p), { ...env, KM_SIGNED_RESULTS: undefined, KM_RESULT_SK_HEX: KM_HEX } as never);
+      expect(dflt.status).toBe(unknown.status); // unset = off
+    }
+    const on = await handleRequest(new Request("https://x/open-store/head"), { ...env, KM_SIGNED_RESULTS: "on", KM_RESULT_SK_HEX: KM_HEX } as never);
     expect(on.status).toBe(200);
   });
 });
