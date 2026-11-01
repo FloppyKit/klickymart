@@ -6,3 +6,9 @@ CREATE TABLE IF NOT EXISTS km_key_ots (
   status TEXT NOT NULL,          -- pending | upgraded (upgraded = a calendar returned a proof into a block)
   updated_at INTEGER NOT NULL
 );
+-- OTS activation state (key 'activated' -> JSON {stmt, at}). Set once, inside the daily cron run that promotes a fresh
+-- statement carrying notbefore; from then on every stored lifecycle record must carry notbefore.
+CREATE TABLE IF NOT EXISTS km_key_ots_state (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);

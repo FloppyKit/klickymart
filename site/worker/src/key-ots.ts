@@ -22,7 +22,7 @@
 /** An anchor counts only with at least this many confirmations (block at height h counts 1 when tip = h). */
 export const CONF = 6;
 export const FRESH_K_DEFAULT = 36;
-/** Compiled ceiling for FRESH_K. PENDING SATOSHI: 144 (~1 day of blocks) picked as a placeholder.
+/** Compiled ceiling for FRESH_K: 144 (~1 day of blocks; Satoshi confirmed 2026-11-01).
  * TODO(measure): real calendar-submit -> block-inclusion latency (incl. calendar aggregation delay) to set FRESH_K. */
 export const FRESH_K_MAX = 144;
 export function effectiveFreshK(config?: number | string | null): number {
@@ -86,20 +86,32 @@ export function notBeforeOf(ctx: OtsContext, nb: NotBefore | undefined): number 
   return h.hash === nb.hash ? nb.height : "invalid";
 }
 
-/** Rule 2: stale = notbefore names a block that isn't there, or the confirmed anchor is more than FRESH_K blocks after
- * notbefore (stamped and held back), or anchored before its own notbefore, or anchored with no notbefore at all. */
-export function isStale(ctx: OtsContext, hash: string, nb: NotBefore | undefined): boolean {
-  const n = notBeforeOf(ctx, nb);
-  if (n === "invalid") return true;
+export type OtsCheck = "ok" | "reject" | "stale" | "eclipsed";
+/** Per-record OTS check (Satoshi OTS answers 2-4).
+ *  - no notbefore: "ok" (a pre-OTS record is unbounded: valid chain history, never ordered against anything);
+ *  - reject outright: notbefore height more than CONF above the tip, or its hash disagrees with a known header;
+ *  - eclipsed: no header source knows the notbefore block by firstSeenTip + FRESH_K + CONF;
+ *  - stale: confirmed anchor more than FRESH_K blocks after notbefore, or anchored before it.
+ * Callers decide who is exempt (current-key revokes are exempt from stale; see evaluate). */
+export function otsCheck(ctx: OtsContext, hash: string, nb: NotBefore | undefined, firstSeenTip?: number): OtsCheck {
+  if (!nb) return "ok";
+  const tip = ctx.headers?.tip() ?? null;
+  if (tip !== null && nb.height > tip + CONF) return "reject";
+  const h = ctx.headers?.header(nb.height) ?? null;
+  if (h && h.hash !== nb.hash) return "reject";
+  const K = effectiveFreshK(ctx.freshK);
+  if (!h) return tip !== null && firstSeenTip !== undefined && tip >= firstSeenTip + K + CONF ? "eclipsed" : "ok";
   const a = anchorOf(ctx, hash);
-  if (a === null) return false;
-  if (!nb) return true;
-  if (n === null) return false; // header for notbefore unknown: can't judge
-  return a - n > effectiveFreshK(ctx.freshK) || a < n;
+  if (a === null) return "ok";
+  return a - nb.height > K || a < nb.height ? "stale" : "ok";
 }
+/** Back-compat helper: anything but "ok". */
+export const isStale = (ctx: OtsContext, hash: string, nb: NotBefore | undefined, firstSeenTip?: number) => otsCheck(ctx, hash, nb, firstSeenTip) !== "ok";
 
-/** Rule 3: A strictly before B iff anchor(A) < notbefore(B) (heights only). Anything else is NOT strictly before. */
-export function strictlyBefore(ctx: OtsContext, a: { hash: string }, b: { notbefore?: NotBefore }): boolean {
+/** Rule 3: A strictly before B iff anchor(A) < notbefore(B) (heights only). Both must carry notbefore: an unbounded
+ * (pre-OTS) record is never strictly before or after anything. */
+export function strictlyBefore(ctx: OtsContext, a: { hash: string; notbefore?: NotBefore }, b: { notbefore?: NotBefore }): boolean {
+  if (!a.notbefore || !b.notbefore) return false;
   const x = anchorOf(ctx, a.hash), n = notBeforeOf(ctx, b.notbefore);
   return x !== null && typeof n === "number" && x < n;
 }
@@ -113,8 +125,10 @@ export type RevokeJudgement = "valid" | "stale" | "pending";
  *    FRESH_K + CONF, after which an unanchored record is stale: unanchored revoke -> stale; unanchored rotation -> the
  *    rotation is stale, so the revoke stands (valid). No headers -> pending forever (fail closed in the dispute only). */
 export function judgeOldKeyRevoke(ctx: OtsContext, rev: { hash: string; payload: { notbefore?: NotBefore } }, rot: { hash: string; payload: { notbefore?: NotBefore } }): RevokeJudgement {
-  if (strictlyBefore(ctx, rev, rot.payload)) return "valid";
-  if (strictlyBefore(ctx, rot, rev.payload)) return "stale";
+  // Unbounded (pre-OTS) side: never ordered, so the tie rule applies: the revoke wins.
+  if (!rev.payload.notbefore || !rot.payload.notbefore) return "valid";
+  if (strictlyBefore(ctx, { hash: rev.hash, notbefore: rev.payload.notbefore }, rot.payload)) return "valid";
+  if (strictlyBefore(ctx, { hash: rot.hash, notbefore: rot.payload.notbefore }, rev.payload)) return "stale";
   const aR = anchorOf(ctx, rev.hash), aX = anchorOf(ctx, rot.hash);
   if (aR !== null && aX !== null) return "valid";
   const tip = ctx.headers?.tip() ?? null;
@@ -177,4 +191,18 @@ export async function loadOtsProofs(db: D1Database): Promise<Record<string, stri
     for (const r of results ?? []) out[r.rec_hash] = JSON.parse(r.proofs_json) as string[];
   } catch { /* none */ }
   return out;
+}
+
+/** OTS activation (answer 3). null = OTS never activated (records without notbefore are accepted as before). */
+export async function otsActivation(db: D1Database): Promise<{ stmt: string; at: number } | null> {
+  try { const r = await db.prepare("SELECT v FROM km_key_ots_state WHERE k = 'activated'").first<{ v: string }>(); return r ? JSON.parse(r.v) : null; } catch { return null; }
+}
+/** Called only from the daily cron run that just promoted `stmtHash` (which must carry notbefore). Idempotent. */
+export async function activateOts(db: D1Database, stmtHash: string, nowS: number): Promise<boolean> {
+  try {
+    const r = await db.prepare("SELECT body_json FROM km_key_records WHERE rec_hash = ? AND kind = 'statement'").bind(stmtHash).first<{ body_json: string }>();
+    if (!r || !validNotBefore(JSON.parse(r.body_json)?.payload?.notbefore)) return false;
+    await db.prepare("INSERT OR IGNORE INTO km_key_ots_state (k, v) VALUES ('activated', ?)").bind(JSON.stringify({ stmt: stmtHash, at: nowS })).run();
+    return true;
+  } catch { return false; }
 }

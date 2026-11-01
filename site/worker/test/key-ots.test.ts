@@ -131,11 +131,13 @@ describe("OTS rule 2: notbefore + FRESH_K", () => {
 describe("OTS rule 3: order by heights only", () => {
   it("A strictly before B iff anchor(A) < notbefore(B); equal or overlapping = tie; timestamps ignored", () => {
     const c = ctx(1000); c.anchor("b1".repeat(32), 100);
-    expect(strictlyBefore(c, { hash: "b1".repeat(32) }, { notbefore: nb(101) })).toBe(true);
-    expect(strictlyBefore(c, { hash: "b1".repeat(32) }, { notbefore: nb(100) })).toBe(false);
-    expect(strictlyBefore(c, { hash: "b1".repeat(32) }, { notbefore: nb(90) })).toBe(false);
-    expect(strictlyBefore(c, { hash: "b9".repeat(32) }, { notbefore: nb(500) })).toBe(false); // unanchored
-    expect(strictlyBefore(c, { hash: "b1".repeat(32) }, {})).toBe(false); // no notbefore
+    const A = { hash: "b1".repeat(32), notbefore: nb(95) };
+    expect(strictlyBefore(c, A, { notbefore: nb(101) })).toBe(true);
+    expect(strictlyBefore(c, A, { notbefore: nb(100) })).toBe(false);
+    expect(strictlyBefore(c, A, { notbefore: nb(90) })).toBe(false);
+    expect(strictlyBefore(c, { hash: "b9".repeat(32), notbefore: nb(95) }, { notbefore: nb(500) })).toBe(false); // unanchored
+    expect(strictlyBefore(c, { hash: "b1".repeat(32) }, { notbefore: nb(500) })).toBe(false); // A unbounded (pre-OTS)
+    expect(strictlyBefore(c, A, {})).toBe(false); // B unbounded
   });
 });
 

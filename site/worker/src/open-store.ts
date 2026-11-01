@@ -6,7 +6,7 @@ import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
 import { cronHandover, currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, pubFromSkHex, statementStatus } from "./key-lifecycle";
 export { signedResultsEnabled } from "./signed-result";
-import { CONF, effectiveFreshK, loadOtsProofs, otsEnabled, stampInBackground, upgradeStamps, type OtsCalendar } from "./key-ots";
+import { CONF, activateOts, effectiveFreshK, otsActivation, loadOtsProofs, otsEnabled, stampInBackground, upgradeStamps, type OtsCalendar } from "./key-ots";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
 const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
@@ -69,7 +69,10 @@ export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?:
   const cals = otsOn ? ots.calendars ?? [] : [];
   // M3: a staged handover is promoted in this same daily run, right before the head is written (no 503 gap).
   // OTS: the promoted statement is stamped in the background (never blocks the head).
-  if (keyLifecycleEnabled(env)) { try { await cronHandover(db, env, nowS, otsOn ? (h) => stampInBackground(ots.waitUntil, db, h, cals, nowS) : undefined); } catch { /* lineage unchanged; fails closed if needed */ } }
+  let promoted: string | null = null;
+  if (keyLifecycleEnabled(env)) { try { promoted = await cronHandover(db, env, nowS, otsOn ? (h) => stampInBackground(ots.waitUntil, db, h, cals, nowS) : undefined); } catch { /* lineage unchanged; fails closed if needed */ } }
+  // OTS answer 3: activation needs a fresh statement carrying notbefore, promoted (and stamped) in THIS cron run.
+  if (otsOn && promoted && !(await otsActivation(db))) await activateOts(db, promoted, nowS);
   // OTS: one upgrade pass per daily run (no new cron, no polling).
   if (otsOn) { try { await upgradeStamps(db, cals, nowS); } catch { /* next day */ } }
   try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }

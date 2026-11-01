@@ -22,7 +22,7 @@ import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import "./nostr-verify";
 import { canonicalJson } from "./endpoint-binding";
-import { anchorOf, isStale, judgeOldKeyRevoke, validNotBefore, type NotBefore, type OtsContext } from "./key-ots";
+import { anchorOf, judgeOldKeyRevoke, otsActivation, otsCheck, validNotBefore, type NotBefore, type OtsContext } from "./key-ots";
 import { HEAD_DOMAIN, RESULT_DOMAIN, verifyResult, verifySig, type HarnessOpts, type HarnessVerdict, type HeadPayload, type ResultPayload, type Signed } from "./signed-result";
 
 export const KEYSTMT_DOMAIN = "klickymart-keystmt-v1";
@@ -119,6 +119,8 @@ export interface KeyState {
   /** OTS rule 7: old-key revokes judged valid in a dispute. Latched: a valid revoke stays terminal forever. Absent
    * unless OTS judged one (so state with KM_KEY_OTS off exports exactly as before). */
   otsValidRevokes?: string[];
+  /** OTS answer 4: header tip when this harness first saw each record (record hash -> height). Latched; OTS only. */
+  otsFirstSeenTip?: Record<string, number>;
 }
 export type AddOutcome = "accepted" | "duplicate" | "rejected";
 
@@ -176,9 +178,21 @@ export interface LineageView {
 /** Rebuild the lineage from the pinned root. Pure apart from latching st.compromised (sticky). */
 export function evaluate(st: KeyState, _nowS: number, ots?: OtsContext): LineageView {
   const chain: KeyStatement[] = [];
-  // OTS rule 2 (only with an OTS context): stale records are invalid and drop out of the lineage.
+  // OTS (only with an OTS context). first_seen_tip: the tip when this harness first saw each record (latched).
   const ex = new Set<string>();
-  if (ots) for (const r of [...st.stmts, ...st.revokes, ...st.revkeyRotations]) if (isStale(ots, r.hash, r.payload.notbefore)) ex.add(r.hash);
+  const chk = new Map<string, ReturnType<typeof otsCheck>>();
+  if (ots) {
+    const tip = ots.headers?.tip() ?? null;
+    for (const r of [...st.stmts, ...st.revokes, ...st.revkeyRotations]) {
+      if (tip !== null && st.otsFirstSeenTip?.[r.hash] === undefined) (st.otsFirstSeenTip ??= {})[r.hash] = tip;
+      const c = otsCheck(ots, r.hash, r.payload.notbefore, st.otsFirstSeenTip?.[r.hash]);
+      chk.set(r.hash, c);
+      // Statements and rotations: rejected, stale or eclipsed -> invalid, ignored. Revokes are judged below.
+      if (c !== "ok" && !("target" in r.payload)) ex.add(r.hash);
+    }
+  }
+  // Activation (OTS answer 3): once a lineage statement carries notbefore, every later statement and rotation must too.
+  const active = () => !!ots && chain.some((c) => c.payload.notbefore);
   const rotUsed: { oldKey: string; rec: RevkeyRotate }[] = [];
   let compromised = st.compromised;
   // Two different statements at one lineage position (same seq) that both chain from our lineage, or any second
@@ -190,7 +204,9 @@ export function evaluate(st: KeyState, _nowS: number, ots?: OtsContext): Lineage
     for (;;) {
       const cur = chain[chain.length - 1]!;
       const i = chain.length - 1;
-      const kids = st.stmts.filter((s) => s.payload.prev === cur.hash && s.payload.seq === cur.payload.seq + 1 && !ex.has(s.hash) && validHandover(cur, s, revKeys[i]!, st, ex));
+      const act = active();
+      if (act) for (const r of st.revkeyRotations) if (r.payload.stmt === cur.hash && !r.payload.notbefore) ex.add(r.hash);
+      const kids = st.stmts.filter((s) => s.payload.prev === cur.hash && s.payload.seq === cur.payload.seq + 1 && !ex.has(s.hash) && (!act || !!s.payload.notbefore) && validHandover(cur, s, revKeys[i]!, st, ex));
       if (!kids.length) break;
       if (kids.length > 1) { compromised = compromised ?? `fork at seq ${cur.payload.seq + 1}: ${kids.length} handovers from ${cur.hash.slice(0, 12)}`; break; }
       // Same position, different statement signed by the same key (an "edited" statement) also counts, even if it does not chain.
@@ -222,11 +238,19 @@ export function evaluate(st: KeyState, _nowS: number, ots?: OtsContext): Lineage
     const i = chain.findIndex((c) => c.hash === r.payload.target);
     if (i < 0) continue; // kept; applies if the target joins the chain later
     if (st.otsValidRevokes?.includes(r.hash)) { if (revokedFrom === null || i < revokedFrom) revokedFrom = i; continue; } // latched: terminal forever
-    if (ex.has(r.hash)) continue; // OTS rule 2: stale
-    // OTS rules 6/7: a revoke by a revocation key that a rotation replaced is judged by anchor order (heights only).
-    const rot = ots && r.payload.revocation_key !== currentRev ? rotUsed.find((x) => x.oldKey === r.payload.revocation_key) : undefined;
-    if (ots && rot) {
-      const j = judgeOldKeyRevoke(ots, r, rot.rec);
+    if (ots) {
+      const c = chk.get(r.hash) ?? "ok";
+      if (c === "reject") continue; // notbefore contradicts a known header or is > CONF above the tip
+      // OTS answer 2: revokes from the CURRENT revocation key are exempt from staleness (and from the eclipse cap).
+      if (r.payload.revocation_key === currentRev) { if (revokedFrom === null || i < revokedFrom) revokedFrom = i; continue; }
+      // OTS rules 6/7: a revoke by a revocation key that a rotation replaced is judged by anchor order (heights only).
+      const rot = rotUsed.find((x) => x.oldKey === r.payload.revocation_key);
+      if (!rot) continue;
+      if (active() && !r.payload.notbefore) continue; // OTS answer 3: after activation every record must carry notbefore
+      if (c === "stale") continue;                    // old-key revoke anchored too late: ignored
+      // OTS answer 4: notbefore never seen by any header source in time -> a tie, and the revoke wins (an eclipse may
+      // delay a resolution but never turns a valid revoke into an ignored one).
+      const j = c === "eclipsed" ? "valid" : judgeOldKeyRevoke(ots, r, rot.rec);
       if (j === "valid") { (st.otsValidRevokes ??= []).push(r.hash); if (revokedFrom === null || i < revokedFrom) revokedFrom = i; }
       else if (j === "pending" && (disputedFrom === null || i < disputedFrom)) disputedFrom = i;
       continue;
@@ -318,6 +342,7 @@ export function importKeyState(json: string, into?: KeyState): KeyState {
   for (const r of x.revokes ?? []) addRevoke(st, r);
   for (const r of x.revkeyRotations ?? []) addRevkeyRotate(st, r);
   if (x.compromised && !st.compromised) st.compromised = x.compromised;
+  for (const [h, t] of Object.entries(x.otsFirstSeenTip ?? {})) { const m = (st.otsFirstSeenTip ??= {}); m[h] = Math.min(m[h] ?? t, t); }
   for (const h of x.otsValidRevokes ?? []) if (!(st.otsValidRevokes ??= []).includes(h)) st.otsValidRevokes.push(h);
   evaluate(st, 0);
   return st;
@@ -403,6 +428,8 @@ export async function storeKeyRecord(db: D1Database, kind: KeyRecordKind, rec: K
   const probe = newKeyState("0".repeat(64));
   const out = kind === "statement" || kind === "staged_statement" ? addStatement(probe, rec as KeyStatement) : kind === "revoke" ? addRevoke(probe, rec as Revoke) : addRevkeyRotate(probe, rec as RevkeyRotate);
   if (out.outcome === "rejected") return "rejected";
+  // OTS answer 3: once OTS is activated, every lifecycle record must carry notbefore.
+  if (!(rec.payload as { notbefore?: unknown }).notbefore && (await otsActivation(db))) return "rejected";
   const body = canonicalJson(rec);
   // Whole signed record + kind: two rotations with one payload but different signatures both stay, and a staged
   // statement and its promoted copy are separate rows.
