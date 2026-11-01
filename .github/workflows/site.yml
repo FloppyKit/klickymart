@@ -8,6 +8,12 @@ on:
       - "data/**"
       - "crawler/check_append_only.py"
       - ".github/workflows/site.yml"
+  # pull_request only drives the ledgers job (PR base sha); the site job stays push-only (one run per push).
+  pull_request:
+    paths:
+      - "data/hand-*.jsonl"
+      - "crawler/check_append_only.py"
+      - ".github/workflows/site.yml"
 
 concurrency:
   group: site-${{ github.ref }}
@@ -15,17 +21,29 @@ concurrency:
 
 jobs:
   ledgers:
-    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). Full history so the merge base resolves; a bad ref fails.
+    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). Base: push -> the previous tip (github.event.before; a
+    # force-push that rewrote history makes it unreachable and the check fails closed); new branch (before = zeros) ->
+    # merge base with origin/main; pull_request -> the PR base sha. Full history so the base resolves.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Append-only ledgers vs merge base with main
+      - name: Append-only ledgers vs base
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          base="$(git merge-base origin/main HEAD)"
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then base="$(git merge-base origin/main HEAD)"
+          else base="$BEFORE"; fi
+          echo "append-only base: $base"
           python3 crawler/check_append_only.py "$base"
   site:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
