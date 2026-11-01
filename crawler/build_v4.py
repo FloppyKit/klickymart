@@ -151,7 +151,8 @@ if "bestbuy.com" in recs and has(BB, "BestBuy.com accepts these payment types:")
     r["pay_q"] = [{"c": c, "neg": False, "url": BB, "q": f"BestBuy.com accepts these payment types: ... {q}", "conf": "med", "scope": "online"} for c, q in items if has(BB, q)]
     r["pay"] = sorted({q["c"] for q in r["pay_q"]}); r["pay_online"] = r["pay"]; r["pay_instore"] = []; r["pay_unscoped"] = []
     r["evu"] = [BB]; r["pay_src"] = "store-help-page-2026-10-30"
-    r["btc"] = 0; r["btc_conf"] = "med"; r["btc_ev"] = {"url": BB, "q": "BestBuy.com accepts these payment types: (16 listed, none bitcoin)", "reason": "store's own complete payment-type list names no bitcoin option"}
+    r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_evidence=BB)
+    r["btc_conf"] = "med"; r["btc_ev"] = {"url": BB, "q": "BestBuy.com accepts these payment types: (16 listed, none bitcoin)", "reason": "store's own complete payment-type list names no bitcoin option"}
     note("bestbuy.com", "pay filled from payment-options help page (" + ",".join(r["pay"]) + "); evidence URL set; btc 0")
 SON = "https://www.sonos.com/en-us/shipping-faq"
 if "sonos.com" in recs:
@@ -160,7 +161,8 @@ if "sonos.com" in recs:
         TOS = "https://www.sonos.com/pdfs/policies/2024-11-terms-of-sale-en-us.pdf"
         r["pay_q"] = [{"c": c, "neg": False, "url": TOS, "q": "We offer various ways for you to pay for your order: Visa, MasterCard, American Express and PayPal.", "conf": "med", "scope": "online"} for c in ("card", "pp")]
         r["pay"] = ["card", "pp"]; r["pay_online"] = ["card", "pp"]; r["pay_instore"] = []; r["pay_unscoped"] = []; r["evu"] = [TOS, SON]; r["pay_src"] = "store-terms-of-sale-us"
-        r["btc"] = 0; r["btc_conf"] = "med"; r["btc_ev"] = {"url": TOS, "q": "We offer various ways for you to pay for your order: Visa, MasterCard, American Express and PayPal.", "reason": "complete US payment list names no bitcoin"}
+        r.update(btc=0, btc_src="hand", btc_grade_basis="hand", btc_grade_hand_by="KlickyBot", btc_grade_hand_at="2026-10-30", btc_grade_hand_evidence=TOS)
+        r["btc_conf"] = "med"; r["btc_ev"] = {"url": TOS, "q": "We offer various ways for you to pay for your order: Visa, MasterCard, American Express and PayPal.", "reason": "complete US payment list names no bitcoin"}
         note("sonos.com", "pay ['gift'] -> card, pp (US terms of sale; 'Gift Card Balance' link was not a payment statement); btc 0")
     if has(SON, "Shipping is always free on Sonos.com."):
         sh = r.setdefault("ship", {}); sh.update(free_min_usd=0, free_min_ev={"url": SON, "q": "Shipping is always free on Sonos.com."}, ships_us=True, ships_us_ev={"url": SON, "q": "Orders can be shipped within the continental US, Alaska, Hawaii, and Puerto Rico."})

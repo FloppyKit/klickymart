@@ -44,6 +44,18 @@ class T(unittest.TestCase):
         self.assertEqual(pay, ["btc"]); self.assertEqual(len(q), 1)
         self.assertEqual(q[0]["q"], "Yes, we accept bitcoin."); self.assert_provenance(q, u)
 
+    def test_3c_faq_question_answer_same_line_named_store(self):
+        u = "https://shop.example/help/faq"
+        pay, no, q = run(u, "help", "FAQ", "Does Example accept bitcoin? Yes, we accept bitcoin.")
+        self.assertEqual(pay, ["btc"]); self.assertEqual(no, []); self.assertEqual([x["q"] for x in q], ["Yes, we accept bitcoin."])
+        self.assert_provenance(q, u)
+
+    def test_3d_faq_question_answer_same_line_the_shop(self):
+        u = "https://shop.example/help/faq"
+        pay, no, q = run(u, "help", "FAQ", "Does the shop accept bitcoin? Yes, we accept bitcoin.")
+        self.assertEqual(pay, ["btc"]); self.assertEqual(no, []); self.assertEqual([x["q"] for x in q], ["Yes, we accept bitcoin."])
+        self.assert_provenance(q, u)
+
     def test_4_bitcoin_backed_loan_page_is_not_evidence(self):
         u = "https://lender.example/help/bitcoin-loans"
         pay, no, q = run(u, "help", "Bitcoin-backed loans | Pay interest",

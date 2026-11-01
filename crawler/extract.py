@@ -82,10 +82,10 @@ BADGE_RX = re.compile(r"(?i)^(" + _COIN + r"( (and|or|&) " + _COIN + r")?( netwo
 # is a list of accepted methods even without a verb (bitrefill help center, 2026-10-30 QA).
 LIST_ROW_RX = re.compile(r"(?i)\b(lightning|bitcoin|liquid) network\b|\bbitcoin\s+\(?btc\)?\s+\S")   # needs a network/ticker column, not a bare word
 
-def btc_payment_context(line, paypage):
+def btc_payment_context(line, paypage, check_not_payment=True):
     """BTC evidence must read as payment acceptance, not editorial text about bitcoin."""
     if BADGE_RX.match(line.strip()): return True
-    if NOT_PAYMENT_RX.search(line): return False
+    if check_not_payment and NOT_PAYMENT_RX.search(line): return False
     if ACCEPT_RX.search(line): return True
     if EDITORIAL_RX.search(line): return False
     if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
@@ -148,12 +148,15 @@ def extract_payments(texts, evidence_dir=None):
             if not ok_ctx: continue
             for code, rx in TERMS:
                 if not re.search(rx, line, flags=re.I): continue
-                if code in BTC_STRICT and not btc_payment_context(line, paypage): continue
                 # sentence-level negation: "SNAP EBT is accepted online. Cash EBT is not accepted." -> one pos, one neg
                 segs = [x for x in re.split(r"(?<=[.!?])\s+", line) if re.search(rx, x, flags=re.I)] or [line]
                 for seg in segs:
                     # FAQ gap (spec): a sentence segment ending in '?' is a question, never BTC evidence
                     if code in BTC_STRICT and seg.rstrip().endswith("?"): continue
+                    # payment context (incl. NOT_PAYMENT_RX) is judged per sentence segment, not per whole line
+                    # (the segment may still borrow payment context from its line, e.g. "Which payment methods...? Card and Bitcoin.")
+                    if code in BTC_STRICT and (NOT_PAYMENT_RX.search(seg) or not (btc_payment_context(seg, paypage)
+                                               or btc_payment_context(line, paypage, check_not_payment=False))): continue
                     neg = bool(NEG.search(seg))
                     (no if neg else pay).add(code)
                     sc = line_scope(seg, None) or line_scope(line, head_scope)

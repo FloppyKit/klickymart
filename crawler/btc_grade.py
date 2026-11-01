@@ -13,8 +13,9 @@ PRIV = re.compile(r"(?i)cashu|ecash|fedimint|silent payments?|\bark\b")
 # Basis of a grade, highest first. No numeric weights: basis only breaks ties within a grade.
 BASIS_BOUND = "bound"        # signed endpoint binding resolving when probed. NOT IMPLEMENTED: never emitted yet (hook: bound_basis)
 BASIS_OBSERVED = "observed"  # checkout probe reached the payment screen and saw a method/processor
+BASIS_HAND = "hand"          # set by a person/agent by hand (btc_src='hand'); never 'observed'. Records btc_grade_hand_by/_at/_evidence
 BASIS_CLAIMED = "claimed"    # page text only
-BASIS_ORDER = (BASIS_BOUND, BASIS_OBSERVED, BASIS_CLAIMED)
+BASIS_ORDER = (BASIS_BOUND, BASIS_OBSERVED, BASIS_HAND, BASIS_CLAIMED)   # order confirmed by Satoshi 2026-10-31
 CLAIMED_CAP = 2              # default scorer: basis 'claimed' caps at 2; 3 and 4 need 'observed' or 'bound'
 
 def bound_basis(r, probe=None):
@@ -30,13 +31,16 @@ def grade_basis(r, probe=None):
     if bound_basis(r, probe): return BASIS_BOUND
     return BASIS_OBSERVED if probe_observed(probe) else BASIS_CLAIMED
 
-def grade_sort_key(grade, basis):
-    """Sort key (ascending = best first): grade first (higher better, None last), basis breaks ties (bound > observed > claimed)."""
+def grade_sort_key(grade, basis, hand_evidence=None):
+    """Sort key (ascending = best first): grade first (higher better, None last), basis breaks ties
+    (bound > observed > hand > claimed). A 'hand' grade with no evidence url/note (btc_grade_hand_evidence) sorts with claimed;
+    its basis label stays 'hand'."""
+    if basis == BASIS_HAND and not hand_evidence: basis = BASIS_CLAIMED
     return (grade is None, -(grade if grade is not None else 0), BASIS_ORDER.index(basis) if basis in BASIS_ORDER else len(BASIS_ORDER))
 
 def grade_record(r, probe=None):
     """Return (grade|None, info dict). info: src, quote, url, reason, range, basis (every non-hand result)."""
-    if r.get("btc_src") == "hand": return r.get("btc"), {"src": "hand"}
+    if r.get("btc_src") == "hand": return r.get("btc"), {"src": "hand", "basis": BASIS_HAND}
     g, info = _grade_text(r, probe)
     if g == 0 and info.get("src") == "agent-evidence" or g == 1:
         info["basis"] = BASIS_CLAIMED   # downgrades stand at 'claimed'
@@ -84,7 +88,10 @@ def _grade_text(r, probe=None):
 def apply(r, probe=None):
     g, info = grade_record(r, probe)
     out = dict(r)
-    if info.get("src") == "hand": return out
+    if info.get("src") == "hand":
+        out["btc_grade_basis"] = BASIS_HAND   # a hand grade is never 'observed', whatever the probe saw
+        for k in ("btc_grade_hand_by", "btc_grade_hand_at", "btc_grade_hand_evidence"): out.setdefault(k, None)
+        return out
     out["btc"] = g
     out["btc_any"] = bool(info.get("quote")) and g != 0
     out["btc_src"] = "agent-evidence" if g is not None else None

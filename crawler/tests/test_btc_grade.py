@@ -62,4 +62,26 @@ class Basis(unittest.TestCase):
         self.assertEqual(sorted(items, key=lambda x: grade_sort_key(*x)),
                          [(3, "observed"), (2, "bound"), (2, "observed"), (2, "claimed"), (0, "claimed"), (None, "claimed")])
 
+class Hand(unittest.TestCase):
+    OBS = {"step_reached": "payment_methods", "methods": [{"c": "btc", "ev": "Bitcoin"}], "processors": []}
+
+    def test_hand_grade_is_never_observed(self):
+        from btc_grade import BASIS_HAND, BASIS_OBSERVED
+        r = {"btc": 3, "btc_src": "hand", "btc_grade_hand_by": "klickymart", "btc_grade_hand_at": "2026-10-30", "btc_grade_hand_evidence": "https://x.example/pay"}
+        for probe in (None, self.OBS):
+            g, info = grade_record(r, probe); self.assertEqual(info["basis"], BASIS_HAND); self.assertNotEqual(info["basis"], BASIS_OBSERVED)
+            out = apply(r, probe); self.assertEqual(out["btc_grade_basis"], BASIS_HAND); self.assertEqual(out["btc"], 3)
+            self.assertEqual(out["btc_grade_hand_evidence"], "https://x.example/pay")
+
+    def test_sort_bound_observed_hand_claimed(self):
+        from btc_grade import grade_sort_key as k
+        keys = [k(2, "claimed"), k(2, "hand", "https://x.example"), k(2, "observed"), k(2, "bound")]
+        self.assertEqual(sorted(keys), [k(2, "bound"), k(2, "observed"), k(2, "hand", "https://x.example"), k(2, "claimed")])
+
+    def test_hand_without_evidence_sorts_with_claimed(self):
+        from btc_grade import grade_sort_key as k
+        for ev in (None, ""): self.assertEqual(k(2, "hand", ev), k(2, "claimed"))
+        self.assertLess(k(2, "hand", "note: phoned store"), k(2, "claimed"))
+        r = apply({"btc": 2, "btc_src": "hand"}); self.assertEqual(r["btc_grade_basis"], "hand")
+
 if __name__ == "__main__": unittest.main()
