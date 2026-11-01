@@ -76,7 +76,9 @@ def _commit_dates(p):
     d, f = os.path.split(os.path.abspath(p))
     try:
         top = subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=30)
-        if top.returncode != 0: return fail("not inside a git checkout") if strict else None
+        if top.returncode != 0:
+            return fail("not inside a git checkout (run this inside the operator checkout of the repo, where data/ is "
+                        "tracked in git)") if strict else None
         if subprocess.run(["git", "-C", d, "ls-files", "--error-unmatch", f], capture_output=True, timeout=30).returncode != 0:
             return fail("ledger file is not tracked in git") if strict else None
         r = subprocess.run(["git", "-C", d, "blame", "--line-porcelain", "--", f], capture_output=True, text=True, timeout=30)
@@ -115,6 +117,11 @@ def _late_commit(want, written, committed, sink):
     except ValueError as e:
         _warn(f"late_commit anomaly not recorded ({e})")
 
+def _in_ledger_pass():
+    try:
+        import ledger_commit; return ledger_commit.pass_active()
+    except ImportError: return False
+
 def get_detail(k, path=None, allow_uncommitted=False, anomaly_sink=None):
     """Earliest valid row for k as {first_seen_written, first_seen_effective, committed_at, line}, or None.
     Committed rows: effective = max(written, commit date) (r5-3 clamp; never dropped for lateness). Uncommitted rows in
@@ -130,8 +137,11 @@ def get_detail(k, path=None, allow_uncommitted=False, anomaly_sink=None):
         committed = dates.get(n) if dates is not None else None
         if dates is not None and committed is None and not allow_uncommitted: continue
         eff = max(fs, committed) if committed else fs
-        if committed and committed > fs: _late_commit(want, fs, committed, anomaly_sink)
-        cand = {"first_seen_written": fs, "first_seen_effective": eff, "committed_at": committed, "line": n}
+        late = bool(committed and committed > fs)
+        # r6-1: reads are side-effect free; the late_commit anomaly is recorded only inside an active ledger pass
+        # (whose commit then includes it) or via an explicit anomaly_sink.
+        if late and (anomaly_sink is not None or _in_ledger_pass()): _late_commit(want, fs, committed, anomaly_sink)
+        cand = {"first_seen_written": fs, "first_seen_effective": eff, "committed_at": committed, "line": n, "late": late}
         if best is None or eff < best["first_seen_effective"]: best = cand
     return best
 

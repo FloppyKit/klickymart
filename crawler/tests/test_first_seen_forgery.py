@@ -73,10 +73,14 @@ def test_r5_3_late_commit_clamped_and_anomaly(tmp_path, monkeypatch):
     f.write_text(""); g("add", "."); g("commit", "-qm", "empty")
     with open(f, "a") as fh: fh.write(json.dumps({"key": list(FS.key(*K)), "first_seen": "2026-10-31"}) + "\n")
     _commit(g, "late", "2026-11-03T12:00:00Z")
-    assert FS.get(K, path=str(f)) == "2026-11-03"                       # clamped, not dropped
+    import ledger_commit as LC
+    assert FS.get(K, path=str(f)) == "2026-11-03"                       # clamped, not dropped (read: no side effects)
+    assert not HA.open_by_author()
+    with LC.ledger_pass([str(f)]):                           # the pass records the late_commit (r6-1)
+        FS.get(K, path=str(f))
     det = FS.get_detail(K, path=str(f))
     assert (det["first_seen_written"], det["first_seen_effective"], det["committed_at"]) == ("2026-10-31", "2026-11-03", "2026-11-03")
-    FS.get(K, path=str(f))                                              # second read: no duplicate anomaly
+    with LC.ledger_pass([str(f)]): FS.get(K, path=str(f))   # second pass: no duplicate anomaly
     late = [e for es in HA.open_by_author().values() for e in es if e["kind"] == "late_commit"]
     assert len(late) == 1 and late[0]["author"] == "kb" and late[0]["domain"] == "s.example"
     monkeypatch.setenv("KM_HAND_FIRST_SEEN", str(f))

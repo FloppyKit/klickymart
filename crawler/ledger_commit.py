@@ -34,6 +34,9 @@ def _gitb(cwd, *a):
 # ---- one pass: exclusive lock across append + commit (r5-4) ----
 _pass = threading.local()
 
+def pass_active():
+    return getattr(_pass, "journal", None) is not None
+
 def journal_append(p, data):
     """Called by jsonl_store.append: remember the bytes this pass wrote to each ledger."""
     j = getattr(_pass, "journal", None)
