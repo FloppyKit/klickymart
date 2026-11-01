@@ -608,7 +608,31 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
      `signed_then_expired`, `signed_under_compromised_lineage`) so a harness can show KlickyMart signed it. A revoke
      carries exactly `type`, `v`, `target`, `revocation_key`, `created_at`: no store field, no claim about any store.
   Harnesses persist revokes (restoring an older backup cannot undo one) and pin the root on two or more agreeing
-  channels. `GET /open-store/keys` serves the stored records (both switches on).
+  channels.
+- **OpenTimestamps for key records (M3, `KM_KEY_OTS`, default OFF; `site/worker/src/key-ots.ts`, migration 0021).**
+  With it off nothing changes (records carry no `notbefore`, nothing is stamped). With it on:
+  1. Every key statement, revoke and revocation-key rotation is stamped (digest = record hash); proofs are stored beside
+     the record (`km_key_ots`) and upgraded by the existing daily cron. Stamping runs in the background and never blocks
+     signing; a failure leaves the record unstamped. An anchor counts only at >= `CONF` = 6 confirmations.
+  2. Records embed `notbefore` = {height, hash} of a recent Bitcoin block. A confirmed anchor more than `FRESH_K` blocks
+     after `notbefore` (default 36, `KM_KEY_OTS_FRESH_K`, compiled max 144, PENDING SATOSHI; TODO measure real
+     calendar-to-block latency), a `notbefore` naming a block that isn't there, or an anchor with no `notbefore` = stale
+     and invalid.
+  3. A is strictly before B only if anchor(A) < notbefore(B), heights only, never block timestamps; overlap = tie.
+  4. Forks stay terminal for the whole lineage. Archived results record the key statement's anchor height as an
+     `observed` provenance field only; no salvage.
+  5. Conflicting rotations / a fork at one position: unchanged, fail closed, no anchor tiebreak.
+  6. Old revocation key R1 after R1 -> R2: an R1 revoke strictly before the rotation is valid and terminal; strictly
+     after is ignored as stale; tie, overlap or unconfirmed = the revoke wins. A rotation never erases a revoke unless it is
+     strictly before it.
+  7. In that dispute only, results fail closed (`disputed`) while anchors are pending. It resolves when all relevant
+     anchors have `CONF` confirmations, or at newest `notbefore` + `FRESH_K` + `CONF` blocks, when an unanchored record is
+     stale. A revoke judged stale was never valid (the lineage resumes); a valid revoke is latched terminal forever.
+  8. Verifiers inject Bitcoin block headers (`BlockHeaderSource`; several sources combine, a header counts only if all
+     answering sources agree, tip = lowest). No headers = anchors unconfirmed, which fails closed only in a dispute;
+     normal operation never needs OTS.
+  Proof verification and calendars are injected interfaces (`OtsProofVerifier`, `OtsCalendar`); no OTS library is
+  bundled and no calendar client ships yet (PENDING). Nothing is published (no NIP-03 kind 1040 events). `GET /open-store/keys` serves the stored records (both switches on).
 - **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
