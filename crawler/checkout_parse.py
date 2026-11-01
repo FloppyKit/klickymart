@@ -108,7 +108,10 @@ def merge(record, probe, today=None):
         url = (probe.get("path") or [[None, None]])[-1][-1]
         btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), url, today)
     elif g is not None:
-        if r.get("btc_src") == "hand": r.pop("btc_grade_conflict", None); r.pop("btc_grade_basis", None)
+        if r.get("btc_src") == "hand":
+            r.pop("btc_grade_conflict", None); r.pop("btc_grade_basis", None)
+            if r.get("btc_grade_hand_review_by") is None and r.get("btc") is not None and g != r.get("btc"):   # undated: fail open, keep old
+                btc_grade.note_conflict(r, g, btc_grade.grade_basis(r, probe), (probe.get("path") or [[None, None]])[-1][-1], today)
         r["btc"] = g; r["btc_src"] = "checkout-probe"
     priv = sorted(set(r.get("btc_priv") or []) | ({"noacct", "selfhosted", "ecash", "sp", "ark"} & set(probe.get("privacy") or [])
                   if probe.get("btc_offered") == "yes" else set()))

@@ -30,7 +30,7 @@ class Grade(unittest.TestCase):
         self.assertEqual(grade_record({"pay_q": []}, P(methods=[{"c": "card", "ev": "Card"}]))[0], 0)
         self.assertIsNone(grade_record({"pay_q": []}, P(step_reached="cart", methods=[]))[0])
     def test_hand_kept_and_apply_fields(self):
-        self.assertEqual(apply({"btc": 4, "btc_src": "hand"})["btc"], 4)
+        self.assertEqual(apply({"btc": 4, "btc_src": "hand", "btc_grade_hand_at": "2026-10-30"}, today="2026-11-01")["btc"], 4)   # dated: protected
         r = apply({"pay_q": [Q("We accept Bitcoin at checkout")], "btc": 0})
         self.assertIsNone(r["btc"]); self.assertIsNone(r["btc_src"]); self.assertTrue(r["btc_grade_reason"]); self.assertTrue(r["btc_any"])
 
@@ -82,7 +82,7 @@ class Hand(unittest.TestCase):
         from btc_grade import grade_sort_key as k
         for ev in (None, ""): self.assertEqual(k(2, "hand", ev), k(2, "claimed"))
         self.assertLess(k(2, "hand", "note: phoned store"), k(2, "claimed"))
-        r = apply({"btc": 2, "btc_src": "hand"}); self.assertEqual(r["btc_grade_basis"], "hand")
+        r = apply({"btc": 2, "btc_src": "hand", "btc_grade_hand_at": "2026-10-30"}, today="2026-11-01"); self.assertEqual(r["btc_grade_basis"], "hand")
 
 class HandReviewBy(unittest.TestCase):
     URL = "https://x.example/pay"
@@ -146,5 +146,51 @@ class HandReviewByMerge(unittest.TestCase):
             over = self.merge(r, p, today="2027-01-28")
             self.assertEqual((over["btc"], over["btc_src"]), (g, "checkout-probe"))
             self.assertNotIn("btc_grade_conflict", over)
+
+class UndatedHandFailsOpen(unittest.TestCase):
+    PROBE0 = HandReviewBy.PROBE0
+    def undated(self, g):
+        return {"d": "x.example", "btc": g, "btc_src": "hand", "btc_grade_basis": "hand", "btc_grade_hand_evidence": "https://x.example/pay"}
+    def test_undated_disagreeing_probe_overwrites_and_keeps_old_hand(self):
+        from btc_grade import hand_protected
+        self.assertFalse(hand_protected(self.undated(2), today="2026-11-01"))
+        out = apply(self.undated(2), self.PROBE0, today="2026-11-01")
+        self.assertEqual((out["btc"], out["btc_src"], out["btc_grade_basis"]), (0, "agent-evidence", "claimed"))
+        c = out["btc_grade_conflict"]
+        self.assertEqual(c["hand"], {"grade": 2, "basis": "hand"})
+        self.assertEqual((c["probe"]["grade"], c["probe"]["url"], c["seen_at"]), (0, "https://x.example/checkout", "2026-11-01"))
+    def test_undated_agreeing_probe_no_conflict(self):
+        out = apply(self.undated(0), self.PROBE0, today="2026-11-01")
+        self.assertEqual(out["btc"], 0); self.assertNotIn("btc_grade_conflict", out)
+    def test_undated_merge_fails_open(self):
+        from checkout_parse import merge
+        p = HandReviewByMerge().probe(False)
+        out = merge({"d": "x.example", "btc": 3, "btc_src": "hand"}, p, today="2026-11-01")
+        self.assertEqual((out["btc"], out["btc_src"]), (0, "checkout-probe"))
+        self.assertEqual(out["btc_grade_conflict"]["hand"], {"grade": 3, "basis": "hand"})
+        self.assertNotIn("btc_grade_conflict", merge({"d": "x.example", "btc": 0, "btc_src": "hand"}, p, today="2026-11-01"))
+
+class ValidateHandOverride(unittest.TestCase):
+    OK = {"btc": 0, "btc_src": "hand", "btc_grade_hand_at": "2026-10-30", "btc_grade_hand_evidence": "https://x.example/pay"}
+    def test_validator(self):
+        from btc_grade import validate_hand_override
+        validate_hand_override(self.OK)
+        validate_hand_override(dict(self.OK, btc_grade_hand_evidence=["https://a.example/1", "https://b.example/2"]))
+        for bad in ({"btc_grade_hand_at": None}, {"btc_grade_hand_at": "soon"}, {"btc_grade_hand_evidence": None},
+                    {"btc_grade_hand_evidence": ""}, {"btc_grade_hand_evidence": "a note"}, {"btc_grade_hand_evidence": []}):
+            with self.assertRaises(ValueError, msg=bad): validate_hand_override(dict(self.OK, **bad))
+    def test_existing_build_v4_overrides_pass(self):
+        from btc_grade import validate_hand_override
+        for ev in ("https://www.bestbuy.com/site/help-topics/payment-options/pcmcat203400050003.c?id=pcmcat203400050003",
+                   "https://www.sonos.com/pdfs/policies/2024-11-terms-of-sale-en-us.pdf"):
+            validate_hand_override(dict(self.OK, btc_grade_hand_evidence=ev))
+    def test_build_v4_writer_skips_invalid_without_raising(self):
+        from btc_grade import write_hand_override
+        logs = []; r = {"d": "x.example", "btc": 2, "btc_src": "agent-evidence"}
+        self.assertFalse(write_hand_override(r, log=logs.append, btc=0, btc_grade_hand_by="kb", btc_grade_hand_evidence="https://x.example/pay"))
+        self.assertEqual(r, {"d": "x.example", "btc": 2, "btc_src": "agent-evidence"})
+        self.assertIn("hand override skipped", logs[0])
+        self.assertTrue(write_hand_override(r, log=logs.append, btc=0, btc_grade_hand_at="2026-10-30", btc_grade_hand_evidence="https://x.example/pay"))
+        self.assertEqual((r["btc"], r["btc_src"], r["btc_grade_basis"], r["btc_grade_hand_review_by"]), (0, "hand", "hand", "2027-01-28"))
 
 if __name__ == "__main__": unittest.main()

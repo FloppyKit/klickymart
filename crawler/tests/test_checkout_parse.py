@@ -58,7 +58,7 @@ class Merge(unittest.TestCase):
         self.assertEqual(m["btc_priv"], ["noacct", "selfhosted"]); self.assertEqual(m["pay_checkout"], ["card", "ln"])
         self.assertEqual(self.R["btc"], None)   # input not mutated
     def test_no_downgrade_hand_grade(self):
-        m = merge(dict(self.R, btc=4, btc_src="hand"), self.P); self.assertEqual(m["btc"], 4)
+        m = merge(dict(self.R, btc=4, btc_src="hand", btc_grade_hand_at="2026-10-30"), self.P, today="2026-11-01"); self.assertEqual(m["btc"], 4)
     def test_inconclusive_keeps_grade(self):
         m = merge(dict(self.R, btc=2), dict(self.P, btc_offered="unknown", step_reached="cart", privacy=[]))
         self.assertEqual(m["btc"], 2); self.assertNotIn("btc_priv", m); self.assertNotIn("pay_checkout", m)
