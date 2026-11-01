@@ -23,12 +23,20 @@ def bolt11_amount(inv):
 CAP = 4096  # max chars stored for any raw challenge string
 _cap = lambda v: v[:CAP] if isinstance(v, str) else v
 
+_PARSE_CAP = 16384
+_L402_START = re.compile(r'(?i)(?:^|,)\s*(L402|LSAT)(?=\s)\s*(.*)', re.S)
+_PARAM = re.compile(r'(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)[ \t]*=[ \t]*(?:"([^"]*)"|([^",\s]+))')
+_BOLT11 = re.compile(r'(?i)ln(?:bc|tb|bcrt)[0-9a-z]*1[02-9ac-hj-np-z]+$')
 def l402_challenge(wa):
     """Parse an L402/LSAT WWW-Authenticate value into {scheme, macaroon, invoice, params, raw}. Store only; never pays."""
-    m = re.search(r'(?i)\b(L402|LSAT)\b\s*(.*)', wa or "")
+    # P2-4: the scheme must start the header value or a comma-separated challenge, not appear inside free text;
+    # P2-3: params are matched only at token starts (lookbehind), so the scan is linear, and input is capped first.
+    wa = wa or ""
+    m = _L402_START.search(wa[:_PARSE_CAP])
     if not m: return None
-    params = {k.lower(): (q if q else u) for k, q, u in re.findall(r'([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|([^",\s]+))', m.group(2))}
+    params = {k.lower(): (q if q else u) for k, q, u in _PARAM.findall(m.group(2))}
     if not params.get("invoice") or not params.get("macaroon"): return None
+    if not _BOLT11.match(params["invoice"].strip()): return None
     inv = params.pop("invoice").strip(); mac = params.pop("macaroon").strip()
     return {"scheme": m.group(1).upper(), "invoice": _cap(inv), "macaroon": _cap(mac), "macaroon_len": len(mac),
             "params": {k: _cap(v) for k, v in params.items()}, "raw": _cap(wa), "truncated": len(wa) > CAP or len(inv) > CAP or len(mac) > CAP}
