@@ -13,7 +13,7 @@ import { loadTips, summarize, curators, tipWeight, setCustodialZapperKeys, custo
 import { loadAggregates, experienceTemplate } from "../src/experience";
 
 const DOM = "store.google.com";
-const OUR = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242";
+const OUR = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242"; // secret-scan: allow (public pubkey)
 const ctx = (): IngestCtx => ({ domains: new Set([DOM]), ourPubkey: OUR });
 const key = () => secp.utils.randomSecretKey();
 const pk = (sk: Uint8Array) => bytesToHex(secp.schnorr.getPublicKey(sk));

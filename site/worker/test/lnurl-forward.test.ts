@@ -199,7 +199,7 @@ describe("R9-003 / R9-008 / R9-009 zap@ hardening", () => {
 describe("zap@ invoice checks (plain-payment fix)", () => {
   const ph = () => bytesToHex(sha256(enc(String(Math.random()))));
   // Primal's real behaviour (checked live 2026-10-31): description_hash is a constant unrelated to metadata or the 9734.
-  const PRIMAL_DH = "f5e3ee151af383d51e9bc2718781355c52fa13ab3a91a9620de0cbd599b5191a";
+  const PRIMAL_DH = "f5e3ee151af383d51e9bc2718781355c52fa13ab3a91a9620de0cbd599b5191a"; // secret-scan: allow (public pubkey)
   it("accepts a 1-sat mainnet invoice with the right amount even when description_hash commits to neither metadata nor 9734", () => {
     const pr = encodeBolt11ForTest(NODE, "lnbc10n", ph(), { descriptionHashHex: PRIMAL_DH });
     const r = checkForwardInvoice(pr, 1000); expect(r.ok).toBe(true);

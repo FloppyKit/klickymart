@@ -8,7 +8,7 @@ import { buildSummaryJson } from "../src/summary-json";
 import { NOSTR_KIND_CRAWL_RECORD } from "../src/nostr-kinds";
 import wranglerToml from "../../wrangler.toml?raw";
 
-const CRAWLER_HEX = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242";
+const CRAWLER_HEX = "3ac44bd91d4a0544403a0dfe4edc468c0f4e1ec8a26f2b2f58e979abe34d3242"; // secret-scan: allow (public crawler pubkey)
 const CRAWLER_NPUB = "npub18tzyhkgafgz5gsp6phlyahzx3s85u8kg5fhjkt6ca9u6hc6dxfpqe6z979";
 
 async function embeddedSnapshot() {

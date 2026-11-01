@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import egress, gate
 
 MAC = "AgEDbG5kAvgBAwoQSecretMacaroonBytes0123"
-PRE = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+PRE = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"  # secret-scan: allow (fake test prefix)
 CASES = [
     ("auth-l402", f"Authorization: L402 {MAC}:{PRE}", [MAC, PRE]),
     ("auth-lsat", f"authorization: LSAT {MAC}:{PRE}", [MAC, PRE]),

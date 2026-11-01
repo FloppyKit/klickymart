@@ -27,7 +27,7 @@ def test_p1_1_exact_hosts_allowed_over_https():
               "https://openrouter.ai/api/v1/chat/completions", "https://rdap.org/domain/example.com"):
         assert gate.check(u) == "api host"
 
-SECRET_URL = "ftp://u:TOKENxyz123@h.example/p?macaroon=MACsecret987&x=1"
+SECRET_URL = "ftp://u:TOKENxyz123@h.example/p?macaroon=MACsecret987&x=1"  # secret-scan: allow (fake credential in a test URL)
 
 def test_p2_1_reason_and_url_redacted_for_non_http(tmp_path):
     with pytest.raises(gate.GateRefused) as ei: gate.check(SECRET_URL)
