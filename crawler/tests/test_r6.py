@@ -74,12 +74,10 @@ def test_note_c_lock_wait_times_out(repo, monkeypatch):
             with LC.ledger_pass(): pass
     finally: fcntl.flock(fd, fcntl.LOCK_UN); os.close(fd)
 
-def test_r6_2_ledgers_job_concurrency_and_stable_base():
+def test_r6_2_ledgers_job_concurrency_and_delegates_to_script():
+    """Wiring only; the base-selection and scan behavior is tested in tests/test_ci_ledger_check.py."""
     import re
     text = open(os.path.join(REPO, ".github", "workflows", "site.yml")).read()
     j = re.search(r"(?ms)^  ledgers:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", text).group(1)
     assert re.search(r"(?m)^    concurrency:\n      group: ledgers-\$\{\{ github\.ref \}\}\n      cancel-in-progress: false$", j)
-    assert "git merge-base origin/main HEAD" in j and "${{ github.event.before }}" in j
-    assert "refs/heads/main" in j                                   # main checks event.before AND merge base (both must pass)
-    run = j[j.index("run: |"):]
-    assert run.count("check_append_only.py") >= 2
+    assert "crawler/ci_ledger_check.py" in j and "AND merge base" not in j

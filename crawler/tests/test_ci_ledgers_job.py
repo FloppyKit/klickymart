@@ -19,9 +19,9 @@ def test_ledgers_job_base_and_permissions():
     j = _job(text, "ledgers")
     assert re.search(r"(?m)^    permissions:\n      contents: read$", j)
     assert "fetch-depth: 0" in j
-    assert "${{ github.event.before }}" in j
-    assert "${{ github.event.pull_request.base.sha }}" in j
-    assert re.search(r"0{40}", j) and "git merge-base origin/main HEAD" in j   # new-branch fallback
-    assert 'check_append_only.py "$PR_BASE"' in j and 'check_append_only.py "$BEFORE"' in j
+    for expr in ("${{ github.event_name }}", "${{ github.ref }}", "${{ github.event.before }}", "${{ github.event.pull_request.base.sha }}"):
+        assert expr in j
+    assert 'crawler/ci_ledger_check.py --event "$EVENT" --ref "$REF" --before "$BEFORE" --pr-base "$PR_BASE"' in j
     assert re.search(r"(?m)^  pull_request:", text)
     assert "if: github.event_name == 'push'" in _job(text, "site")          # site job keeps its one-run-per-push rule
+    assert "needs:" not in _job(text, "site")

@@ -7,12 +7,14 @@ on:
       - "site/**"
       - "data/**"
       - "crawler/check_append_only.py"
+      - "crawler/ci_ledger_check.py"
       - ".github/workflows/site.yml"
   # pull_request only drives the ledgers job (PR base sha); the site job stays push-only (one run per push).
   pull_request:
     paths:
       - "data/hand-*.jsonl"
       - "crawler/check_append_only.py"
+      - "crawler/ci_ledger_check.py"
       - ".github/workflows/site.yml"
 
 concurrency:
@@ -21,12 +23,10 @@ concurrency:
 
 jobs:
   ledgers:
-    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). r6-2: own concurrency group, never cancelled, and a stable
-    # base so a cancelled/skipped run can't hide a rewrite:
-    #   pull_request -> the PR base sha
-    #   push, non-main -> merge base with origin/main (stable across pushes)
-    #   push, main -> github.event.before (an unreachable old tip after a force-push fails closed) AND every ancestor
-    #                 commit that touched the ledgers (each must be a line prefix of today's files)
+    # data/hand-*.jsonl are append-only (Satoshi 2026-10-31). Logic lives in crawler/ci_ledger_check.py (tested in
+    # crawler/tests/test_ci_ledger_check.py): PR -> PR base sha; branch push -> before, or merge-base with origin/main for a
+    # new branch; main push -> before must resolve, then every ledger commit reachable from HEAD is checked against its
+    # own parent(s) (merges: all parent rows kept, so merge=union merges pass). Own concurrency group, never cancelled.
     # Advisory until Matt marks "ledgers" a required check and disables force-push on main (branch protection).
     runs-on: ubuntu-latest
     permissions:
@@ -38,26 +38,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Append-only ledgers vs stable base
+      - name: Append-only ledgers
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -e
-          if [ "$EVENT" = "pull_request" ]; then
-            python3 crawler/check_append_only.py "$PR_BASE"
-          elif [ "$REF" != "refs/heads/main" ]; then
-            python3 crawler/check_append_only.py "$(git merge-base origin/main HEAD)"
-          else
-            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-              python3 crawler/check_append_only.py "$BEFORE"
-            fi
-            for c in $(git log --format=%H -- data/hand-first-seen.jsonl data/hand-anomalies.jsonl); do
-              python3 crawler/check_append_only.py "$c"
-            done
-          fi
+        run: python3 crawler/ci_ledger_check.py --event "$EVENT" --ref "$REF" --before "$BEFORE" --pr-base "$PR_BASE"
   site:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
