@@ -1,5 +1,6 @@
-import os, tempfile, pytest
+import atexit, os, shutil, tempfile, pytest
 _TMP = tempfile.mkdtemp(prefix="km-ledgers-")
+atexit.register(shutil.rmtree, _TMP, True)   # post-verify 2026-11-01: was leaked once per pytest run
 # hermetic: hard-set (not setdefault) so a shell-exported path can never make tests touch a real ledger/store
 os.environ["KM_LEDGER_AUTOCOMMIT"] = "0"   # tests never commit the real ledgers; autocommit tests use a temp repo
 os.environ["KM_TEST_LEDGERS"] = "1"   # only tests may point the ledgers at tmp
@@ -11,3 +12,7 @@ def _ledger_env(monkeypatch, tmp_path):
     monkeypatch.setenv("KM_TEST_LEDGERS", "1"); monkeypatch.setenv("KM_LEDGER_AUTOCOMMIT", "0")
     monkeypatch.setenv("KM_HAND_ANOMALIES", str(tmp_path / "hand-anomalies.jsonl"))
     monkeypatch.setenv("KM_HAND_FIRST_SEEN", str(tmp_path / "hand-first-seen.jsonl"))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    shutil.rmtree(_TMP, ignore_errors=True)
