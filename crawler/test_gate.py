@@ -20,7 +20,6 @@ class TestEveryFetchHelperIsGated(unittest.TestCase):
         for p in sorted(glob.glob(os.path.join(HERE, "*.py"))):
             name = os.path.basename(p)
             if name in ("gate.py", "test_gate.py", "egress.py", "egress_proxy.py") or name.startswith("test_"): continue  # the gate layer itself
-            if name == "pending_sites.py": continue  # reads only our own API (klickymart.com, gate.API_HOSTS), public-repo tool
             src = open(p).read()
             if not any(k in src for k in FETCH): continue
             if not (imported(p) & GATED_IMPORTS): bad.append(name)

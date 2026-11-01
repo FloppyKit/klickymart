@@ -90,6 +90,12 @@ def btc_payment_context(line, paypage):
     if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
     return bool(paypage and CTX.search(line))
 
+def btc_provenance(q):
+    """Spec v9.2 s1: BTC evidence read from page text is what the store says, never something KlickyMart observed.
+    snapshot_id: crawl records carry no snapshot/evidence id yet, so it is None (url + quote are the provenance)."""
+    q["provenance"] = "store-asserted"; q["snapshot_id"] = None
+    return q
+
 def extract_payments(texts):
     pay, no, quotes = set(), set(), []
     for url, step, title, t in texts:
@@ -115,13 +121,14 @@ def extract_payments(texts):
                     (no if neg else pay).add(code)
                     sc = line_scope(seg, None) or line_scope(line, head_scope)
                     if not any(q["c"] == code and q["neg"] == neg and q["scope"] == sc for q in quotes):
-                        quotes.append({"c": code, "neg": neg, "url": url, "q": seg[:240],
-                                       "conf": "med" if paypage else "low", "scope": sc})
+                        q = {"c": code, "neg": neg, "url": url, "q": seg[:240],
+                             "conf": "med" if paypage else "low", "scope": sc}
+                        quotes.append(btc_provenance(q) if code in BTC_STRICT else q)
         for i, line in enumerate(lines):
             if ugc[i]: continue
             if re.search(r"(?i)on-?chain payments only", line):
                 no.add("ln"); pay.discard("ln")
-                quotes.append({"c": "ln", "neg": True, "url": url, "q": line[:240], "conf": "med", "scope": line_scope(line)})
+                quotes.append(btc_provenance({"c": "ln", "neg": True, "url": url, "q": line[:240], "conf": "med", "scope": line_scope(line)}))
     if pay & {"btc", "eth", "usdt", "usdc", "ltc", "xmr"}: pay.discard("crypto")
     return sorted(pay), sorted(no - pay), quotes
 
