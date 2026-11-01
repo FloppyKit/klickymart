@@ -360,7 +360,9 @@ export async function storeKeyRecord(db: D1Database, kind: KeyRecordKind, rec: K
   const out = kind === "statement" || kind === "staged_statement" ? addStatement(probe, rec as KeyStatement) : kind === "revoke" ? addRevoke(probe, rec as Revoke) : addRevkeyRotate(probe, rec as RevkeyRotate);
   if (out.outcome === "rejected") return "rejected";
   const body = canonicalJson(rec);
-  const id = bytesToHex(sha256(utf8ToBytes(body))); // whole signed record: two rotations with one payload but different signatures both stay
+  // Whole signed record + kind: two rotations with one payload but different signatures both stay, and a staged
+  // statement and its promoted copy are separate rows.
+  const id = bytesToHex(sha256(utf8ToBytes(`${kind}\n${body}`)));
   const r = await db.prepare("INSERT OR IGNORE INTO km_key_records (id, rec_hash, kind, body_json, seen_at) VALUES (?,?,?,?,?)").bind(id, rec.hash, kind, body, nowS).run();
   return (r.meta?.changes ?? 0) > 0 ? "accepted" : "duplicate";
 }
