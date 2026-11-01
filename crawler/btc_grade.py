@@ -8,6 +8,7 @@ SELF = re.compile(r"(?i)btcpay|own (lightning )?node|self-hosted")
 CUSTODIAL = re.compile(r"(?i)confirmo|opennode|strike|bitpay|coinbase commerce|zaprite|ibex|speed|blink|nowpayments|coingate")
 FIAT_CONVERT = re.compile(r"(?i)crypto (debit )?card|via (an )?exchange|coinbase account|requires? (an )?account")
 NOACCT_TEXT = re.compile(r"(?i)only the minimum (necessary )?shipping information|no account (is )?(needed|required)|without (creating )?an account|guest checkout")
+BTC_PROCESSORS = {"btcpay", "opennode", "strike", "bitpay", "zaprite", "ibex", "blink", "speed", "confirmo", "coingate", "nowpayments", "coinbase", "coinbase commerce"}
 PRIV = re.compile(r"(?i)cashu|ecash|fedimint|silent payments?|\bark\b")
 
 # Basis of a grade, highest first. No numeric weights: basis only breaks ties within a grade.
@@ -23,9 +24,12 @@ def bound_basis(r, probe=None):
     return False
 
 def probe_observed(probe):
-    """'observed': probe reached the payment screen and its methods or processors are non-empty."""
+    """'observed': probe reached the payment screen AND itself showed bitcoin: a BTC method, or a bitcoin processor
+    (P1-2: a card-only payment screen must not launder page-text bitcoin claims into 'observed')."""
     p = probe or {}
-    return p.get("step_reached") == "payment_methods" and bool(p.get("methods") or p.get("processors"))
+    if p.get("step_reached") != "payment_methods": return False
+    return any(m.get("c") in BTC for m in p.get("methods") or []) or \
+        any((x.get("p") or "").lower() in BTC_PROCESSORS for x in p.get("processors") or [])
 
 def grade_basis(r, probe=None):
     if bound_basis(r, probe): return BASIS_BOUND
