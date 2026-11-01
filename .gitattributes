@@ -1,0 +1,3 @@
+# append-only ledgers: both sides of concurrent appends are kept (no manual conflict resolve)
+data/hand-first-seen.jsonl merge=union
+data/hand-anomalies.jsonl merge=union
