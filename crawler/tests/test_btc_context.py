@@ -1,6 +1,8 @@
 import os, sys, unittest
 HERE = os.path.dirname(__file__); sys.path.insert(0, os.path.dirname(HERE))
 from extract import extract_payments, btc_payment_context
+FAQ = "https://s.example/faq/payment"
+def ex(line, url=FAQ, step="help"): return extract_payments([(url, step, "Site", line)])
 
 def pay(line, step="home", url="https://site.example/"):
     return extract_payments([(url, step, "Site", line)])[0]
@@ -42,5 +44,21 @@ class BtcContext(unittest.TestCase):
         self.assertNotIn("btc", pay(l, "help", "https://s.example/faq/payment"))
         # same answer after a CTX question does borrow
         self.assertIn("btc", pay("Which payment methods do you take? Bitcoin is available.", "help", "https://s.example/faq/payment"))
+
+    # P2-5 (Satoshi 2026-10-31)
+    def test_p2_5_ctx_question_does_not_launder_unrelated_btc(self):
+        r = ex("Do you accept payment by card? We love Bitcoin memes.")
+        self.assertNotIn("btc", r[0]); self.assertFalse([q for q in r[2] if q["c"] == "btc"])
+        self.assertIn("btc", pay("Which payment methods do you take? Card, PayPal and Bitcoin are available.", "help", FAQ))
+
+    def test_p2_5_scoped_exception_keeps_positive(self):
+        r = ex("Payment: Visa, Mastercard, Bitcoin (not accepted for gift cards).")
+        self.assertIn("btc", r[0]); self.assertNotIn("btc", r[1])
+        q = [q for q in r[2] if q["c"] == "btc"][0]
+        self.assertFalse(q["neg"]); self.assertEqual(q.get("scope_note"), "not accepted for gift cards")
+
+    def test_p2_5_plain_negation_is_negative(self):
+        r = ex("Bitcoin is not accepted.")
+        self.assertNotIn("btc", r[0]); self.assertIn("btc", r[1])
 
 if __name__ == "__main__": unittest.main()

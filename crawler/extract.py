@@ -91,9 +91,20 @@ def btc_payment_context(line, paypage):
     if paypage and LIST_ROW_RX.search(line) and len(line) <= 100: return True   # payment-method table/list row
     return bool(paypage and CTX.search(line))
 
-def question_lends_context(prev):
-    """True when prev (the segment immediately before, same line) is a question that itself names payment (CTX)."""
-    return bool(prev) and prev.rstrip().endswith("?") and bool(CTX.search(prev))
+# P2-5 (Satoshi 2026-10-31): the answer must itself name BTC as a payment option: next to another payment method or an
+# acceptance word. "Do you accept payment by card? We love Bitcoin memes." lends nothing.
+OTHER_METHOD_RX = re.compile(r"(?i)\b(cards?|credit|debit|visa|master\s?card|amex|american express|discover|paypal|apple pay|google pay|"
+                             r"venmo|klarna|afterpay|affirm|bank transfer|wire|ach|cash|ideal|sofort|alipay|wechat pay|usdc|usdt|ethereum|litecoin|monero)\b")
+ACCEPT_WORD_RX = re.compile(r"(?i)\b(accept(s|ed|ing)?|take|takes|taken|pay(ing)? (with|by|via|using)|payable|available|supported|options?|methods?)\b")
+def question_lends_context(prev, seg=""):
+    """True when prev (the segment immediately before, same line) is a question that itself names payment (CTX) AND the
+    answer seg names bitcoin as a payment option (beside another payment method or an acceptance word)."""
+    if not (prev and prev.rstrip().endswith("?") and CTX.search(prev)): return False
+    return bool(OTHER_METHOD_RX.search(seg or "") or ACCEPT_WORD_RX.search(seg or ""))
+
+# P2-5 suppression: a parenthetical scoped exception ("(not accepted for gift cards)") negates its own scope, not the
+# methods listed before it. It is stripped before NEG/NOT_PAYMENT and kept with the quote as scope_note.
+SCOPED_EXC_RX = re.compile(r"(?i)\(\s*((?:not|except|excluding|unavailable|n/a)\b[^()]{0,80}?\b(?:for|on|with|in)\b[^()]{1,60}?)\s*\)")
 
 def normalize_text(t):
     """Evidence normalization (the ONE definition; evidence_sha hashes its UTF-8 bytes):
@@ -161,14 +172,18 @@ def extract_payments(texts, evidence_dir=None):
                     # payment context (incl. NOT_PAYMENT_RX) is judged per sentence segment, not per whole line
                     # a segment may borrow context ONLY from the question segment immediately before it, and only when that
                     # question matches CTX ("Which payment methods do you take? Card and Bitcoin."); nothing else on the line lends
-                    if code in BTC_STRICT and (NOT_PAYMENT_RX.search(seg) or not (btc_payment_context(seg, paypage)
-                                               or question_lends_context(prev))): continue
-                    neg = bool(NEG.search(seg))
+                    m_exc = SCOPED_EXC_RX.search(seg)
+                    core = SCOPED_EXC_RX.sub("", seg) if m_exc else seg
+                    if m_exc and not re.search(rx, core, flags=re.I): core, m_exc = seg, None   # term only inside the exception
+                    if code in BTC_STRICT and (NOT_PAYMENT_RX.search(core) or not (btc_payment_context(core, paypage)
+                                               or question_lends_context(prev, core))): continue
+                    neg = bool(NEG.search(core))
                     (no if neg else pay).add(code)
                     sc = line_scope(seg, None) or line_scope(line, head_scope)
                     if not any(q["c"] == code and q["neg"] == neg and q["scope"] == sc for q in quotes):
                         q = {"c": code, "neg": neg, "url": url, "q": seg[:240],
                              "conf": "med" if paypage else "low", "scope": sc}
+                        if m_exc: q["scope_note"] = m_exc.group(1).strip()
                         quotes.append(prov(q) if code in BTC_STRICT else q)
         for i, line in enumerate(lines):
             if ugc[i]: continue
