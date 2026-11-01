@@ -68,6 +68,18 @@ def begin_pass(paths=None):
 def end_pass(ctx):
     ctx.__exit__(None, None, None)
 
+def _head_blob(top, r):
+    """r6-3: HEAD's bytes for r. Empty ONLY when r is truly absent from HEAD (ls-tree says so); any other failure raises."""
+    lt = _git(top, "ls-tree", "--name-only", "HEAD", "--", r)
+    if lt.returncode != 0:
+        if _git(top, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0: return b""   # unborn branch: no HEAD yet
+        raise LedgerCommitError(f"cannot read the HEAD baseline for {r}: git ls-tree failed: {lt.stderr.strip()[:200]}")
+    if not lt.stdout.strip(): return b""                                  # new file, not in HEAD
+    h = _gitb(top, "show", f"HEAD:{r}")
+    if h.returncode != 0:
+        raise LedgerCommitError(f"cannot read the HEAD baseline for {r}: git show failed: {h.stderr.decode(errors='replace').strip()[:200]}")
+    return h.stdout
+
 def flush_and_commit(paths=None, journal=None):
     """Commit this pass's ledger appends only. Returns True when a commit was made. Raises LedgerCommitError on any
     failure once autocommit is on (r5-4/5/6/7); only 'autocommit off' and 'not a git checkout' just warn."""
@@ -95,8 +107,7 @@ def flush_and_commit(paths=None, journal=None):
     from check_append_only import check_bytes
     head, expect = {}, {}
     for p, r in zip(paths, rel):
-        h = _gitb(top, "show", f"HEAD:{r}")
-        head[r] = h.stdout if h.returncode == 0 else b""
+        head[r] = _head_blob(top, r)
         cur = open(p, "rb").read()
         why = check_bytes(head[r], cur)                              # r5-5: whole-line appends only vs HEAD
         if why: raise LedgerCommitError(f"refusing to commit {r}: not append-only vs HEAD ({why})")
@@ -104,7 +115,9 @@ def flush_and_commit(paths=None, journal=None):
             mine = journal.get(os.path.realpath(p), b"")
             if cur != head[r] + mine:
                 raise LedgerCommitError(f"refusing to commit {r}: it holds uncommitted rows not written by this pass "
-                                        f"({len(cur) - len(head[r]) - len(mine)} extra bytes); commit or remove them by hand")
+                                        f"({len(cur) - len(head[r]) - len(mine)} extra bytes). To recover, commit or remove them by "
+                                        f"hand: review `git -C {top} diff -- {r}`, then either `git -C {top} commit --only -- {r}` "
+                                        f"or `git -C {top} checkout -- {r}`, and rerun the pass")
         expect[r] = cur
     untracked = [l[3:] for l in st.stdout.splitlines() if l.startswith("??")]
     if untracked:
