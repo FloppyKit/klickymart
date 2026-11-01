@@ -176,6 +176,12 @@ def install():
         _install_playwright(proxy)
         _installed = True
 
+def _force_block_sw(k):
+    """d3: always block service workers; a caller asking for 'allow' is overridden (and logged)."""
+    if k.get("service_workers") not in (None, "block"):
+        import sys; print(f"gate: service_workers={k['service_workers']!r} overridden to 'block'", file=sys.stderr)
+    k["service_workers"] = "block"
+
 def _install_playwright(proxy):
     import importlib.util
     try:
@@ -217,12 +223,12 @@ def _install_playwright(proxy):
     for cls, name in ((Browser, "new_context"), (BrowserType, "launch_persistent_context")):
         orig = getattr(cls, name)
         def wrap(self, *a, __orig=orig, **k):
-            k.setdefault("service_workers", "block")   # d3: service workers would bypass ctx.route (robots/terms)
+            _force_block_sw(k)   # d3: service workers would bypass ctx.route (robots/terms)
             return gate_ctx(__orig(self, *a, **k))
         setattr(cls, name, wrap)
     orig_np = Browser.new_page
     def new_page(self, *a, **k):
-        k.setdefault("service_workers", "block")   # d3: Browser.new_page makes its own context
+        _force_block_sw(k)   # d3: Browser.new_page makes its own context
         p = orig_np(self, *a, **k); gate_ctx(p.context); return p
     Browser.new_page = new_page
     from playwright.sync_api._generated import Page

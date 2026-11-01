@@ -51,6 +51,8 @@ def test_d3_contexts_block_service_workers():
         gate.start_egress_proxy = lambda: 'http://127.0.0.1:9'
         gate.install()
         Browser.new_context(object()); BrowserType.launch_persistent_context(object(), '/tmp/x'); Browser.new_page(object())
+        Browser.new_context(object(), service_workers='allow'); BrowserType.launch_persistent_context(object(), '/tmp/x', service_workers='allow')
+        Browser.new_page(object(), service_workers='allow')
         print(seen)
     """)
-    assert out == "['block', 'block', 'block']", out
+    assert out == "['block', 'block', 'block', 'block', 'block', 'block']", out   # 'allow' is overridden
