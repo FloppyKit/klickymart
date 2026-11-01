@@ -11,7 +11,9 @@ Corrupt lines are skipped and counted.
 p2-e (forged older rows): a row is valid only if first_seen is not earlier than its hand_at (when hand_at is parseable and
 not in the future; future-dated rows exist precisely because first_seen < hand_at), checked at write AND read, and, for
 a tracked file in a git checkout, not earlier than the commit date that introduced the line (git blame). Uncommitted
-lines are operator-local and trusted. get() is the min over valid rows only. This narrows forgery to "no earlier than
+lines don't count (r5-2) except for the same-pass writer (allow_uncommitted=True). Committed rows are CLAMPED to their
+commit date (r5-3: effective = max(written, commit date)) and a late commit is recorded as a late_commit anomaly.
+get() is the min over valid rows only. Trust boundary: crawler/LEDGER-TRUST.md, 'Accepted residual: operator trust line'. This narrows forgery to "no earlier than
 the commit"; operator-key signing of rows (v9.2 key lifecycle, gated on Matt's go) closes it fully later."""
 import datetime, json, os, shutil, subprocess, sys, threading
 import jsonl_store
@@ -53,27 +55,42 @@ def _hand_floor_ok(k, first_seen):
     if at_d > _today_utc(): return True
     return first_seen >= at_d
 
+class LedgerTrustError(RuntimeError):
+    """The tracked ledger's commit-date floor can't be established (git missing / blame failed): fail closed."""
+
+def _is_tracked_data(p):
+    real = os.path.realpath(p)
+    return real.startswith(os.path.realpath(jsonl_store.DATA).rstrip(os.sep) + os.sep)
+
 def _commit_dates(p):
-    """{line_no: committer UTC date} for committed lines of a git-tracked file; None when not applicable/available."""
-    if not shutil.which("git"):
-        _warn("git unavailable: commit-date check on first_seen rows skipped"); return None
+    """{line_no: committer UTC date or None (uncommitted)} for a git-tracked file; None when the file isn't in git.
+    r5-2: for the tracked data/ ledger, a missing git or a failed blame raises LedgerTrustError (fail closed). Other
+    (tmp/test) paths only warn and skip the check.
+    Accepted operator-trust line: committer dates are operator-settable (GIT_COMMITTER_DATE), so this floor stops casual
+    backdating only; see crawler/LEDGER-TRUST.md 'Accepted residual: operator trust line'."""
+    strict = _is_tracked_data(p)
+    def fail(msg):
+        if strict: raise LedgerTrustError(f"{p}: {msg}; refusing to trust first-seen rows")
+        _warn(f"{msg}: commit-date check on first_seen rows skipped"); return None
+    if not shutil.which("git"): return fail("git unavailable")
     d, f = os.path.split(os.path.abspath(p))
     try:
-        if subprocess.run(["git", "-C", d, "ls-files", "--error-unmatch", f], capture_output=True).returncode != 0: return None
-        r = subprocess.run(["git", "-C", d, "blame", "--line-porcelain", "--", f], capture_output=True, text=True)
-    except OSError as e:
-        _warn(f"git failed ({e}): commit-date check skipped"); return None
-    if r.returncode != 0:
-        _warn("git blame failed: commit-date check skipped"); return None
-    out, cur, t = {}, None, None
+        top = subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=30)
+        if top.returncode != 0: return fail("not inside a git checkout") if strict else None
+        if subprocess.run(["git", "-C", d, "ls-files", "--error-unmatch", f], capture_output=True, timeout=30).returncode != 0:
+            return fail("ledger file is not tracked in git") if strict else None
+        r = subprocess.run(["git", "-C", d, "blame", "--line-porcelain", "--", f], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return fail(f"git failed ({type(e).__name__})")
+    if r.returncode != 0: return fail("git blame failed")
+    out, cur = {}, None
     for l in r.stdout.splitlines():
         parts = l.split(" ")
         if len(parts) >= 3 and len(parts[0]) == 40 and parts[1].isdigit():
-            cur = (parts[0], int(parts[2])); t = None
-        elif l.startswith("committer-time ") and cur:
-            t = int(l.split(" ", 1)[1])
-            if cur[0] != "0" * 40:   # all-zero sha = not committed yet
-                out[cur[1]] = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).date().isoformat()
+            cur = (parts[0], int(parts[2]))
+            out[cur[1]] = None if cur[0] == "0" * 40 else out.get(cur[1])
+        elif l.startswith("committer-time ") and cur and cur[0] != "0" * 40:
+            out[cur[1]] = datetime.datetime.fromtimestamp(int(l.split(" ", 1)[1]), datetime.timezone.utc).date().isoformat()
     return out
 
 def _rows(p):
@@ -87,20 +104,42 @@ def _rows(p):
             if isinstance(e, dict): rows.append((n, e))
     return rows
 
-def get(k, path=None):
-    """Earliest VALID first_seen (ISO date) for key k, or None (see p2-e in the module doc)."""
+def _late_commit(want, written, committed, sink):
+    """r5-3: a row committed on a later UTC day than its written first_seen is clamped AND flagged (late_commit) in the
+    hand-anomaly ledger, keyed by author; idempotent (one entry per key), closed only by a human via clear(). Date
+    granularity: first_seen is a date, so 'later than HAND_AT_SKEW' means a later UTC day; no grace window."""
+    try:
+        (sink or __import__("hand_anomalies").record)({"author": want[1], "domain": want[0], "kind": "late_commit",
+                 "hand_at": f"{want[2]}|written={written}", "clamped_to": committed,
+                 "seen_at": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    except ValueError as e:
+        _warn(f"late_commit anomaly not recorded ({e})")
+
+def get_detail(k, path=None, allow_uncommitted=False, anomaly_sink=None):
+    """Earliest valid row for k as {first_seen_written, first_seen_effective, committed_at, line}, or None.
+    Committed rows: effective = max(written, commit date) (r5-3 clamp; never dropped for lateness). Uncommitted rows in
+    a git-tracked file count only with allow_uncommitted=True (r5-2; same-pass writer before its commit)."""
     p = path or globals()["path"]()
     want = _k(k)
-    rows = [(n, e) for n, e in _rows(p) if e.get("key") == want and isinstance(e.get("first_seen"), str)]
-    if not rows: return None
-    dates = _commit_dates(p)
-    vals = []
-    for n, e in rows:
+    dates = _commit_dates(p) if os.path.exists(p) else None
+    best = None
+    for n, e in _rows(p):
+        if e.get("key") != want or not isinstance(e.get("first_seen"), str): continue
         fs = e["first_seen"][:10]
         if not _hand_floor_ok(want, fs): continue
-        if dates and n in dates and fs < dates[n]: continue   # claims a date before the line was committed
-        vals.append(fs)
-    return min(vals) if vals else None
+        committed = dates.get(n) if dates is not None else None
+        if dates is not None and committed is None and not allow_uncommitted: continue
+        eff = max(fs, committed) if committed else fs
+        if committed and committed > fs: _late_commit(want, fs, committed, anomaly_sink)
+        cand = {"first_seen_written": fs, "first_seen_effective": eff, "committed_at": committed, "line": n}
+        if best is None or eff < best["first_seen_effective"]: best = cand
+    return best
+
+def get(k, path=None, allow_uncommitted=False, anomaly_sink=None):
+    """Earliest effective first_seen (ISO date) for k over valid rows, or None. See get_detail."""
+    d = get_detail(k, path, allow_uncommitted, anomaly_sink)
+    return d["first_seen_effective"] if d else None
+
 def put(k, first_seen, path=None):
     """Record first_seen for k unless an earlier-or-equal valid value exists. Returns the effective (min) value.
     Refuses (ValueError) a first_seen earlier than a parseable, non-future hand_at."""
@@ -108,7 +147,7 @@ def put(k, first_seen, path=None):
         raise ValueError(f"first_seen {first_seen} is earlier than hand_at {_k(k)[2]}")
     p = path or globals()["path"]()
     with _lock:
-        cur = get(k, p)
+        cur = get(k, p, allow_uncommitted=True)   # this pass's own pending rows count, so no duplicate appends
         if cur is not None and cur <= first_seen: return cur
         jsonl_store.append(p, {"key": _k(k), "first_seen": first_seen})
         return first_seen
