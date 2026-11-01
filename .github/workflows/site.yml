@@ -81,4 +81,6 @@ jobs:
             "$RUNNER_TEMP/gitleaks/gitleaks" detect --source . --no-git -v --redact
           fi
           set -e
-          git grep -nE "(api[_-]?token|account_id|secret)" -- . ':!node_modules' ':!worker/src/fixture-data.ts' | grep -v REPLACE_AT_DEPLOY | (! grep .)
+          # Fails on secret VALUES (nsec1 bech32, NWC URI with a 64-hex secret, 64-hex/api-token assignments), not on the
+          # word "secret" in guard code. Tests: crawler/tests/test_secret_scan.py. Per-line escape: `secret-scan: allow`.
+          python3 scripts/secret-scan.py
