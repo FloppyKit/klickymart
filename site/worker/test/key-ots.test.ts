@@ -305,3 +305,187 @@ describe("KM_KEY_OTS off: behaviour exactly as before", () => {
     expect(on.ots_params).toEqual({ conf: 6, fresh_k: 36 });
   });
 });
+
+// ---------------- Satoshi OTS answers 1-4 ----------------
+import { otsActivation, otsCheck } from "../src/key-ots";
+
+function holed(tip: number, hole: Set<number>): BlockHeaderSource & { setTip(t: number): void; fill(): void } {
+  let t = tip; const h = hole;
+  return { header: (x) => (x <= t && x >= 0 && !h.has(x) ? { hash: bh(x) } : null), tip: () => t, setTip(v) { t = v; }, fill() { h.clear(); } };
+}
+
+describe("answer 1: FRESH_K compiled max 144 (confirmed)", () => {
+  it("max is 144 and env cannot exceed it", () => { expect(FRESH_K_MAX).toBe(144); expect(effectiveFreshK("145")).toBe(144); expect(effectiveFreshK("144")).toBe(144); });
+});
+
+describe("answer 2: current-key revokes are exempt from staleness", () => {
+  it("a current-key revoke anchored far too late still revokes; stale old-key revokes, rotations and statements don't count", () => {
+    const { R1, s1, st } = rotated();
+    const late = makeRevoke(R1, s1.hash, NOW, nb(150));
+    addRevoke(st, late);
+    const c = ctx(800); c.anchor(late.hash, 600); // 450 blocks late
+    expect(otsCheck(c, late.hash, late.payload.notbefore)).toBe("stale");
+    expect(statementStatus(st, s1.hash, NOW, { ots: c }).status).toBe("revoked");
+  });
+  it("an old-key revoke anchored too late is ignored", () => {
+    const r = rotated();
+    const rot = makeRevkeyRotate(r.s1, r.sks[1]!, r.R1, pk(r.R2), NOW, nb(140)); addRevkeyRotate(r.st, rot);
+    const rv = makeRevoke(r.R1, r.s1.hash, NOW, nb(130)); addRevoke(r.st, rv);
+    const c = ctx(800); c.anchor(rot.hash, 145); c.anchor(rv.hash, 400);
+    expect(currentStatement(r.st, NOW, { ots: c })?.hash).toBe(r.s1.hash);
+  });
+});
+
+describe("answer 3: pre-OTS records are unbounded; activation; notbefore required after", () => {
+  function preOts() {
+    const sks = [key(), key(), key(), key()], R1 = key(), R2 = key();
+    const s0 = makeInception(sks[0]!, pk(sks[1]!), pk(R1), NOW - 2 * DAY, NOW + 5 * DAY); // no notbefore
+    const s1 = makeHandover(s0, sks[0]!, sks[1]!, pk(sks[2]!), pk(R1), NOW - DAY, NOW + 5 * DAY); // no notbefore
+    const st = newKeyState(s0.hash); addStatement(st, s0); addStatement(st, s1);
+    return { sks, R1, R2, s0, s1, st };
+  }
+  it("pre-OTS statements stay valid chain history under an OTS context, even when anchored", () => {
+    const { s1, st, s0 } = preOts();
+    const c = ctx(900); c.anchor(s0.hash, 300); c.anchor(s1.hash, 500);
+    expect(otsCheck(c, s1.hash, undefined)).toBe("ok");
+    expect(currentStatement(st, NOW, { ots: c })?.hash).toBe(s1.hash);
+  });
+  it("a pre-OTS rotation vs an R1 revoke: never ordered -> tie -> the revoke wins", () => {
+    const { sks, R1, R2, s1, st } = preOts();
+    const rot = makeRevkeyRotate(s1, sks[1]!, R1, pk(R2), NOW); addRevkeyRotate(st, rot); // unbounded
+    const rv = makeRevoke(R1, s1.hash, NOW, nb(500)); addRevoke(st, rv);
+    const c = ctx(900); c.anchor(rot.hash, 100); c.anchor(rv.hash, 501); // rotation anchored much earlier: still no order
+    expect(judgeOldKeyRevoke(c, rv, rot)).toBe("valid");
+    expect(statementStatus(st, s1.hash, NOW, { ots: c }).status).toBe("revoked");
+  });
+  it("after activation (first statement with notbefore) a later statement or rotation without notbefore is rejected", () => {
+    const { sks, R1, R2, s1, st } = preOts();
+    const act = makeHandover(s1, sks[1]!, sks[2]!, pk(sks[3]!), pk(R1), NOW, NOW + 5 * DAY, nb(500)); addStatement(st, act);
+    const noNb = makeHandover(act, sks[2]!, sks[3]!, pk(key()), pk(R1), NOW + 10, NOW + 5 * DAY); addStatement(st, noNb);
+    const c = ctx(900);
+    expect(currentStatement(st, NOW + 20, { ots: c })?.hash).toBe(act.hash);
+    const rotNoNb = makeRevkeyRotate(act, sks[2]!, R1, pk(R2), NOW); addRevkeyRotate(st, rotNoNb);
+    const rv = makeRevoke(R2, act.hash, NOW, nb(600)); addRevoke(st, rv); // would only count if the rotation were accepted
+    expect(statementStatus(st, act.hash, NOW + 20, { ots: c }).status).toBe("current");
+  });
+  it("after activation an old-key revoke without notbefore is rejected", () => {
+    const { sks, R1, R2, s1, st } = preOts();
+    const act = makeHandover(s1, sks[1]!, sks[2]!, pk(sks[3]!), pk(R1), NOW, NOW + 5 * DAY, nb(500)); addStatement(st, act);
+    const rot = makeRevkeyRotate(act, sks[2]!, R1, pk(R2), NOW, nb(510)); addRevkeyRotate(st, rot);
+    addRevoke(st, makeRevoke(R1, act.hash, NOW));
+    const c = ctx(900); c.anchor(rot.hash, 512);
+    expect(currentStatement(st, NOW + 20, { ots: c })?.hash).toBe(act.hash);
+  });
+  it("Worker: activation happens only in the cron run that promotes a statement with notbefore; afterwards records need notbefore", async () => {
+    await env.DB.exec("DELETE FROM km_key_ots_state"); await env.DB.exec("DELETE FROM km_key_records"); await env.DB.exec("DELETE FROM km_key_ots"); await env.DB.exec("DELETE FROM snapshot_heads");
+    const t = Math.floor(Date.now() / 1000);
+    const sks = [key(), key(), key(), key()], rev = key();
+    const s0 = makeInception(sks[0]!, pk(sks[1]!), pk(rev), t - DAY, t + 3 * DAY);
+    await storeKeyRecord(env.DB, "statement", s0, t);
+    const cal: OtsCalendar = { async stamp(d) { return `p:${d}`; }, async upgrade() { return null; } };
+    const base = { ...env, KM_SIGNED_RESULTS: "on", KM_KEY_LIFECYCLE: "on", KM_KEY_OTS: "on", KM_KEY_ROOT: s0.hash };
+    // a staged handover WITHOUT notbefore: promoted, but OTS does not activate
+    const h1 = makeHandover(s0, sks[0]!, sks[1]!, pk(sks[2]!), pk(rev), t, t + 3 * DAY);
+    await stageHandover(env.DB, h1, t);
+    await writeDailyHead({ ...base, KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[1]!) } as never, "v1", t, { calendars: [cal] });
+    expect(await otsActivation(env.DB)).toBeNull();
+    expect(await storeKeyRecord(env.DB, "revoke", makeRevoke(rev, "77".repeat(32), t), t)).toBe("accepted"); // still allowed
+    // a fresh statement WITH notbefore promoted in this cron run activates OTS and is stamped
+    const h2 = makeHandover(h1, sks[1]!, sks[2]!, pk(sks[3]!), pk(rev), t + 1, t + 3 * DAY, nb(900));
+    await stageHandover(env.DB, h2, t);
+    const pend: Promise<unknown>[] = [];
+    await writeDailyHead({ ...base, KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[2]!) } as never, "v2", t + 2, { calendars: [cal], waitUntil: (p) => pend.push(p) });
+    await Promise.all(pend);
+    expect((await otsActivation(env.DB))?.stmt).toBe(h2.hash);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM km_key_ots WHERE rec_hash = ?").bind(h2.hash).first<{ n: number }>())!.n).toBe(1);
+    expect(await storeKeyRecord(env.DB, "revoke", makeRevoke(rev, "78".repeat(32), t), t)).toBe("rejected");
+    expect(await storeKeyRecord(env.DB, "revoke", makeRevoke(rev, "78".repeat(32), t, nb(901)), t)).toBe("accepted");
+  });
+  it("Worker: with KM_KEY_OTS off nothing activates even when a notbefore statement is promoted", async () => {
+    await env.DB.exec("DELETE FROM km_key_ots_state"); await env.DB.exec("DELETE FROM km_key_records"); await env.DB.exec("DELETE FROM snapshot_heads");
+    const t = Math.floor(Date.now() / 1000);
+    const sks = [key(), key(), key()], rev = key();
+    const s0 = makeInception(sks[0]!, pk(sks[1]!), pk(rev), t - DAY, t + 3 * DAY);
+    await storeKeyRecord(env.DB, "statement", s0, t);
+    await stageHandover(env.DB, makeHandover(s0, sks[0]!, sks[1]!, pk(sks[2]!), pk(rev), t, t + 3 * DAY, nb(900)), t);
+    await writeDailyHead({ ...env, KM_SIGNED_RESULTS: "on", KM_KEY_LIFECYCLE: "on", KM_KEY_ROOT: s0.hash, KM_RESULT_SK_NEXT_HEX: bytesToHex(sks[1]!) } as never, "v1", t);
+    expect(await otsActivation(env.DB)).toBeNull();
+  });
+});
+
+describe("answer 4: header eclipse cap (first_seen_tip) and outright rejects", () => {
+  it("reject outright: notbefore hash disagrees with a known header, or height > CONF above the tip", () => {
+    const c = ctx(500);
+    expect(otsCheck(c, "e1".repeat(32), { height: 400, hash: "00".repeat(32) })).toBe("reject");
+    expect(otsCheck(c, "e2".repeat(32), nb(507))).toBe("reject"); // 507 > 500 + 6
+    expect(otsCheck(c, "e3".repeat(32), nb(506))).toBe("ok");     // unknown yet, not too far
+    const { sks, R1, R2, s1, st } = rotated();
+    const futRot = makeRevkeyRotate(s1, sks[1]!, R1, pk(R2), NOW, nb(9999)); addRevkeyRotate(st, futRot);
+    addRevoke(st, makeRevoke(R2, s1.hash, NOW, nb(400)));
+    expect(currentStatement(st, NOW, { ots: c })?.hash).toBe(s1.hash); // rotation rejected -> R2 isn't current -> its revoke doesn't count
+  });
+  it("an eclipsed rotation becomes invalid after first_seen_tip + FRESH_K + CONF; before that it stands", () => {
+    const r = rotated();
+    const rot = makeRevkeyRotate(r.s1, r.sks[1]!, r.R1, pk(r.R2), NOW, nb(300)); addRevkeyRotate(r.st, rot);
+    const H = holed(302, new Set([300]));
+    const c: OtsContext = { proofs: {}, verifier: mockVerifier, headers: H };
+    expect(otsCheck(c, rot.hash, rot.payload.notbefore, 302)).toBe("ok");
+    addRevoke(r.st, makeRevoke(r.R2, r.s1.hash, NOW, nb(301)));
+    expect(statementStatus(r.st, r.s1.hash, NOW, { ots: c }).status).toBe("revoked"); // first seen at 302; R2 is current
+    const r2 = rotated();
+    const rot2 = makeRevkeyRotate(r2.s1, r2.sks[1]!, r2.R1, pk(r2.R2), NOW, nb(300)); addRevkeyRotate(r2.st, rot2);
+    const H2 = holed(302, new Set([300]));
+    const c2: OtsContext = { proofs: {}, verifier: mockVerifier, headers: H2 };
+    evaluate(r2.st, NOW, c2); // first seen at tip 302
+    H2.setTip(302 + 36 + 6);
+    expect(otsCheck(c2, rot2.hash, rot2.payload.notbefore, r2.st.otsFirstSeenTip![rot2.hash])).toBe("eclipsed");
+    addRevoke(r2.st, makeRevoke(r2.R1, r2.s1.hash, NOW, nb(301))); // R1 is current again
+    expect(statementStatus(r2.st, r2.s1.hash, NOW, { ots: c2 }).status).toBe("revoked");
+  });
+  it("an eclipsed key statement is invalid after the cap", () => {
+    const sks = [key(), key(), key()], rev = key();
+    const s0 = makeInception(sks[0]!, pk(sks[1]!), pk(rev), NOW - DAY, NOW + 5 * DAY, nb(100));
+    const s1 = makeHandover(s0, sks[0]!, sks[1]!, pk(sks[2]!), pk(rev), NOW - 10, NOW + 5 * DAY, nb(300));
+    const st = newKeyState(s0.hash); addStatement(st, s0); addStatement(st, s1);
+    const H = holed(302, new Set([300])); const c: OtsContext = { proofs: {}, verifier: mockVerifier, headers: H };
+    expect(currentStatement(st, NOW, { ots: c })?.hash).toBe(s1.hash);
+    H.setTip(302 + 42);
+    expect(currentStatement(st, NOW, { ots: c })?.hash).toBe(s0.hash);
+  });
+  it("an eclipse never turns a valid revoke into an ignored one", () => {
+    // (a) old-key revoke whose notbefore is eclipsed: tie -> revoke wins (terminal)
+    const r = rotated();
+    const rot = makeRevkeyRotate(r.s1, r.sks[1]!, r.R1, pk(r.R2), NOW, nb(200)); addRevkeyRotate(r.st, rot);
+    const rv = makeRevoke(r.R1, r.s1.hash, NOW, nb(250)); addRevoke(r.st, rv);
+    const H = holed(252, new Set([250])); const c: OtsContext = { proofs: { [rot.hash]: [proof(rot.hash, 201)] }, verifier: mockVerifier, headers: H };
+    expect(statementStatus(r.st, r.s1.hash, NOW, { ots: c }).status).toBe("disputed"); // delayed, fail closed
+    H.setTip(252 + 42);
+    expect(statementStatus(r.st, r.s1.hash, NOW, { ots: c }).status).toBe("revoked");
+    // (b) a revoke already judged valid stays valid when headers later vanish entirely
+    const r2 = rotated();
+    const rot2 = makeRevkeyRotate(r2.s1, r2.sks[1]!, r2.R1, pk(r2.R2), NOW, nb(200)); addRevkeyRotate(r2.st, rot2);
+    const rv2 = makeRevoke(r2.R1, r2.s1.hash, NOW, nb(150)); addRevoke(r2.st, rv2);
+    const good = ctx(400); good.anchor(rv2.hash, 151); good.anchor(rot2.hash, 205);
+    expect(statementStatus(r2.st, r2.s1.hash, NOW, { ots: good }).status).toBe("revoked");
+    const eclipse: OtsContext = { proofs: good.proofs, verifier: mockVerifier, headers: holed(400, new Set(Array.from({ length: 401 }, (_, i) => i))) };
+    expect(statementStatus(r2.st, r2.s1.hash, NOW, { ots: eclipse }).status).toBe("revoked");
+    expect(statementStatus(r2.st, r2.s1.hash, NOW, { ots: { ...eclipse, headers: null } }).status).toBe("revoked");
+    // (c) a current-key revoke under a total eclipse still revokes
+    const r3 = rotated();
+    addRevoke(r3.st, makeRevoke(r3.R1, r3.s1.hash, NOW, nb(150)));
+    const c3: OtsContext = { proofs: {}, verifier: mockVerifier, headers: holed(400, new Set([150])) };
+    evaluate(r3.st, NOW, c3); (c3.headers as ReturnType<typeof holed>).setTip(1000);
+    expect(statementStatus(r3.st, r3.s1.hash, NOW, { ots: c3 }).status).toBe("revoked");
+    // (d) a total eclipse past the cap invalidates the eclipsed statements themselves: nothing is current (fail closed)
+    const all: OtsContext = { proofs: {}, verifier: mockVerifier, headers: holed(400, new Set(Array.from({ length: 401 }, (_, i) => i))) };
+    evaluate(r3.st, NOW, all); (all.headers as ReturnType<typeof holed>).setTip(1000);
+    expect(currentStatement(r3.st, NOW, { ots: all })).toBeNull();
+  });
+  it("first_seen_tip is latched and survives export/import (earliest wins)", () => {
+    const { st, s1 } = rotated();
+    const H = holed(300, new Set()); evaluate(st, NOW, { proofs: {}, verifier: mockVerifier, headers: H });
+    H.setTip(900); evaluate(st, NOW, { proofs: {}, verifier: mockVerifier, headers: H });
+    expect(st.otsFirstSeenTip![s1.hash]).toBe(300);
+    expect(importKeyState(exportKeyState(st)).otsFirstSeenTip![s1.hash]).toBe(300);
+  });
+});
