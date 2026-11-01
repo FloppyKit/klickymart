@@ -101,8 +101,13 @@ def mark_first_seen(out, today=None, anomaly_sink=None):
     now = _dt(today) or datetime.datetime.now(datetime.timezone.utc)
     at_dt = _dt(out.get("btc_grade_hand_at"))
     future = at_dt is not None and at_dt - now > HAND_AT_SKEW
-    if (at is None or at > _today(today) or future) and not _date(out.get("btc_grade_hand_first_seen")):
-        out["btc_grade_hand_first_seen"] = _today(today).isoformat()
+    if at is None or at > _today(today) or future:
+        # n-2: the operator-side store is the source of truth; the record field is a cache. Earliest value wins.
+        import hand_first_seen
+        k = hand_first_seen.key(out.get("d"), out.get("btc_grade_hand_by"), out.get("btc_grade_hand_at"))
+        cands = [v for v in (hand_first_seen.get(k), out.get("btc_grade_hand_first_seen")) if _date(v)]
+        fs = min(_date(v) for v in cands).isoformat() if cands else _today(today).isoformat()
+        out["btc_grade_hand_first_seen"] = hand_first_seen.put(k, fs)
     if future:
         a = {"kind": "future_hand_at", "hand_at": out.get("btc_grade_hand_at"), "hand_by": out.get("btc_grade_hand_by"),
              "clamped_to": out["btc_grade_hand_first_seen"], "seen_at": now.isoformat()}
