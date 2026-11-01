@@ -8,9 +8,7 @@ crawl.py reads robots.txt first for every site and tos.py records a terms ban as
 Signing and publishing the resulting 31420 records stays a separate, manual step.
 """
 import json, re, sys, urllib.request
-import ua  # noqa: F401  installs gate.py; klickymart.com is in gate.API_HOSTS
-
-UA = "FloppyKitMapBot/0.2 (+https://klickymart.com/bot; bot@klickymart.com)"
+from ua import UA  # PQ-2: the one honest UA (Agent/KlickyBot); importing ua installs gate.py; klickymart.com is in gate.API_HOSTS
 HOST = re.compile(r"^(?!localhost$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 
 def main(src="https://klickymart.com/pending.json"):

@@ -46,7 +46,7 @@ We respect every rule, and we publish every restriction. Each entry is `{"c":cod
 | `ag` | 0–3 | agent access: 0 blocked at landing, 1 browse only (or key pages blocked), 2 product/cart pages readable, 3 payment-method screen reached and read |
 | `ar` | list | agent restrictions with evidence (replaces v0.1 `blk`/`blk_at`, see below) |
 | `fetch` | map | HTTP outcome per step, e.g. `{"robots":200,"home":403}` |
-| `pay_src` | code | where `pay` came from: `observed-checkout`, `first-party-pages`, `search-index` |
+| `pay_src` | code | where `pay` came from: `rendered-pages` (crawler, store pages as rendered); hand fixes use a named store source (e.g. `store-help-page-2026-10-30`, `store-terms-of-sale-us`); null when no pay evidence |
 | `pay_tc` | codes | methods mentioned but not verified from a first-party page (TO-CONFIRM) |
 | `pay_no` | codes | methods the site says it does NOT accept |
 | `kyc` | code | buyer identity: `none-stated`, `conditional` (limits/flags), `required`, null unknown |
