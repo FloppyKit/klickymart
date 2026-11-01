@@ -4,19 +4,15 @@
 import type { Env } from "./router";
 import { loadBindingState } from "./endpoint-binding";
 import { buildResult, latestHead, signHead, signResult } from "./signed-result";
-import { cronHandover, currentStatement, exportKeyState, keyLifecycleEnabled, loadKeyState, pubFromSkHex, statementStatus } from "./key-lifecycle";
 export { signedResultsEnabled } from "./signed-result";
-import { CONF, activateOts, effectiveFreshK, otsActivation, loadOtsProofs, otsEnabled, stampInBackground, upgradeStamps, type OtsCalendar } from "./key-ots";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 
 const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 const unavailable = (why: string) => Response.json({ ok: false, error: "unavailable", reason: why }, { status: 503, headers: H });
 
 export async function openStoreRoute(path: string, url: URL, env: Env): Promise<Response> {
-  const lifecycle = keyLifecycleEnabled(env);
-  if (path === "/open-store/keys" && lifecycle) return keysRoute(env);
   if (path !== "/open-store/head" && path !== "/open-store/binding") return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
-  let sk = env.KM_RESULT_SK_HEX;
+  const sk = env.KM_RESULT_SK_HEX;
   if (!sk || !/^[0-9a-f]{64}$/.test(sk)) return unavailable("no result-signing key configured");
   if (!env.DB) return unavailable("no database");
   const nowS = Math.floor(Date.now() / 1000);
@@ -25,26 +21,6 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   // Guard (Satoshi 2026-11-01): a label-only head must never be public. Until the snapshot step can commit to the data
   // (snapshot_digest; M4), KM_SIGNED_RESULTS=on still serves nothing.
   if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (digest pending M4)");
-  // M3 (KM_KEY_LIFECYCLE on): sign only under a current, unrevoked, unexpired key statement whose key IS this signing
-  // key; the head and every result name that statement's hash. Anything else fails closed (503).
-  let ksh: string | null = null, keyUntil: number | undefined;
-  if (lifecycle) {
-    const root = (env.KM_KEY_ROOT ?? "").trim();
-    if (!/^[0-9a-f]{64}$/.test(root)) return unavailable("key lifecycle on but no KM_KEY_ROOT pinned");
-    const ks = await loadKeyState(env.DB, root);
-    if (!ks) return unavailable("key records unreadable");
-    if (ks.compromised) return unavailable("key lineage compromised");
-    const cap = env.KM_KEY_TTL_CAP_S; // may only LOWER HARD_MAX_S
-    const cur = currentStatement(ks, nowS, { ttlCapS: cap as never });
-    if (!cur) return unavailable("no current key statement (expired, revoked or missing)");
-    // Sign with whichever loaded key the current statement names (after a cron handover that is KM_RESULT_SK_NEXT_HEX).
-    const pick = [env.KM_RESULT_SK_HEX, env.KM_RESULT_SK_NEXT_HEX].find((k) => pubFromSkHex(k) === cur.payload.key);
-    if (!pick) return unavailable("signing key is not the key named by the current statement");
-    sk = pick;
-    ksh = cur.hash; keyUntil = statementStatus(ks, cur.hash, nowS, { ttlCapS: cap as never }).until;
-    head.key_statement_hash = ksh;
-    head.expires_at = Math.min(head.expires_at, keyUntil ?? head.expires_at);
-  }
   const sh = signHead(head, sk);
   if (path === "/open-store/head") return Response.json(sh, { headers: H });
   const pubkey = url.searchParams.get("pubkey") ?? "";
@@ -52,40 +28,14 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   if (!/^[0-9a-f]{64}$/.test(pubkey)) return Response.json({ ok: false, error: "pubkey must be 64 lowercase hex" }, { status: 400, headers: H });
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(nonce)) return Response.json({ ok: false, error: "nonce required (8-128 chars A-Za-z0-9_-)" }, { status: 400, headers: H });
   const state = await loadBindingState(env.DB, pubkey);
-  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS, ksh, keyUntil), sk) }, { headers: H });
+  return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS), sk) }, { headers: H });
 }
 
 /** Daily snapshot step (M2): called once from the existing daily cron after relay catch-up. Writes one head row only when
  * KM_SIGNED_RESULTS is on; otherwise does nothing. snapshot_id = "<snapshot data version>@<cron unix seconds>": the spec
  * does not yet define what a head commits to, so this is a LABEL (which data version + when), not a content commitment
  * (no Merkle root / digest). Flagged for Satoshi; M4 owns the real snapshot step. */
-/** OTS deps (KM_KEY_OTS on). No calendar client is bundled: production passes none, so nothing is stamped until one is
- * wired in (PENDING). Tests inject mocks. */
-export interface OtsDeps { calendars?: OtsCalendar[]; waitUntil?: (p: Promise<unknown>) => void }
-export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string; KM_KEY_LIFECYCLE?: string; KM_KEY_ROOT?: string; KM_RESULT_SK_NEXT_HEX?: string; KM_KEY_TTL_CAP_S?: string; KM_KEY_OTS?: string }, snapshotVersion: string, nowS: number, ots: OtsDeps = {}): Promise<number | null> {
+export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
   if (!_sre(env) || !env.DB) return null;
-  const db = env.DB;
-  const otsOn = keyLifecycleEnabled(env) && otsEnabled(env);
-  const cals = otsOn ? ots.calendars ?? [] : [];
-  // M3: a staged handover is promoted in this same daily run, right before the head is written (no 503 gap).
-  // OTS: the promoted statement is stamped in the background (never blocks the head).
-  let promoted: string | null = null;
-  if (keyLifecycleEnabled(env)) { try { promoted = await cronHandover(db, env, nowS, otsOn ? (h) => stampInBackground(ots.waitUntil, db, h, cals, nowS) : undefined); } catch { /* lineage unchanged; fails closed if needed */ } }
-  // OTS answer 3: activation needs a fresh statement carrying notbefore, promoted (and stamped) in THIS cron run.
-  if (otsOn && promoted && !(await otsActivation(db))) await activateOts(db, promoted, nowS);
-  // OTS: one upgrade pass per daily run (no new cron, no polling).
-  if (otsOn) { try { await upgradeStamps(db, cals, nowS); } catch { /* next day */ } }
   try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
-}
-
-/** GET /open-store/keys (only when KM_SIGNED_RESULTS and KM_KEY_LIFECYCLE are both on): the pinned root and every stored
- * key record. Records are self-verifying, so the response itself is not signed; harnesses must cross-check the root on
- * a second channel (v9.2 TOFU) and keep revokes they have already seen. */
-async function keysRoute(env: Env): Promise<Response> {
-  const root = (env.KM_KEY_ROOT ?? "").trim();
-  if (!/^[0-9a-f]{64}$/.test(root) || !env.DB) return unavailable("no KM_KEY_ROOT pinned");
-  const ks = await loadKeyState(env.DB, root);
-  if (!ks) return unavailable("key records unreadable");
-  const body = otsEnabled(env) ? JSON.stringify({ ...JSON.parse(exportKeyState(ks)), ots_proofs: await loadOtsProofs(env.DB), ots_params: { conf: CONF, fresh_k: effectiveFreshK(env.KM_KEY_OTS_FRESH_K) } }) : exportKeyState(ks);
-  return new Response(body, { headers: { ...H, "Content-Type": "application/json" } });
 }

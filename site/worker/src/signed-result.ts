@@ -3,8 +3,9 @@
  * harness checks. A signature gives accountability, not truth. Results never carry a score, rank or weight.
  *
  * Signing: id = sha256(DOMAIN + "\n" + canonicalJson(payload)), BIP-340 Schnorr over id with the KlickyMart result key
- * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). Key-statement lifecycle: key-lifecycle.ts (M3, KM_KEY_LIFECYCLE,
- * default off). With it off, results carry key_statement_hash = null and a harness that requires one rejects them.
+ * (env KM_RESULT_SK_HEX, a wrangler secret; never logged). Key custody (M3) is being rebuilt as FROST
+ * Key A + Key B certs (design/GAME-THEORY-M3-FROST-KEYS-2026-11-01.md); until then results carry key_statement_hash = null
+ * and a harness that requires one rejects them. buildResult's optional key reference + expiry cap is kept for that.
  * Switch: KM_SIGNED_RESULTS = 1|true|on enables the /open-store routes (default OFF: they do not exist; when on they 503 without a key or head).
  */
 import * as secp from "@noble/secp256k1";
@@ -66,7 +67,7 @@ export function typedFields(s: BindingState | null | "unknown", nowS: number, sn
 /** snapshot_digest: sha256 commitment over the snapshot data, signed inside the head. null = label-only head, which is
  * never served (no digest source exists in the Worker yet; M4). */
 export interface HeadPayload { type: "klickymart-head"; v: 1; snapshot_id: string; snapshot_digest: string | null; sequence: number; created_at: number; expires_at: number; prev_head: string | null;
-  /** M3: hash of the signing key's statement. Absent (not null) when KM_KEY_LIFECYCLE is off, so M2 heads sign identically. */
+  /** M3 (pending FROST rebuild): hash of the signing key's cert. Absent (not null) today, so M2 heads sign identically. */
   key_statement_hash?: string }
 export interface ResultPayload {
   type: "klickymart-result"; v: 1; store_pubkey: string; nonce: string; snapshot_id: string; sequence: number;
