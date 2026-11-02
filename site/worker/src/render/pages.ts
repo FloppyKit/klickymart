@@ -75,7 +75,6 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
   }).join("");
 
   const body = `
-<div class="km-home-scene-gap" aria-hidden="true"></div>
 <section class="km-hero km-hero-panel km-home-hero">
   <div class="km-eyebrow">OPEN DATA · SIGNED RECORDS <details class="km-def" data-testid="def-signed-records"><summary aria-label="What signed records means">(?)</summary><p>Each store record is a signed Nostr event (<a href="/docs/nostr-tags">kind ${NOSTR_KIND_CRAWL_RECORD}</a>), and anyone can <a href="/export.ndjson">check every record in /export.ndjson</a>.</p></details> · NO LOGIN</div>
   <h1>Where agents shop.</h1>
@@ -90,6 +89,7 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     <button type="submit">Search</button>
   </form>
 </section>
+<div class="km-home-scene-gap" aria-hidden="true"></div>
 <div class="km-store">
 <section class="km-section km-home-list" aria-label="Stores">
   <div class="km-tag-legend km-muted"><span>Agent access</span><span>BTC privacy grade 0–4 <span class="km-legend-priv">3+ = private</span></span></div>

@@ -242,15 +242,32 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 [data-theme="light"] .km-grade.km-g-private{background:#8a4a05;border-color:#8a4a05;color:#fff}
 @media (prefers-color-scheme:light){:root:not([data-theme]) .km-legend-priv{color:#8a4a05}:root:not([data-theme]) .km-grade.km-g-private{background:#8a4a05;border-color:#8a4a05;color:#fff}}
 .km-store .km-section.km-receipt{padding:var(--km-s-4) var(--km-s-5)}
-/* F7: the pixel scene stays as a band so the search and the first store rows sit above the fold. */
+/* F7 + GO-KM-HOME-HERO-CLEAR: the pixel scene stays as a band so the search and the first store rows sit above
+   the fold, and the hero sits in the SKY band ABOVE the storefront sprite instead of on top of the shop.
+   The sprite is drawn on #km-landscape (public/km-landscape.js storeGeom) with its top edge at
+   round(h*(0.52+reach*0.04) - 50*p + p), p = 2 under 520px wide and 3 under 1500px, so that edge is never
+   higher than 0.52h-98 (phones) or 0.52h-147 (laptops). The hero below is held at least 8px above that line
+   at 1280x800 and 390x844, and the scene gap UNDER the hero then keeps the store sheet (and so the whole
+   shop) clear of it: the storefront is drawn unobstructed between the hero and the sheet. */
 .km-page-home .km-home-scene-gap{min-height:min(30vh,240px);height:min(30vh,240px)}
 @media(max-width:640px){.km-page-home .km-home-scene-gap{min-height:min(26vh,220px);height:min(26vh,220px)}}
-.km-page-home .km-home-hero{max-width:min(38rem,92vw);padding:var(--km-s-3) var(--km-s-5)}
-.km-page-home .km-home-hero h1{margin-bottom:var(--km-s-2)}
-.km-page-home .km-home-hero .km-eyebrow{margin-bottom:var(--km-s-2)}
-.km-page-home .km-home-hero{margin-bottom:var(--km-s-3)}
-.km-page-home .km-story-defs{margin-bottom:var(--km-s-2)}
+.km-page-home .km-home-hero{max-width:min(38rem,92vw);padding:var(--km-s-2) var(--km-s-5);margin:0 auto var(--km-s-2)}
+.km-page-home .km-home-hero h1{font-size:2.4rem;margin-bottom:var(--km-s-1)}
+.km-page-home .km-home-hero .km-eyebrow{margin-bottom:var(--km-s-1)}
+.km-page-home .km-home-hero .km-story{margin-bottom:var(--km-s-1)}
+.km-page-home .km-home-hero .km-search input{padding-block:var(--km-s-1)}
+.km-page-home .km-story-defs{margin-bottom:0}
 .km-page-home .km-store{margin-top:var(--km-s-3)}
+/* Phones: the sky band above the shop is ~200px tall under a 130px header, so the hero is set to the compact
+   type the GO allows (smaller h1, story line kept, (?) pills may wrap) and the search stays fully in view. */
+@media(max-width:640px){
+  .km-page-home .km-home-hero{max-width:min(24rem,94vw);padding:0 var(--km-s-4) var(--km-s-1);margin-bottom:0}
+  .km-page-home .km-home-hero h1{font-size:1.5rem;margin-bottom:var(--km-s-1)}
+  .km-page-home .km-home-hero .km-eyebrow{line-height:1.35;letter-spacing:.06em;margin-bottom:var(--km-s-1)}
+  .km-page-home .km-home-hero .km-story{line-height:1.4;margin-bottom:var(--km-s-1)}
+  .km-page-home .km-story-defs{gap:var(--km-s-1)}
+  .km-page-home .km-story-defs .km-def>summary{line-height:1.3}
+}
 .km-page-home .km-home-list{padding-top:var(--km-s-3)!important}
 .km-page-home .km-home-quick{margin-top:var(--km-s-4)}
 .km-page-home .km-home-forms{margin-top:var(--km-s-5)}
