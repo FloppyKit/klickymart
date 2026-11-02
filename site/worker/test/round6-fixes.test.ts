@@ -238,3 +238,92 @@ describe("GO-KM-TIPS-ZERO-R6 B10: MCP carries the one_time_link_card note when p
     expect(sc2.pay_filter?.note).toMatch(/not observed|left out/);
   });
 });
+
+describe("GO-KM-TIPS-ZERO-R6-F1 N1: guest=1 keeps unknown and ranks it after confirmed; guest=confirmed is strict (docs + MCP)", () => {
+  type AltBody = { count: number; items: { d: string; guest: boolean | null }[]; filters: { guest: boolean; guest_strict?: boolean } };
+  it("openapi /alternatives documents guest=1 (unknown kept, ranked after) and guest=confirmed (strict)", async () => {
+    const o = await getJson<{ paths: Record<string, { get?: { parameters?: { name: string; description?: string; schema?: { type?: unknown; enum?: unknown[] } }[] } }> }>("/openapi.json");
+    const g = o.paths["/alternatives"]!.get!.parameters!.find((p) => p.name === "guest")!;
+    expect(g).toBeDefined();
+    const text = String(g.description ?? "");
+    expect(text).toMatch(/unknown/i);
+    expect(text).toMatch(/ranked after/i);
+    expect(text).toMatch(/confirmed/i);
+    expect(text).toMatch(/strict/i);
+    expect(g.schema?.enum ?? []).toEqual(expect.arrayContaining(["0", "1", "confirmed"]));
+    // /q documents the same three-way meaning
+    const q = o.paths["/q"]!.get!.parameters!.find((p) => p.name === "guest")!;
+    const qtext = String(q.description ?? "");
+    expect(qtext).toMatch(/unknown/i);
+    expect(qtext).toMatch(/ranked after/i);
+    expect(qtext).toMatch(/confirmed/i);
+  });
+  it("MCP find_alternatives schema accepts and documents confirmed; handler behaves like the HTTP endpoint", async () => {
+    const list = await (await SELF.fetch("https://example.com/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) })).json<{ result: { tools: { name: string; inputSchema: { properties: Record<string, { type?: unknown; enum?: unknown[]; description?: string }> } }[] } }>();
+    const tool = list.result.tools.find((t) => t.name === "find_alternatives")!;
+    const g = tool.inputSchema.properties.guest!;
+    expect(String(g.description ?? "")).toMatch(/confirmed/i);
+    expect(String(g.description ?? "")).toMatch(/unknown/i);
+    expect(String(g.description ?? "")).toMatch(/ranked after/i);
+    expect((g.enum ?? []).map(String)).toEqual(expect.arrayContaining(["confirmed", "1", "0"]));
+    const snap = await realSnap();
+    const loose = findAlternatives(snap, "https://klickymart.com", { category: "electronics", guest: true, limit: 50 });
+    if (!loose.ok) throw new Error(loose.message);
+    const l = loose.body as unknown as AltBody;
+    // loose form drops only stores KNOWN to require an account and keeps unknown (guest null)
+    expect(l.items.every((i) => i.guest !== false)).toBe(true);
+    expect(l.items.some((i) => i.guest === null)).toBe(true);
+    expect(l.items.some((i) => i.guest === true)).toBe(true);
+    // strict form (direct): only stores CONFIRMED to allow guest checkout (guest true); unknown dropped
+    const strict = findAlternatives(snap, "https://klickymart.com", { category: "electronics", guest: true, guest_strict: true, limit: 50 });
+    if (!strict.ok) throw new Error(strict.message);
+    const st = strict.body as unknown as AltBody;
+    expect(st.items.length).toBeGreaterThan(0);
+    expect(st.items.every((i) => i.guest === true)).toBe(true);
+    expect(st.items.map((i) => i.d)).toEqual(l.items.filter((i) => i.guest === true).map((i) => i.d));
+    expect(st.filters.guest_strict).toBe(true);
+    // handler wiring: MCP find_alternatives behaves like the HTTP /alternatives endpoint on the worker snapshot.
+    // Worker-snapshot rows all carry guest unknown today (normalize maps only boolean guests to 1/0), so a strict
+    // filter legitimately returns an empty list while the loose form keeps every unknown row. MCP must agree with HTTP.
+    const m = await mcp("find_alternatives", { category: "electronics", guest: "confirmed", limit: 50 });
+    if (m.error) throw new Error(m.error.message);
+    const s = m.result!.structuredContent as unknown as AltBody;
+    const hstrict = await getJson<AltBody>("/alternatives?category=electronics&guest=confirmed&limit=50");
+    expect(s.items.map((i) => i.d)).toEqual(hstrict.items.map((i) => i.d));
+    expect(s.items.every((i) => i.guest === true)).toBe(true);
+    expect(hstrict.items.every((i) => i.guest === true)).toBe(true);
+    expect(s.filters.guest_strict).toBe(true);
+    expect(hstrict.filters.guest_strict).toBe(true);
+    // boolean true form through MCP is the same as HTTP guest=1 (loose: unknown kept)
+    const http = await getJson<AltBody>("/alternatives?category=electronics&guest=1&limit=50");
+    const mtrue = await mcp("find_alternatives", { category: "electronics", guest: true, limit: 50 });
+    if (mtrue.error) throw new Error(mtrue.error.message);
+    const mt = mtrue.result!.structuredContent as unknown as AltBody;
+    expect(mt.items.map((i) => i.d)).toEqual(http.items.map((i) => i.d));
+    expect(mt.items.some((i) => i.guest === null)).toBe(true);
+  });
+});
+
+describe("GO-KM-TIPS-ZERO-R6-F1 N2: openapi POST /reviews field names match a real dry-run response", () => {
+  it("uses per_key_notes_per_day, drops the nested dry_run limit object, and names fields a real dry run returns", async () => {
+    const o = await getJson<{ paths: Record<string, { post?: { responses: Record<string, { description: string }> } }> }>("/openapi.json");
+    const text = o.paths["/reviews"]!.post!.responses["200"]!.description;
+    // N2: the real field name, not per_key_per_day_notes; no nested dry_run {limit 20/hour} object
+    expect(text).toContain("per_key_notes_per_day");
+    expect(text).not.toContain("per_key_per_day_notes");
+    expect(text).not.toContain("dry_run {limit");
+    expect(text).not.toContain("larger values are rejected");
+    for (const f of ["ok", "stored", "dry_run", "id", "d", "counts_toward_chart", "would_count_toward_chart", "counts_after", "warnings", "limits_would_apply", "per_key_per_day", "per_key_per_merchant_per_day", "global_per_day", "per_key_notes_per_day", "any_limit_would_hit", "note"]) expect(text).toContain(f);
+    // diff against a real dry-run response
+    const r = await post(sign(expTags([["rating", "4", "5"]]), "openapi field diff"), "?dry_run=1");
+    expect(r.status).toBe(200);
+    const b = await r.json<Record<string, unknown>>();
+    for (const f of ["ok", "stored", "dry_run", "id", "d", "counts_toward_chart", "would_count_toward_chart", "dry_run_note", "warnings", "limits_would_apply"]) expect(b).toHaveProperty(f);
+    const lim = b.limits_would_apply as Record<string, unknown>;
+    for (const f of ["per_key_per_day", "per_key_per_merchant_per_day", "global_per_day", "per_key_notes_per_day", "any_limit_would_hit", "note"]) expect(lim).toHaveProperty(f);
+    expect(lim).not.toHaveProperty("dry_run"); // the nested object the old text promised does not exist
+    // created_at text now points at the real window direction
+    const req = o.paths["/reviews"]!.post as unknown as { requestBody: { content: { "application/json": { schema: { properties: { created_at: { description: string } } } } } } };
+    expect(req.requestBody.content["application/json"].schema.properties.created_at.description).toMatch(/older than 7 days/i);
+  });
+});
