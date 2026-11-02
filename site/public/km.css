@@ -47,16 +47,8 @@ body.km-scene-only .km-header,body.km-scene-only .km-footer,body.km-scene-only .
 body.km-scene-only .km-skip{display:none!important}
 body.km-scene-only{overflow:hidden}
 .km-home-quick .km-h2{text-shadow:0 0 14px rgb(0 0 0 / .8),0 1px 3px rgb(0 0 0 / .85)}
-.km-home-scrim{
-  margin-top:var(--km-s-5);
-  padding:var(--km-s-5) var(--km-s-4);
-  border-radius:var(--km-radius-lg);
-  background:linear-gradient(180deg,transparent 0,color-mix(in srgb,var(--km-bg) 72%,transparent) 56px,color-mix(in srgb,var(--km-bg) 94%,transparent) 140px);
-  box-shadow:0 -24px 48px rgb(0 0 0 / .15);
-}
-[data-theme="light"] .km-home-scrim{background:linear-gradient(180deg,transparent 0,color-mix(in srgb,var(--km-bg) 80%,transparent) 48px,color-mix(in srgb,var(--km-bg) 96%,transparent) 120px)}
 .km-main{max-width:var(--km-maxw);margin:0 auto;padding:var(--km-s-6) var(--km-s-5) var(--km-s-8);background:transparent}
-.km-page-home .km-footer{background:color-mix(in srgb,var(--km-bg) 90%,transparent)}
+.km-page-home .km-footer{background:var(--km-home-footer-bg)}
 .km-preview-badge{font-family:var(--km-font-mono);font-size:var(--km-fs-xs);letter-spacing:.04em;text-transform:uppercase;background:var(--km-surface-2);color:var(--km-anw);border:1px solid var(--km-border-strong);border-radius:var(--km-radius-pill);padding:var(--km-s-1) var(--km-s-3);margin-left:auto;margin-right:var(--km-s-3)}
 .km-header{flex-wrap:wrap}
 .km-footer-signoff{text-align:center;font-size:var(--km-fs-md);color:var(--km-text);margin:0 0 var(--km-s-3);letter-spacing:.02em}
@@ -91,8 +83,8 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-grade{font-family:var(--km-font-mono);font-size:var(--km-fs-xs);padding:2px 6px;border-radius:var(--km-radius-sm);border:1px solid var(--km-border-strong);box-shadow:inset 0 -1px 0 rgb(0 0 0 / .35);background:var(--km-ink-850);color:var(--km-ink-100)}
 .km-g0{color:#b8bfce}.km-g1{color:#ffb09a}.km-g2{color:#ffe08a}.km-g3{color:#c8f090}.km-g4{color:#3df29a}.km-gnull{color:#b8bfce;background-image:repeating-linear-gradient(-45deg,transparent,transparent 2px,rgb(255 255 255 / .06) 2px,rgb(255 255 255 / .06) 4px)}.km-g-ungraded{color:var(--km-ink-200);font-style:italic;border-style:dashed}
 [data-theme="light"] .km-grade,.km-grade:where([data-theme="light"] *){background:var(--km-surface-2);color:var(--km-text);box-shadow:inset 0 -1px 0 rgb(0 0 0 / .06)}
-[data-theme="light"] .km-g-ungraded{color:#5f6677}
-[data-theme="light"] .km-g0{color:#5f6677}[data-theme="light"] .km-g1{color:#8a2f1a}[data-theme="light"] .km-g2{color:#7a5a08}[data-theme="light"] .km-g3{color:#3a6a12}[data-theme="light"] .km-g4{color:#0b6b42}
+[data-theme="light"] .km-g-ungraded{color:#4a4f5c}
+[data-theme="light"] .km-g0{color:#524b44}[data-theme="light"] .km-g1{color:#8a2f1a}[data-theme="light"] .km-g2{color:#7a5a08}[data-theme="light"] .km-g3{color:#3a6a12}[data-theme="light"] .km-g4{color:#0b6b42}
 .km-table-compact td,.km-table-compact th{padding:var(--km-s-1) var(--km-s-2);font-size:var(--km-fs-sm)}
 .km-dl dt{font-family:var(--km-font-mono);font-size:var(--km-fs-sm);margin-top:var(--km-s-3)}
 .km-dl dd{margin:var(--km-s-1) 0 var(--km-s-2) var(--km-s-3);color:var(--km-text-muted)}
@@ -150,13 +142,27 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-hero-panel .km-story,.km-hero-panel .km-story-key{text-shadow:0 0 14px rgb(0 0 0 / .85),0 1px 3px rgb(0 0 0 / .9)}
 [data-theme="light"] .km-hero-panel .km-story,[data-theme="light"] .km-hero-panel .km-story-key{text-shadow:none}
 .km-store{margin-top:var(--km-s-6);padding:0 0 var(--km-s-6);background:var(--km-bg);border-radius:var(--km-radius-lg) var(--km-radius-lg) 0 0;box-shadow:0 -30px 60px rgb(0 0 0 / .35)}
-.km-page-home .km-store{position:relative;background:color-mix(in srgb,var(--km-ink-950) 84%,transparent);box-shadow:none}
-[data-theme="light"] .km-page-home .km-store{background:color-mix(in srgb,#e8c9a8 88%,transparent)}
-/* Light mode on the home page is tinted to the sunset scene: warm sand/peach, never white panels. */
-[data-theme="light"] .km-page-home{--km-paper:#f0dcc4;--km-paper-edge:#c9a882;--km-tag-ink:#1b1c22}
-@media (prefers-color-scheme:light){:root:not([data-theme]) .km-page-home{--km-paper:#f0dcc4;--km-paper-edge:#c9a882;--km-tag-ink:#1b1c22}}
-[data-theme="light"] .km-page-home .km-search input,[data-theme="light"] .km-page-home .km-def>p,[data-theme="light"] .km-page-home .km-check-card{background:#f7e6d2;border-color:#c9a882;color:#1b1c22}
-[data-theme="light"] .km-page-home .km-footer{background:color-mix(in srgb,#e8c9a8 90%,transparent)}
+.km-page-home .km-store{position:relative;background:var(--km-home-sheet);box-shadow:none}
+/* Light mode on the home page is tinted to the sunset scene: warm sand/peach, never white panels.
+   The warm home surfaces are tokens so each rule is declared once. The dark look is the fallback value;
+   the two light selectors below re-tint it, exactly like --km-paper/--km-paper-edge, so an OS-light
+   first visit (:root with no data-theme) matches an explicit light theme (GO-KM-HOME-SCENE-FIX N3). */
+.km-page-home{
+  --km-home-sheet:color-mix(in srgb,var(--km-ink-950) 84%,transparent);
+  --km-home-footer-bg:color-mix(in srgb,var(--km-bg) 90%,transparent);
+  --km-home-link:var(--km-link);
+}
+[data-theme="light"] .km-page-home{--km-paper:#f0dcc4;--km-paper-edge:#c9a882;--km-tag-ink:#1b1c22;--km-home-sheet:color-mix(in srgb,#e8c9a8 88%,transparent);--km-home-footer-bg:color-mix(in srgb,#e8c9a8 90%,transparent);--km-home-field:#f7e6d2;--km-home-field-edge:#c9a882;--km-home-field-ink:#1b1c22;--km-home-link:#4224b8}
+@media (prefers-color-scheme:light){:root:not([data-theme]) .km-page-home{--km-paper:#f0dcc4;--km-paper-edge:#c9a882;--km-tag-ink:#1b1c22;--km-home-sheet:color-mix(in srgb,#e8c9a8 88%,transparent);--km-home-footer-bg:color-mix(in srgb,#e8c9a8 90%,transparent);--km-home-field:#f7e6d2;--km-home-field-edge:#c9a882;--km-home-field-ink:#1b1c22;--km-home-link:#4224b8;
+  /* Parity with tokens.css [data-theme="light"]: km.css's own system-light token block below drifts a
+     step lighter on these inks, which drops faint/accent text under 4.5:1 on the warm sheet. */
+  --km-text-muted:#3a4050;--km-text-faint:#4a4f5c;--km-accent:#055c37;--km-ok:#055c37;--km-tos:#a01d3d;--km-anw:#7a5200;--km-err:#4a5162}}
+.km-page-home .km-search input,.km-page-home .km-def>p,.km-page-home .km-check-card{background:var(--km-home-field,var(--km-surface))}
+.km-page-home .km-search input{border-color:var(--km-home-field-edge,var(--km-border-strong));color:var(--km-home-field-ink,var(--km-text))}
+.km-page-home .km-def>p{border-color:var(--km-home-field-edge,var(--km-border));color:var(--km-home-field-ink,var(--km-text-muted))}
+.km-page-home .km-check-card{border-color:var(--km-home-field-edge,var(--km-border,#444));color:var(--km-home-field-ink,var(--km-text))}
+/* Footer links on the warm sand footer: --km-link is 4.17:1 there, so the home footer uses a darker indigo. */
+.km-page-home .km-footer a{color:var(--km-home-link)}
 .km-awning{position:relative;margin:0 0 var(--km-s-5);padding:calc(var(--km-s-6) + 18px) var(--km-s-5) var(--km-s-4);text-align:center}
 .km-awning-stripes{position:absolute;left:0;right:0;top:0;height:30px;border-radius:var(--km-radius-lg) var(--km-radius-lg) 0 0;
   background:repeating-linear-gradient(90deg,var(--km-awn-a) 0 28px,var(--km-awn-b) 28px 56px);
@@ -190,6 +196,15 @@ h1{font-size:var(--km-fs-3xl);line-height:var(--km-lh-tight);letter-spacing:var(
 .km-grade.km-g-ungraded{font-style:normal;border-style:dashed;color:var(--km-text-faint)}
 [data-theme="light"] .km-grade{background:transparent;box-shadow:none}
 [data-theme="light"] .km-grade.km-g-private{background:var(--km-btc);color:#fff}
+/* GO-KM-HOME-SCENE-FIX N3: OS-light first visits (:root, no data-theme) get the explicit light chips too. */
+@media (prefers-color-scheme:light){
+  :root:not([data-theme]) .km-grade{background:transparent;box-shadow:none}
+  :root:not([data-theme]) .km-g0{color:#524b44}
+  :root:not([data-theme]) .km-g1{color:#8a2f1a}
+  :root:not([data-theme]) .km-g2{color:#7a5a08}
+  :root:not([data-theme]) .km-g3{color:#3a6a12}
+  :root:not([data-theme]) .km-g4{color:#0b6b42}
+}
 /* staff-only card for agents */
 .km-staff{margin:var(--km-s-6) var(--km-s-4) 0;padding:var(--km-s-5)!important;background:var(--km-paper);border:1px dashed var(--km-paper-edge);border-radius:var(--km-radius-sm);font-family:var(--km-font-mono);font-size:var(--km-fs-sm);position:relative}
 .km-staff::before,.km-receipt::before{content:"";position:absolute;left:0;right:0;top:-6px;height:6px;background:radial-gradient(circle 3px at 6px 6px,var(--km-bg) 98%,transparent) 0 0/12px 6px repeat-x}
