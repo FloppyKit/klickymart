@@ -1,0 +1,1 @@
+{"text": "We offer free standard shipping on all orders over $50 within the United States.", "expect": [["free_over", null, 50, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

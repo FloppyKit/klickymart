@@ -1,0 +1,1 @@
+{"text": "Hawaii and Alaska orders add $20 shipping.", "expect": [["per_region", 20, null, "AK-HI"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

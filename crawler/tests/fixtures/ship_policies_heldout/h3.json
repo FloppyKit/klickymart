@@ -1,0 +1,1 @@
+{"text": "Standard Shipping: $6.50 (3-5 business days).", "expect": [["flat", 6.5, null, "US"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

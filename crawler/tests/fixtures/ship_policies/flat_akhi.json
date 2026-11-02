@@ -1,0 +1,1 @@
+{"text": "Domestic shipping is $5.00. Shipping to Alaska and Hawaii is $15.", "expect": [["flat", 5, null, "US"], ["per_region", 15, null, "AK-HI"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

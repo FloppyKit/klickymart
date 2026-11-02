@@ -1,0 +1,1 @@
+{"text": "Free ground shipping on orders over $100 to the contiguous United States.", "expect": [["free_over", null, 100, "contiguous-US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

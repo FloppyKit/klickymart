@@ -1,0 +1,1 @@
+{"text": "Spend $80 and shipping is on us.", "expect": [["free_over", null, 80, "US"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

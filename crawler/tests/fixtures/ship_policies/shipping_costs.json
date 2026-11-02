@@ -1,0 +1,1 @@
+{"text": "Shipping costs $9.95 for all orders under 5 lbs.", "expect": [["flat", 9.95, null, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

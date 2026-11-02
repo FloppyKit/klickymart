@@ -1,0 +1,1 @@
+{"text": "We charge a flat $8 for shipping anywhere in the US.", "expect": [["flat", 8, null, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

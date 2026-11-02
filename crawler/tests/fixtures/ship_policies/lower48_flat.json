@@ -1,0 +1,1 @@
+{"text": "Flat rate shipping of $7 to the lower 48 states.", "expect": [["per_region", 7, null, "contiguous-US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

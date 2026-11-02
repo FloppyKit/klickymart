@@ -1,0 +1,1 @@
+{"text": "Rewards members get free shipping on all orders. Use code SHIP10 for free shipping on orders over $25.", "expect": [["free", null, null, "US", "c"], ["free_over", null, 25, "US", "c"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

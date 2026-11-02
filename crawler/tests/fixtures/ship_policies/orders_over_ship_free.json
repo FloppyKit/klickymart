@@ -1,0 +1,1 @@
+{"text": "Orders over $35 ship free! All other orders are charged at checkout.", "expect": [["free_over", null, 35, "US"], ["calculated", null, null, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

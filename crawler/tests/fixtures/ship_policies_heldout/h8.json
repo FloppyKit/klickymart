@@ -1,0 +1,1 @@
+{"text": "A $5 shipping fee applies to orders under $40; orders of $40 or more ship free.", "expect": [["flat", 5, null, "US"], ["free_over", null, 40, "US"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

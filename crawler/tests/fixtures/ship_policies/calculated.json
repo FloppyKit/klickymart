@@ -1,0 +1,1 @@
+{"text": "Shipping charges are calculated at checkout based on weight and destination.", "expect": [["calculated", null, null, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

@@ -1,0 +1,1 @@
+{"text": "FREE SHIPPING ON ALL ORDERS OVER $25", "expect": [["free_over", null, 25, "US"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

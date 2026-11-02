@@ -1,0 +1,1 @@
+{"text": "International orders ship for a flat rate of $25. Free shipping on US orders over $60.", "expect": [["free_over", null, 60, "US"]], "note": "synthetic fixture written for M4 S5 tests (typical Shopify policy phrasing), not a real store page"}

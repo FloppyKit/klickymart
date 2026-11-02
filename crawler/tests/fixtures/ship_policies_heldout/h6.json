@@ -1,0 +1,1 @@
+{"text": "Orders ship via USPS. Rates are calculated in checkout.", "expect": [["calculated", null, null, "US"]], "note": "HELD-OUT synthetic fixture written after the parser was tuned; scored, not tuned against"}

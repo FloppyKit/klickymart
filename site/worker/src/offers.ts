@@ -1,3 +1,5 @@
+import { deliveredField, withPolicy } from "./delivered";
+import type { ShipPolicy } from "./landed";
 import { DEFAULT_TRUST, tierRank, type TrustField } from "./trust-tier";
 import { storeFacts, deriveVerdict } from "./explain";
 import { storeCard, landedForProduct, hostOf, findRow } from "./store-card";
@@ -32,7 +34,7 @@ const normGtin = (g: string) => g.replace(/\D/g, "").replace(/^0+/, "");
 export interface OfferQuery { gtin?: string; mpn?: string; q?: string; zip?: string | null; domain?: string; in_stock?: boolean; max_price?: number; limit?: number; condition?: string; type?: string; brand_strict?: boolean }
 /** M4 S4: `tiers` (only when KM_TRUST_LABELS is on) adds a `trust` field to every row and lifts established stores within
  * the same checkout-blocked group. It never removes a row. Tips/amounts are not inputs anywhere in this function. */
-export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null) {
+export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null, policies: Map<string, ShipPolicy> | null = null) {
   const limit = Math.min(Math.max(qy.limit ?? 20, 1), 100);
   const g = qy.gtin ? normGtin(qy.gtin) : null;
   const m = qy.mpn ? qy.mpn.toLowerCase().replace(/[^a-z0-9]/g, "") : null;
@@ -65,7 +67,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   scored.sort((a, b) => { const ra = rank(a), rb = rank(b); for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!; return 0; });
   const items = scored.slice(0, limit).map(({ o, conf, how }) => {
     const row = rows.get(o.d);
-    const raw = row ? parseRaw(row.raw_json) : {};
+    const raw = withPolicy(row ? parseRaw(row.raw_json) : {}, o.d, policies); // M4 S5: observed policy only when the record has none
     const pay = o.dn?.price_usd ?? o.p; // what the buyer pays (gift-card fee included when observed)
     const landed = zip && o.c === "USD" ? landedFor(raw, zip, pay, o.sh ?? null, landedOptsFor(o.n, raw)) : undefined;
     return {
@@ -73,6 +75,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
       price: o.dn?.price_usd ?? o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
       ...(tiers ? { trust: trustOf(o.d) ?? DEFAULT_TRUST(Math.floor(Date.now() / 1000)) } : {}),
+      ...(policies ? { delivered: deliveredField(landed, zip) } : {}),
       ...(o.dn ? { denomination: o.dn, ...giftCardPrice(o) } : {}),
       shipping: rowShipping(landed, o.sh),
       store: row ? { ...storeCard(snap, row.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(row.d)}`, ...(row.d !== o.d ? { matched_via: `${o.d} -> ${row.d} (same registrable domain)` } : {}) } : null,
@@ -104,7 +107,7 @@ type LiveVariant = { url?: string; title?: string; price?: { amount?: number; cu
 type LiveProduct = { id?: string; title?: string; variants?: LiveVariant[] };
 /** Normalize live Shopify Catalog products into product results with store facts, then apply our filters AFTER fetching
  * (the catalog ignores max_price/in_stock). Nothing here is stored. */
-export function liveItems(products: LiveProduct[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null) {
+export function liveItems(products: LiveProduct[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null, policies: Map<string, ShipPolicy> | null = null) {
   const applied: string[] = []; let dropped = 0;
   const out: Record<string, unknown>[] = [];
   for (const p of products) {
@@ -119,9 +122,10 @@ export function liveItems(products: LiveProduct[], snap: Snapshot, origin: strin
     out.push({
       source: "shopify-catalog-live", title: p.title || v.title || null, name: p.title || v.title || null, variant: v.title ?? null, price, currency: cur, stock: avail === true ? "in" : avail === false ? "out" : null,
       url: v.url ?? null, domain: hostOf(v.url), checked_at: new Date().toISOString(), store: card,
-      ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null, p.title || v.title || "") } : {}),
+      ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null, p.title || v.title || "", policies) } : {}),
     });
     const last = out[out.length - 1]!; last.shipping = rowShipping(last.landed as Record<string, any> | undefined, null);
+    if (policies) last.delivered = deliveredField(last.landed as Record<string, unknown> | undefined, qy.zip);
   }
   if (tiers) { // M4 S4: label every live row (unknown store = new-and-risky) and lift established ones; stable, nothing dropped
     const nowS = Math.floor(Date.now() / 1000);

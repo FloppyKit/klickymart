@@ -1,3 +1,5 @@
+import { withPolicy } from "./delivered";
+import type { ShipPolicy } from "./landed";
 import { landedOptsFor } from "./offers";
 /** Store facts attached to every product result (indexed offers and live Shopify Catalog products). One source: storeFacts() + record. */
 import type { Snapshot } from "./index-mem";
@@ -82,8 +84,9 @@ export function storeCard(snap: Snapshot, domainOrUrl: string, origin: string) {
 }
 
 /** Landed parts for any priced product at a ZIP, using the indexed record when the store is indexed. */
-export function landedForProduct(snap: Snapshot, domainOrUrl: string, zip: string, price: number, offerShip?: OfferShip | null, title = "") {
+export function landedForProduct(snap: Snapshot, domainOrUrl: string, zip: string, price: number, offerShip?: OfferShip | null, title = "", policies: Map<string, ShipPolicy> | null = null) {
   const row = findRow(snap, domainOrUrl);
-  const raw = row ? parseRaw(row.raw_json) : {};
+  let host = domainOrUrl; try { host = new URL(domainOrUrl).hostname; } catch { /* already a domain */ }
+  const raw = withPolicy(row ? parseRaw(row.raw_json) : {}, host, policies); // M4 S5
   return landedFor(raw, zip, price, offerShip ?? null, landedOptsFor(title, raw));
 }
