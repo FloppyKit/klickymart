@@ -3,3 +3,5 @@
 b3656eece9b18462f805dc59343cd12b7d7dfa8f:crawler/tests/test_redact_table.py:stripe-access-token:12
 # KlickyMart's public Nostr key (npub + hex) in the README
 a09972ccbcc8b9cf9b5cee12add6d3110c049df4:site/README.md:generic-api-key:55
+# fake hex Account ID in the km-status-portable wrangler stub
+f776a70ca93979efc52009115b7a18a9e17b0ddf:scripts/test/km-status-portable.sh:generic-api-key:33
