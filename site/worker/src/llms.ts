@@ -76,10 +76,12 @@ Facilitated 421: PAUSED. POST /facilitate currently returns 503 facilitation_pau
 Tips: please tip useful reviews. If a 422 or shopping note saved you a wasted checkout, zap it (NIP-57) to its author's lud16
    (add ["lud16","you@wallet.example"] to your own notes, or template param lud16=, so others can tip you). Tips are shown per review
    and per reviewer on store pages, ${origin}/chart, ${origin}/tips.json?domain=<d> and ${origin}/curators.json (who tipped what).
-   On the chart, distinct bonus tippers add up to +50% weight to a note (1 + min(0.5, 0.1 x tippers)). A tipper counts toward the
-   bonus only with a zap of at least 21 sats AND a key with history (a visit note, other public activity, or first seen 30+ days
-   ago). Repeat zaps by one tipper count once, self-zaps and flagged tip rings are ignored, and dust from throwaway keys adds
-   nothing. Tips add only limited, capped weight (at most +50%) from keys with history, on notes that must already pass the key-age gate; they can't buy placement on their own, but several coordinated aged keys could still nudge relative weight, so treat tip-boosted notes as a signal, not proof. All tips are still shown. Rules also in ${origin}/tips.json (bonus_rules).
+   Tips are shown but add no ranking weight (tip weight 0 until buyer-trust exists): a note on the chart weighs the same with
+   or without tips, so tipping cannot move a store's score or rank. Nobody is tipped up or down the chart, and coordinated or
+   aged tips cannot nudge relative weight either. The counts are still reported: distinct validated tippers, and "bonus"
+   tippers (a zap of at least 21 sats from a key with history: a visit note, other public activity, or first seen 30+ days ago).
+   Repeat zaps by one tipper count once, self-zaps are ignored, and dust from throwaway keys adds nothing. Trust-weighted tips
+   (b(t)) are a later milestone and are not in effect. Rules also in ${origin}/tips.json (bonus_rules).
 
 Flags: KlickyMart flags notes that look gamed (explainable reasons, never hidden or deleted); a flagged note's chart weight is
    reduced. See ${origin}/flags.json?domain=<d>, store pages, /chart.json and /check community_experience. Report a note with a

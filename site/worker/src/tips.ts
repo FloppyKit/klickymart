@@ -1,18 +1,23 @@
 import { visibleSql } from "./takedown";
 /** Tips on 422 reviews / shopping-experience notes: NIP-57 zap receipts (kind 9735) whose `e` tag points at a note.
- * Display counts every receipt; ranking weight counts only DISTINCT tippers with a validated receipt, ignores self-zaps,
- * and is capped (see TIP_WEIGHT). Read-only over nostr_events; nothing is published. */
+ * Display counts every receipt; every count (tips, sats, distinct / validated / bonus tippers) is kept and shown, but tips
+ * add NO ranking weight (M1 rule 5: tip weight is 0 until buyer-trust exists, so tips display only).
+ * Read-only over nostr_events; nothing is published. */
 import { decodeBolt11 } from "./bolt11";
 import { cachedZapKey, checkZapReceipt, lud16Of } from "./pay-binding";
 import { verifyNostrEvent } from "./nostr-verify";
 
 export const ZAP_RECEIPT = 9735;
-/** Ranking multiplier for a note: 1 + min(CAP, PER * distinct validated tippers). */
-export const TIP_WEIGHT = { PER: 0.1, CAP: 0.5 };
+/** Ranking multiplier for a note. M1 rule 5 (Matt, 2026-10-31): until M2 exists, b(t) (buyer trust) is not available, so the
+ * tip part of the weight is 0 and tips are shown only. PER/CAP keep the M2 design numbers (+10% per bonus tipper, +50% cap)
+ * for when trust-weighted tips ship; they are NOT in effect: tipWeight() returns 1 for every input. */
+export const TIP_WEIGHT = { PER: 0.1, CAP: 0.5, IN_EFFECT: false, WEIGHT: 0 };
 /** A tipper counts toward the bonus only with a zap of at least MIN_SATS and a key with history: a visit note, other
  * public activity we hold, or first seen at least MIN_AGE_S ago. Dust and throwaway keys still show, but add nothing. */
 export const TIP_BONUS_RULES = { MIN_SATS: 21, MIN_AGE_S: 30 * 86400 };
-export const tipWeight = (distinctValidated: number) => 1 + Math.min(TIP_WEIGHT.CAP, TIP_WEIGHT.PER * distinctValidated);
+/** Ranking multiplier a note gets from its tips: always 1 (tip weight 0, M1 rule 5). Kept as a function so callers (chart,
+ * aggregate, flags) read one place; when M2 ships, this becomes 1 + min(TIP_WEIGHT.CAP, TIP_WEIGHT.PER * distinctValidated). */
+export const tipWeight = (_distinctValidated: number) => 1;
 
 type Ev = { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string };
 export interface Tip { receipt: string; target: string; tipper: string | null; sats: number | null; validated: boolean; self: boolean; created_at: number; eligible?: boolean }

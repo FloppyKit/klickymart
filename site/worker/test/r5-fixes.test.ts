@@ -52,7 +52,8 @@ describe("tip bonus resists dust (Blair r5)", () => {
     expect(summarize(Array.from({ length: 20 }, (_, i) => tip(`big-new${i}`, 1000, false))).weight).toBe(1); // no history
     expect(summarize(Array.from({ length: 20 }, (_, i) => tip(`old-dust${i}`, 20, true))).weight).toBe(1);   // below 21 sats
     const real = [tip("a", 21, true), tip("b", 500, true)];
-    expect(summarize([...dust, ...real]).weight).toBeCloseTo(tipWeight(2));
+    expect(tipWeight(2)).toBe(1); // M1 rule 5: tip weight is 0, so tips never move a note's weight
+    expect(summarize([...dust, ...real]).weight).toBe(1);
     expect(summarize([...dust, ...real]).tips).toBe(22); // still shown
   });
 });

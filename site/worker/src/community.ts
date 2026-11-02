@@ -85,7 +85,7 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
     const t = await loadTips(db, d);
     if (t.byNote.size) out.tips = { ...summarize([...t.byNote.values()].flat()),
       per_review: [...t.byNote].map(([id, x]) => { const s = summarize(x); return { id, tips: s.tips, sats: s.sats, distinct_tippers: s.distinct_tippers }; }),
-      per_reviewer: perReviewer(t), how: "Zap (NIP-57) a useful 422 or shopping note to tip its author. Distinct validated tippers add up to +50% weight to that note on /chart; self-zaps are ignored." };
+      per_reviewer: perReviewer(t), how: "Zap (NIP-57) a useful 422 or shopping note to tip its author. Tips are shown; they add no ranking weight on /chart (tip weight 0 until buyer-trust exists). Self-zaps are ignored." };
   } catch { /* ignore */ }
   try {
     const fl = [...(await readFlagCache(db, d)).values()].filter((f) => f.reasons.length);

@@ -641,8 +641,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const body = path === "/curators.json"
       ? { curators: curators(t), note: "Curator record: who tipped which agent notes (public NIP-57 zap receipts). Self-zaps excluded." }
       : { domain: d ?? null, per_review: [...t.byNote].map(([id, x]) => ({ id, d: t.noteDomain.get(id) ?? null, author: t.author.get(id) ?? null, ...summarize(x) })), per_reviewer: perReviewer(t),
-          weight_rule: "note weight x (1 + min(0.5, 0.1 x bonus tippers)); self-zaps ignored; flagged tip rings / tip-only keys add nothing",
-          bonus_rules: { min_sats_per_zap: TIP_BONUS_RULES.MIN_SATS, tipper_history: `a visit note, other public activity we hold, or a key first seen ${TIP_BONUS_RULES.MIN_AGE_S / 86400}+ days ago`, distinct: "each tipper counts once per note", cap: "+50% per note at most", display: "every tip is shown (count, sats); only bonus tippers add weight" } };
+          weight_rule: "tips add no ranking weight (0) until buyer-trust exists; shown only",
+          bonus_rules: { min_sats_per_zap: TIP_BONUS_RULES.MIN_SATS, tipper_history: `a visit note, other public activity we hold, or a key first seen ${TIP_BONUS_RULES.MIN_AGE_S / 86400}+ days ago`, distinct: "each tipper counts once per note", cap: "not in effect: tips add no ranking weight (0) until buyer-trust exists", in_effect: false, tip_weight: 0, display: "every tip is shown (count, sats); bonus tippers are counted but add no weight today" } };
     return Response.json({ ...licenseMetaBlock(), ...body }, { headers: { ...apiHeaders(snap.version, 0), "Cache-Control": "public, max-age=60" } });
   }
 

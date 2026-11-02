@@ -95,7 +95,7 @@ describe("POST /facilitate (facilitated 421)", () => {
 });
 
 describe("tips on 422 notes (NIP-57)", () => {
-  it("counts tips, ignores self-zaps, caps weight, exposes curators, and boosts chart weight", async () => {
+  it("counts tips, ignores self-zaps, adds no chart weight (tip weight 0), exposes curators", async () => {
     const a = key(), b = key(), lnurl = key();
     const n1 = sign(a, 422, [["r", DOM], ["depth", "paid"], ["basis", "visit"], ["rating", "5", "5"], ["attempt", "paid"]], "great");
     const n2 = sign(b, 422, [["r", DOM], ["depth", "browse"], ["basis", "visit"], ["rating", "2", "5"], ["attempt", "browse"]], "meh");
@@ -114,12 +114,13 @@ describe("tips on 422 notes (NIP-57)", () => {
     expect(res.accepted).toBe(receipts.length); // receipts are not per-pubkey rate limited
     const t = await loadTips(env.DB, DOM);
     const s = summarize(t.byNote.get(n1.id)!);
-    expect(s).toMatchObject({ tips: 8, sats: 8000, distinct_tippers: 7, validated_tippers: 7, self_zaps_ignored: 1, weight: 1.5 });
-    expect(tipWeight(2)).toBeCloseTo(1.2);
+    // M1 rule 5: counts and sats are shown, but the ranking weight from tips is always 1 (tip weight 0)
+    expect(s).toMatchObject({ tips: 8, sats: 8000, distinct_tippers: 7, validated_tippers: 7, bonus_tippers: 7, self_zaps_ignored: 1, weight: 1 });
+    expect(tipWeight(2)).toBe(1);
     expect(curators(t).length).toBe(7);
     const agg = (await loadAggregates(env.DB, [DOM], Date.now(), { minKeyAgeS: 0 })).get(DOM)!;
     expect(agg.tips.sats).toBe(8000);
-    expect(agg.success_score).toBe(0.6); // 1.5 / (1.5 + 1)
+    expect(agg.success_score).toBe(0.5); // 1 / (1 + 1): the tipped note weighs the same as the other note
     const tj = await (await SELF.fetch(`https://example.com/tips.json?domain=${DOM}`)).json() as { per_review: { id: string; sats: number }[] };
     expect(tj.per_review.find((x) => x.id === n1.id)?.sats).toBe(8000);
     const cj = await (await SELF.fetch("https://example.com/curators.json")).json() as { curators: unknown[] };
@@ -178,7 +179,7 @@ describe("tips on 422 notes (NIP-57)", () => {
     it("a proven single-receiver key keeps its weight", async () => {
       setCustodialZapperKeys("");
       const { w } = await setup("a@ln.example");
-      expect(await w()).toMatchObject({ validated_tippers: 1, bonus_tippers: 1, weight: 1.1 });
+      expect(await w()).toMatchObject({ validated_tippers: 1, bonus_tippers: 1, weight: 1 });
     });
     it("env CUSTODIAL_ZAPPER_KEYS deny-lists a key: self-zap via it gives 0", async () => {
       const { zk, w } = await setup("a@ln.example");
@@ -187,7 +188,7 @@ describe("tips on 422 notes (NIP-57)", () => {
         expect(custodialZapperKey(pk(zk))).toBe(true);
         expect(await w()).toMatchObject({ validated_tippers: 0, weight: 1 });
       } finally { setCustodialZapperKeys(""); }
-      expect((await w()).weight).toBe(1.1);
+      expect(await w()).toMatchObject({ validated_tippers: 1, weight: 1 });
     });
     it("an unknown key (no lnurl_cache proof) gives 0", async () => {
       const { w } = await setup("a@ln.example");

@@ -377,10 +377,10 @@ Reviews (422 shopping-experience notes) can be zapped (NIP-57). A review MAY car
 
 Indexers read 9735 zap receipts whose `e` tag points at a 422 and SHOULD show, per review and per reviewer: tip count, distinct tippers and sats. For ranking:
 - only **distinct tippers** count (one tipper zapping ten times is one tip); a zap from the review's own author (`P` of the 9734 == review pubkey, or tipper == author) is ignored;
-- the weight added is **capped** (for example `1 + min(0.5, 0.1 * distinct_tippers)`), so tips amplify a review but cannot dominate;
+- tips add **no ranking weight today**. Any weight from tips must come from buyer trust that the indexer can actually check (`b(t)`); until that exists an indexer MUST NOT let tips move a review's rank, so tips are display only;
 - receipts are validated per NIP-57 where possible; unvalidated receipts count in the display, not in the weight.
 
-**KlickyMart implementation (2026-10-30).** Tips are read from 9735 receipts on recent 422 / kind-1 note ids; shown on store pages, `/chart`, `/chart.json` (`community.tips`), `/tips.json?domain=` (per review, per reviewer) and `/curators.json`. Weight is `1 + min(0.5, 0.1 * distinct validated tippers)`; a tip is validated when both the 9735 and its embedded 9734 signatures check and the invoice has an amount.
+**KlickyMart implementation (2026-10-30, tip weight 0 since 2026-11-02).** Tips are read from 9735 receipts on recent 422 / kind-1 note ids; shown on store pages, `/chart`, `/chart.json` (`community.tips`), `/tips.json?domain=` (per review, per reviewer) and `/curators.json`. A review's ranking weight is **1** whatever its tips: **tip weight is 0 until buyer trust (M2 `b(t)`) exists**, so tips are displayed only and cannot move the chart. The counts are still reported (tip count, sats, distinct tippers, validated tippers, and "bonus" tippers: at least 21 sats from a key with history). A tip is validated when both the 9735 and its embedded 9734 signatures check, the receipt is bound to the note's author, and the invoice has an amount.
 
 **Curator record.** Indexers MAY publish a per-tipper summary (who tipped which reviews, sats and count) so tippers are visible as curators; this is public data already present in the receipts.
 
