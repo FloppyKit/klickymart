@@ -40,6 +40,10 @@ KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 KM_KEY_RECORDS = "off"  # M3: /open-store/keys + cert_hash off by default
 KM_SNAPSHOT_DIGEST = "off"  # M4 S2: Merkle snapshot_digest + /open-store/proof off by default
 KM_CRAWL_QUEUE = "off"  # M4 S3: live-result domain queue (domain only) off by default
+KM_TRUST_LABELS = "off"  # M4 S4: trust tiers + ranking lift off by default
+KM_TRUST_BUYS = "off"  # M4 S4: social-graph buy/complaint inputs off by default
+KM_TRUST_SEED_NPUB = "npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqfz25ah"  # KlickyMart account (public; Matt 2026-11-01): its follows define the graph
+KM_TRUST_RELAY = ""  # our own relay (wss://...) for kind-3/kind-1 reads; empty = trust job does nothing
 SITE_ORIGIN = "https://klickymart.com"
 SNAPSHOT_TTL_S = "60"
 CONTACT = "bot@klickymart.com"
@@ -87,6 +91,10 @@ KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 KM_KEY_RECORDS = "off"  # M3: /open-store/keys + cert_hash off by default
 KM_SNAPSHOT_DIGEST = "off"  # M4 S2: Merkle snapshot_digest + /open-store/proof off by default
 KM_CRAWL_QUEUE = "off"  # M4 S3: live-result domain queue (domain only) off by default
+KM_TRUST_LABELS = "off"  # M4 S4: trust tiers + ranking lift off by default
+KM_TRUST_BUYS = "off"  # M4 S4: social-graph buy/complaint inputs off by default
+KM_TRUST_SEED_NPUB = "npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqfz25ah"  # KlickyMart account (public; Matt 2026-11-01): its follows define the graph
+KM_TRUST_RELAY = ""  # our own relay (wss://...) for kind-3/kind-1 reads; empty = trust job does nothing
 SITE_ORIGIN = "https://klickymart.com"
 ENVIRONMENT = "production"  # R12-005: with this, a missing SUBMIT_SALT secret makes rate-limited endpoints return 503
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).

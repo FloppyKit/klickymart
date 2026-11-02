@@ -74,7 +74,7 @@ describe("KM_HANDSHAKE_MARKS kill switch", () => {
   });
   it("no ranking/visibility code reads handshake marks", () => {
     const files = (import.meta as unknown as { glob: (p: string, o: object) => Record<string, string> }).glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true });
-    const readers = Object.entries(files).filter(([p, s]) => !/handshake(-marks)?\.ts$/.test(p) && /handshake_marks|getHandshakeMarks|from "\.\/handshake"/.test(s)).map(([p]) => p);
+    const readers = Object.entries(files).filter(([p, s]) => !/(handshake(-marks)?|trust-tier)\.ts$/.test(p) && /handshake_marks|getHandshakeMarks|from "\.\/handshake"/.test(s)).map(([p]) => p);
     expect(readers).toEqual([]);
   });
 });

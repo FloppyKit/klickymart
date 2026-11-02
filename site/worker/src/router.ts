@@ -52,6 +52,7 @@ import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
 import { queueDomains } from "./trust-obs";
+import { loadTiers } from "./trust-tier";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
@@ -123,6 +124,12 @@ export interface Env {
   KM_SNAPSHOT_DIGEST?: string;
   /** M4 S3 switch (default OFF): KM_CRAWL_QUEUE queues live-result domains (domain only, no result data). */
   KM_CRAWL_QUEUE?: string;
+  /** M4 S4 (default OFF): KM_TRUST_LABELS labels + lifts established stores; KM_TRUST_BUYS enables the social-graph buy/complaint inputs. */
+  KM_TRUST_LABELS?: string;
+  KM_TRUST_BUYS?: string;
+  /** M4 S4: graph seed (the KlickyMart account npub, public); KM_TRUST_RELAY = our own relay (wss) for kind-3/kind-1 reads. */
+  KM_TRUST_SEED_NPUB?: string;
+  KM_TRUST_RELAY?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -690,7 +697,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-offers");
     const allOffers = parseOffers(EMBEDDED_OFFERS_NDJSON || "");
     addKnownBrands(allOffers.map((o) => (o.b ?? "").split(/\s+/)[0] ?? "").filter((w) => w.length >= 3 && !/gift|card|the/i.test(w)));
-    const r = findOffers(allOffers, snap, origin, q);
+    const tiers = await loadTiers(env, Math.floor(Date.now() / 1000)); // M4 S4: null unless KM_TRUST_LABELS is on
+    const r = findOffers(allOffers, snap, origin, q, tiers);
     if (r.ok && live && q.q) {
       // Page through the live catalog (bounded) until filters leave enough rows. Catalog also gets price/condition natively.
       const want = Math.min(q.limit ?? 10, 50), MAX_PAGES = 4;
@@ -703,11 +711,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         pages++; const ps = lv.results?.products ?? []; scanned += ps.length; products.push(...ps);
         const pg = lv.pagination as { has_next_page?: boolean; cursor?: string; total_count?: number } | null;
         totalCount = pg?.total_count ?? totalCount; cursor = pg?.has_next_page ? pg.cursor : undefined;
-        const kept = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q).items.length;
+        const kept = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q, tiers).items.length;
         if (kept >= want) break;
       } while (cursor && pages < MAX_PAGES);
       if (pages > 0) {
-        const li = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q);
+        const li = liveItems(products as Parameters<typeof liveItems>[0], snap, origin, q, tiers);
         const ann = li.items.map((x) => annotate(x, q.q));
         const rel = ann.filter((x) => !x.below_floor); const relDropped = ann.length - rel.length;
         const pf = applyProductFilters(dedupe(rel).rows, { condition: q.condition, type: q.type, brand_strict: q.brand_strict });

@@ -1,5 +1,7 @@
 import { handleRequest, loadSnapshot, mcpErrorFor, type Env as RouterEnv } from "./router";
 import { writeDailyHead } from "./open-store";
+import { relayQuery, runTrustJob, trustBuysEnabled } from "./trust-tier";
+import { workerConnect } from "./relay-ingest";
 import { catchUp, relayList } from "./relay-ingest";
 import { ingestCtx, liveIngestEnabled } from "./ingester-do";
 import { HTML_CSP } from "./render/layout";
@@ -50,6 +52,8 @@ export default {
       }
       if (env.DB) await catchUp(env.DB, relayList(env.RELAY_URLS), await ingestCtx(e));
       // M2: one signed-results head per daily cron run, only when KM_SIGNED_RESULTS is on (no-op otherwise).
+      // M4 S4: daily trust job (no-op unless KM_TRUST_BUYS is on, the seed npub is valid and KM_TRUST_RELAY is our relay).
+      if (env.DB && trustBuysEnabled(e) && e.KM_TRUST_RELAY) { try { await runTrustJob(e, relayQuery(e.KM_TRUST_RELAY, workerConnect), Math.floor(Date.now() / 1000)); } catch { /* next day */ } }
       if (env.DB) { try { const s = await loadSnapshot(e); await writeDailyHead(e, s.version, Math.floor(Date.now() / 1000), s.rows); } catch { /* head stays stale; routes 503 */ } }
     })());
   },

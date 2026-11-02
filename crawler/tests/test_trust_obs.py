@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest, trust_obs as T
 
 AT = 1_793_000_000
-VEC = "42d5d635c3361bc0f6bf73b46b644dd4defec618bb23c74cceaaee3a16b6a526"  # same vector in site/worker/test/trust-obs.test.ts
+VEC = "42d5d635c3361bc0f6bf73b46b644dd4defec618bb23c74cceaaee3a16b6a526"  # same vector in site/worker/test/trust-obs.test.ts  # secret-scan: allow (sha256 test vector shared with the Worker test, not a key)
 RO = "https://rdap.org"
 VS = "https://rdap.verisign.com/com/v1/domain/shop.com"
 
@@ -124,3 +124,10 @@ def test_append_only_tables_never_updated_or_deleted_in_worker_src():
     rx = re.compile(r"(UPDATE|DELETE\s+FROM)\s+(store_trust_obs|live_seen_domains|snapshot_nodes|snapshot_leaves)\b", re.I)
     hits = [f for f in glob.glob(os.path.join(src, "**", "*.ts"), recursive=True) if rx.search(open(f).read())]
     assert hits == []
+
+def test_trust_ranking_never_imports_tip_modules():
+    import re
+    src = os.path.join(os.path.dirname(__file__), "..", "..", "site", "worker", "src")
+    for f in ("trust-tier.ts", "offers.ts", "trust-obs.ts"):
+        imports = re.findall(r'from\s+"([^"]+)"', open(os.path.join(src, f)).read())
+        assert not any(re.search(r"tip", i) for i in imports), (f, imports)

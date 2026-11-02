@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { QUEUE_DAILY_CAP, appendObs, crawlQueueEnabled, obsId, queueDomains, validateObs } from "../src/trust-obs";
 
-const VEC = "42d5d635c3361bc0f6bf73b46b644dd4defec618bb23c74cceaaee3a16b6a526"; // same vector in crawler/tests/test_trust_obs.py
+const VEC = "42d5d635c3361bc0f6bf73b46b644dd4defec618bb23c74cceaaee3a16b6a526"; // same vector in crawler/tests/test_trust_obs.py // secret-scan: allow (sha256 test vector shared with the crawler test, not a key)
 const AT = 1_793_000_000;
 const mk = (o: Partial<Record<string, unknown>> = {}) => {
   const base = { domain: "a.com", signal: "return_policy", value_json: '{"window_days":30}', evidence_url: "https://a.com/policies/refund-policy", quote: "Returns within 30 days.", method: "shopify-policy-page", observed_at: AT, ...o };

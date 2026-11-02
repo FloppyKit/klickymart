@@ -1,3 +1,4 @@
+import { DEFAULT_TRUST, tierRank, type TrustField } from "./trust-tier";
 import { storeFacts, deriveVerdict } from "./explain";
 import { storeCard, landedForProduct, hostOf, findRow } from "./store-card";
 /** GO D1: product offers observed by KlickyBot (deterministic: schema.org JSON-LD and Shopify /products.json only).
@@ -29,7 +30,9 @@ import { queryTokens, offerTokens, coverage } from "./search-terms";
 const normGtin = (g: string) => g.replace(/\D/g, "").replace(/^0+/, "");
 
 export interface OfferQuery { gtin?: string; mpn?: string; q?: string; zip?: string | null; domain?: string; in_stock?: boolean; max_price?: number; limit?: number; condition?: string; type?: string; brand_strict?: boolean }
-export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: OfferQuery) {
+/** M4 S4: `tiers` (only when KM_TRUST_LABELS is on) adds a `trust` field to every row and lifts established stores within
+ * the same checkout-blocked group. It never removes a row. Tips/amounts are not inputs anywhere in this function. */
+export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null) {
   const limit = Math.min(Math.max(qy.limit ?? 20, 1), 100);
   const g = qy.gtin ? normGtin(qy.gtin) : null;
   const m = qy.mpn ? qy.mpn.toLowerCase().replace(/[^a-z0-9]/g, "") : null;
@@ -57,7 +60,8 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
   // R11-001 / K12-101: offers from checkout-blocked stores rank after every usable store, whatever the match confidence.
   const blockedMemo = new Map<string, number>();
   const isBlocked = (d: string) => { let v = blockedMemo.get(d); if (v === undefined) { const r = rows.get(d); v = r && deriveVerdict(r, parseRaw(r.raw_json)).verdict === "checkout-blocked" ? 1 : 0; blockedMemo.set(d, v); } return v; };
-  const rank = (x: { o: Offer; conf: number }) => [isBlocked(x.o.d), -(x.conf), x.o.st === "in" ? 0 : x.o.st ? 2 : 1, -(rows.get(x.o.d)?.co ?? -1), x.o.p];
+  const trustOf = (d: string) => tiers?.get(d) ?? tiers?.get(d.replace(/^www\./, ""));
+  const rank = (x: { o: Offer; conf: number }) => [isBlocked(x.o.d), ...(tiers ? [tierRank(trustOf(x.o.d))] : []), -(x.conf), x.o.st === "in" ? 0 : x.o.st ? 2 : 1, -(rows.get(x.o.d)?.co ?? -1), x.o.p];
   scored.sort((a, b) => { const ra = rank(a), rb = rank(b); for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!; return 0; });
   const items = scored.slice(0, limit).map(({ o, conf, how }) => {
     const row = rows.get(o.d);
@@ -68,6 +72,7 @@ export function findOffers(offers: Offer[], snap: Snapshot, origin: string, qy: 
       domain: o.d, name: o.n, brand: o.b ?? null, gtin: o.g ?? null, mpn: o.m ?? null, sku: o.s ?? null,
       price: o.dn?.price_usd ?? o.p, currency: o.c, stock: o.st ?? null, condition: o.cd ?? null, seller: o.sl ?? null, url: o.u,
       method: o.me, src: o.src, checked_at: o.t, match: { how, conf },
+      ...(tiers ? { trust: trustOf(o.d) ?? DEFAULT_TRUST(Math.floor(Date.now() / 1000)) } : {}),
       ...(o.dn ? { denomination: o.dn, ...giftCardPrice(o) } : {}),
       shipping: rowShipping(landed, o.sh),
       store: row ? { ...storeCard(snap, row.d, origin), checkout_depth: storeFacts(row).co, record: `${origin}/records/${encodeURIComponent(row.d)}`, ...(row.d !== o.d ? { matched_via: `${o.d} -> ${row.d} (same registrable domain)` } : {}) } : null,
@@ -99,7 +104,7 @@ type LiveVariant = { url?: string; title?: string; price?: { amount?: number; cu
 type LiveProduct = { id?: string; title?: string; variants?: LiveVariant[] };
 /** Normalize live Shopify Catalog products into product results with store facts, then apply our filters AFTER fetching
  * (the catalog ignores max_price/in_stock). Nothing here is stored. */
-export function liveItems(products: LiveProduct[], snap: Snapshot, origin: string, qy: OfferQuery) {
+export function liveItems(products: LiveProduct[], snap: Snapshot, origin: string, qy: OfferQuery, tiers: Map<string, TrustField> | null = null) {
   const applied: string[] = []; let dropped = 0;
   const out: Record<string, unknown>[] = [];
   for (const p of products) {
@@ -117,6 +122,11 @@ export function liveItems(products: LiveProduct[], snap: Snapshot, origin: strin
       ...(qy.zip && cur === "USD" ? { landed: landedForProduct(snap, v.url ?? "", qy.zip, price, null, p.title || v.title || "") } : {}),
     });
     const last = out[out.length - 1]!; last.shipping = rowShipping(last.landed as Record<string, any> | undefined, null);
+  }
+  if (tiers) { // M4 S4: label every live row (unknown store = new-and-risky) and lift established ones; stable, nothing dropped
+    const nowS = Math.floor(Date.now() / 1000);
+    for (const r of out) r.trust = tiers.get(String(r.domain ?? "").replace(/^www\./, "")) ?? DEFAULT_TRUST(nowS);
+    out.sort((a, b) => tierRank(a.trust as TrustField) - tierRank(b.trust as TrustField));
   }
   if (qy.max_price !== undefined) applied.push(`max_price<=${qy.max_price} USD`);
   if (qy.in_stock) applied.push("in_stock");
