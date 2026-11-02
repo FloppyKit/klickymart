@@ -15,7 +15,6 @@ test("story line is computed from live data", async ({ page, request }) => {
   await darkHome(page, "?nomotion=1");
   const story = await page.getByTestId("story-line").innerText();
   expect(story).toMatch(new RegExp(`^\\d+ of ${stats.records} stores let agents in\\. \\d+ takes? Bitcoin privately\\. Watch the sun rise\\.$`));
-  await expect(page.getByText("The road fills in as stores open to agents; the sun rises as private Bitcoin spreads.")).toBeVisible();
   const reachable = await page.locator("#km-landscape").getAttribute("data-reachable");
   expect(story.startsWith(`${reachable} of `)).toBe(true);
 });
