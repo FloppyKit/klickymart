@@ -24,26 +24,22 @@
 - Keys live at `/home/box/secrets/klickymart/` (700/600), read by path only; never cat/echo/argv. Rule Auditor is
   sweeping the box for plaintext secrets; anything found gets rolled with Matt.
 
-## Open item: Klicky's first GO
-`site/worker/src/ingester-do.ts:10` `const ALARM_MS = 30_000;` self-re-arms at `ingester-do.ts:44`
-(`finally { ... setAlarm(Date.now() + ALARM_MS) }`) and is first armed at `ingester-do.ts:38`, behind
-`LIVE_INGEST=1` (`liveIngestEnabled`, line 23). Remove the loop or make it >= 24 h behind the deploy flag.
-`km-deploy.sh` refuses every deploy until this is fixed (schedule gate).
+## Status (re-checked 2026-11-01 ~9:00 PM CT)
+Klicky's first GO is done. `main` 016e596 was deployed through `km-deploy.sh` at 6:58 PM CT as `klickymart-production`
+version fe74e814 (message `git:016e596`); `km-status.sh` passes every check (CI green on HEAD, deployed = HEAD,
+only cron `15 6 * * *`, one Worker, usage < 1%). Resolved:
+- DO alarm loop: `ALARM_MS` is gone. `LIVE_INGEST` is only an off switch (`site/worker/src/ingester-do.ts:23-25,44,48`):
+  off (the default, not set in `site/wrangler.toml`) = shut down, drop the alarm, no re-arm.
+- e2e: debug screenshots in `site/e2e/agent-upgrades.spec.ts` now use `animations: "disabled"`; CI `site` is green.
+- Smoke: the whole `site` CI job took ~6 min on 016e596 (run 41369436057), down from ~19.9 min for smoke alone.
+- Old key paths: `crawler/keygen.py:5` reads `KM_CRAWLER_NSEC` (default `/home/box/secrets/klickymart/crawler.nsec`);
+  `site/README.md:56` names `/home/box/secrets/klickymart/facilitator.nsec`.
 
-Also in Klicky's first GO:
-- **e2e red:** two debug `page.screenshot` calls in `site/e2e/agent-upgrades.spec.ts` (line 27, full-page `about-dark-desktop-agents.png`, and line 59, `check-blocked-alternatives-dark-desktop.png`) time out at
-  90 s after fonts load; the page likely never settles. Fix with `animations: "disabled"` / `reducedMotion: "reduce"`, or
-  drop those debug screenshots.
-- **Slow smoke:** `site/e2e/smoke.spec.ts` takes ~19.9 min; speed it up or run it in parallel.
-- Workflow timeouts are a SEPARATE PR from cloud agent bc-fd2dbd19 into cursor/site-v1-9b41, for Matt to merge (not Klicky).
-- **nostr-market crawler port:** hand-merge the 8 diverged files: `crawler/crawl.py`, `crawler/extract.py`,
-  `crawler/sign_events.py`, `crawler/tos.py`, `crawler/tests/test_egress_guard.py`, `crawler/tests/test_egress_proxy.py`,
-  `crawler/tests/test_extract.py`, `crawler/tests/test_tos.py`; then add the unique modules (list in
-  /workspace/klicky-seat-plan/nostr-market-diff.md). The `sites*.json` store lists need Matt's call before they go public.
-- **Old key paths in product code** (keys now at /home/box/secrets/klickymart/): `crawler/keygen.py:5`,
-  `crawler/sign_events.py:8` (`../secrets/crawler.nsec`), `site/README.md:56` (`nostr-market/secrets/facilitator.nsec`);
-  archived nostr-market: `crawler/sign_events.py:17`, `crawler/sign_deletion.py:8`, `crawler/keygen.py:5`,
-  `crawler/queue_worker.py:19` (ingest.token). Point them at the new path (env var or fixed path), never argv.
+Still open:
+- **nostr-market crawler port:** 7 of the 8 files still differ from `/workspace/nostr-market.ARCHIVED/crawler/`
+  (`crawl.py`, `extract.py`, `sign_events.py`, `tests/test_egress_guard.py`, `tests/test_egress_proxy.py`,
+  `tests/test_extract.py`, `tests/test_tos.py`); `tos.py` is identical. Unique modules: see
+  /workspace/klicky-seat-plan/nostr-market-diff.md. The `sites*.json` store lists need Matt's call before they go public.
 
 ## Other findings from the reset
 - Chuck ruling: Worker allowlist = `klickymart-production` + alias `klickymart`; other klickymart* names refused; km-status
@@ -51,7 +47,7 @@ Also in Klicky's first GO:
 - Production Worker is `klickymart-production` (`[env.production]` has no `name`); there is no Worker named `klickymart`.
   The deploy/status allowlist is `klickymart klickymart-production`. The shared account also has other non-KlickyMart
   Workers (km-status flags them).
-- The current production deployment predates the git:<sha> tag, so deployed = HEAD stays unprovable until the next km-deploy.
+- Deploys carry `git:<sha>` (first one: 016e596 on 2026-11-01), so km-status proves deployed = HEAD.
 
 ## nostr-market
 - Diff notes: `/workspace/klicky-seat-plan/nostr-market-diff.md` (unique crawler work, recommended port list).
