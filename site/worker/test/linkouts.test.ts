@@ -21,7 +21,7 @@ describe("M4 S6 Amazon/Target link-outs (KM_LINKOUTS)", () => {
     for (const x of l) { expect(x).toMatchObject({ price: null, stock: null, fetched: false }); expect(x.note).toMatch(/KlickyMart doesn't fetch this site\. If your agent shops here, follow the store's terms below\./); }
     expect(linkoutsFor("  ")).toEqual([]);
     const h = linkoutsHtml("<x>");
-    expect(h).not.toContain("<x>"); expect(h).not.toMatch(/person must/i); expect(h).toContain(LINKOUT_NOTE.slice(0, 30));
+    expect(h).not.toContain("<x>"); expect(h).not.toMatch(/person must/i); expect(h).toContain(LINKOUT_NOTE.replace(/'/g, "&#39;"));
   });
   it("module never fetches", () => { expect(SRC).not.toMatch(/fetch\(/); });
   it("/offers: absent when off; present when on, with zero requests to amazon/target", async () => {
