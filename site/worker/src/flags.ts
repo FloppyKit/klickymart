@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { keyFirstSeen } from "./key-age";
 import { takeAll, utcDayOf } from "./ratelimit";
 /** Explainable anti-gaming scorer for agent notes (422 / kind-1 shopping experiences).
@@ -162,15 +163,15 @@ export async function loadFlagContext(db: D1Database, notes: FNote[], st?: Parti
   const ctx: FlagCtx = { firstSeen: new Map(), active: new Set(), tips: new Map(), reports: [], fulfillmentMsat: new Map(), inStoreOnly: st?.inStoreOnly, crawlPrices: st?.crawlPrices, nip05: await verifiedNip05(db) };
   try {
     ctx.firstSeen = await keyFirstSeen(db); // KM-007 / R6-004: ingest time, not author-set created_at
-    const act = await db.prepare("SELECT DISTINCT pubkey FROM nostr_events WHERE kind != ? UNION SELECT DISTINCT pubkey FROM experiences").bind(REPORT_KIND).all<{ pubkey: string }>();
+    const act = await db.prepare(`SELECT DISTINCT pubkey FROM nostr_events WHERE kind != ? AND ${visibleSql("nostr_events")} UNION SELECT DISTINCT pubkey FROM experiences WHERE ${visibleSql("experiences")}`).bind(REPORT_KIND).all<{ pubkey: string }>();
     for (const r of act.results ?? []) ctx.active.add(r.pubkey);
     ctx.tips = (await loadTips(db)).byNote;
-    const rep = await db.prepare("SELECT raw_json FROM nostr_events WHERE kind = ?").bind(REPORT_KIND).all<{ raw_json: string }>();
+    const rep = await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind = ? AND ${visibleSql("nostr_events")}`).bind(REPORT_KIND).all<{ raw_json: string }>();
     for (const r of rep.results ?? []) { const p = parseReport(JSON.parse(r.raw_json)); if (p) ctx.reports.push(p); }
     const fids = [...new Set(notes.map((n) => n.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]).filter((x): x is string => !!x))];
     for (let k = 0; k < fids.length; k += 90) {
       const chunk = fids.slice(k, k + 90);
-      const { results } = await db.prepare(`SELECT id, raw_json FROM nostr_events WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all<Row>();
+      const { results } = await db.prepare(`SELECT id, raw_json FROM nostr_events WHERE id IN (${chunk.map(() => "?").join(",")}) AND ${visibleSql("nostr_events")}`).bind(...chunk).all<Row>();
       for (const r of results ?? []) { const b = (JSON.parse(r.raw_json).tags as string[][]).find((t) => t[0] === "bolt11")?.[1]; const a = b ? decodeBolt11(b)?.amount_msat : null; if (a) ctx.fulfillmentMsat.set(r.id, a); }
     }
   } catch { /* migration pending */ }
@@ -237,7 +238,7 @@ export async function buildFlagStatic(snap: { rows: { d: string; pay_online: num
 const NOTE_COLS = "id,d,pubkey,created_at,content,depth,price,currency,duration_s,steps_n,blocker,shipping,tax,raw_json";
 /** Full scan: every stored note scored with the full public context. */
 export async function scanFlags(db: D1Database, st?: Partial<FlagStatic>): Promise<Map<string, NoteFlag>> {
-  const { results } = await db.prepare(`SELECT ${NOTE_COLS} FROM experiences`).all<Row>();
+  const { results } = await db.prepare(`SELECT ${NOTE_COLS} FROM experiences WHERE ${visibleSql("experiences")}`).all<Row>();
   const notes = (results ?? []).map(rowToFNote);
   return computeFlags(notes, await loadFlagContext(db, notes, st));
 }

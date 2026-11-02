@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { readCapped } from "./capped-read";
 /** NIP-05 checks for keys that have posted notes, used only as a public same-operator hint in flags.ts.
  * Mirrors crawler/gate.py: robots.txt first with our honest UA (404 = allowed; 403/5xx/timeout = disallowed), refuse
@@ -65,7 +66,7 @@ export async function nip05Pass(db: D1Database, f: Fetcher, indexStatus: (d: str
   try {
     const { results } = await db.prepare(`SELECT e.pubkey, e.raw_json FROM nostr_events e
       JOIN (SELECT pubkey, MAX(created_at) AS c FROM nostr_events WHERE kind = 0 GROUP BY pubkey) l ON l.pubkey = e.pubkey AND l.c = e.created_at AND e.kind = 0
-      WHERE e.pubkey IN (SELECT DISTINCT pubkey FROM experiences)
+      WHERE e.pubkey IN (SELECT DISTINCT pubkey FROM experiences WHERE ${visibleSql("experiences")})
         AND e.pubkey NOT IN (SELECT pubkey FROM nip05_checks WHERE checked_at > ?) LIMIT ?`).bind(nowS - NIP05_LIMITS.recheckS, NIP05_LIMITS.perPass).all<{ pubkey: string; raw_json: string }>();
     for (const r of results ?? []) {
       let prof: { nip05?: unknown } = {}; try { prof = JSON.parse(JSON.parse(r.raw_json).content); } catch { /* */ }

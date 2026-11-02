@@ -38,7 +38,7 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
   };
   if (!db) return out;
   try {
-    const { results } = await db.prepare("SELECT pubkey, created_at, rating, rating_max, attempt, pay, proof_status, source, relays FROM reviews WHERE d = ? ORDER BY created_at DESC").bind(d).all<Rv>();
+    const { results } = await db.prepare(`SELECT pubkey, created_at, rating, rating_max, attempt, pay, proof_status, source, relays FROM reviews WHERE d = ? AND ${visibleSql("reviews")} ORDER BY created_at DESC`).bind(d).all<Rv>();
     const all = results ?? [];
     out.reviews_total_events = all.length;
     const latest = new Map<string, Rv>();
@@ -69,7 +69,7 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
         summary: `agents report: ${label} ${verb} (${n} agent${n === 1 ? "" : "s"}, ${e.verified.size} verified)${corroborated ? "" : " · single report, not corroborated"}`,
       };
     }).sort((a, b) => b.agents - a.agents);
-    const hs = await db.prepare("SELECT kind, COUNT(DISTINCT pubkey) AS n FROM nostr_events WHERE d = ? AND kind IN (?, ?) GROUP BY kind").bind(d, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT).all<{ kind: number; n: number }>();
+    const hs = await db.prepare(`SELECT kind, COUNT(DISTINCT pubkey) AS n FROM nostr_events WHERE d = ? AND kind IN (?, ?) AND ${visibleSql("nostr_events")} GROUP BY kind`).bind(d, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT).all<{ kind: number; n: number }>();
     for (const r of hs.results ?? []) { if (r.kind === NOSTR_KIND_NEED) out.handshake.needs = r.n; else out.handshake.fulfillments = r.n; }
     const recs = await db.prepare(`SELECT pubkey, id, created_at, raw_json, relays FROM site_records WHERE d = ? AND ${visibleSql("site_records")}`).bind(d).all<{ pubkey: string; id: string; created_at: number; raw_json: string; relays: string }>();
     for (const r of recs.results ?? []) {

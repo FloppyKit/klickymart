@@ -1,3 +1,4 @@
+import { wipe } from "./helpers/wipe";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { cleanRules, deliveredField, deliveredPriceEnabled, loadShipPolicies, resetShipCache, withPolicy } from "../src/delivered";
@@ -51,7 +52,7 @@ describe("delivered price (KM_DELIVERED_PRICE)", () => {
 });
 
 describe("ship_policy_obs (D1)", () => {
-  beforeEach(async () => { resetShipCache(); await env.DB.prepare("DELETE FROM ship_policy_obs").run(); });
+  beforeEach(async () => { resetShipCache(); await wipe(env.DB, ["ship_policy_obs"]); });
   it("latest row per domain wins; [] rows mean unknown; flag off -> null", async () => {
     const ins = (id: string, d: string, rules: unknown, at: number) => env.DB.prepare("INSERT INTO ship_policy_obs (id, domain, rules_json, ships_us, src, checked_at) VALUES (?,?,?,?,?,?)").bind(id, d, JSON.stringify(rules), 1, `https://${d}/policies/shipping-policy`, at).run();
     await ins("1", "a.com", [{ type: "flat", usd: 9, quote: "Shipping is $9." }], NOW - 100);

@@ -1,3 +1,4 @@
+import { wipe } from "./helpers/wipe";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
@@ -101,7 +102,7 @@ describe("job + read side (D1, mocked relay)", () => {
   const npubOf = async (hex: string) => (await import("../src/crawler-pubkey")).hexToNpub(hex);
   beforeEach(async () => {
     resetTierCache(); notes = [];
-    for (const t of ["trust_buys", "trust_complaints", "trust_dismissals", "trust_graph_heads", "trust_graph_members", "store_trust_obs", "nostr_events", "store_claims"]) await env.DB.prepare(`DELETE FROM ${t}`).run();
+    await wipe(env.DB, ["trust_buys", "trust_complaints", "trust_dismissals", "trust_graph_heads", "trust_graph_members", "store_trust_obs", "nostr_events", "store_claims"]);
     await env.DB.prepare("INSERT INTO store_claims (domain, pubkey, method, status, event_id, claimed_at, checked_at) VALUES (?,?,?,?,?,?,?)").bind(D, st.pk, "dns", "active", "e".repeat(64), OLD, OLD).run();
     for (const [sig, v] of [["first_seen", `{"at":"${new Date(OLD * 1000).toISOString()}"}`], ["domain_registered", '{"registered":"2015-01-01"}']])
       await env.DB.prepare("INSERT INTO store_trust_obs VALUES (?,?,?,?,?,?,?,?)").bind(sig + "x", D, sig, v, "https://rdap.org/x", null, sig === "first_seen" ? "own-ledger" : "rdap", OLD).run();

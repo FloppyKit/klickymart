@@ -5,9 +5,14 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { nostrEventId } from "../src/nostr-verify";
 import { parseFeedParams, readFeed } from "../src/nostr-app";
 import { getReviews } from "../src/reviews";
+import { keyFirstSeen } from "../src/key-age";
+import { loadTips } from "../src/tips";
+import { scanFlags } from "../src/flags";
 import { isRepeatOffender, takedownEnabled, takedownInfo, REPEAT_RULE } from "../src/takedown";
 import worker from "../src/index";
 import MIG from "../migrations/0025_takedown.sql?raw";
+import MIG27 from "../migrations/0027_m4_append_only.sql?raw";
+const restore = (id: string, h: string) => DB().prepare("INSERT OR IGNORE INTO takedown_restores (event_id, notice_hash, counter_hash, restored_at) VALUES (?,?,?,?)").bind(id, h, "e".repeat(64), now()).run();
 
 type T = { kind: number; created_at: number; content: string; tags: string[][] };
 const sign = (t: T, sk: Uint8Array) => { const pubkey = bytesToHex(secp.schnorr.getPublicKey(sk)); const id = nostrEventId({ ...t, pubkey }); return { ...t, pubkey, id, sig: bytesToHex(secp.schnorr.sign(hexToBytes(id), sk)) }; };
@@ -19,7 +24,7 @@ const feed = async () => { const p = parseFeedParams(new URLSearchParams("kinds=
 const store = async (e: ReturnType<typeof sign>) => DB().prepare("INSERT OR REPLACE INTO nostr_events (id, kind, pubkey, created_at, d, raw_json, first_seen, relays) VALUES (?,?,?,?,?,?,?,?)").bind(e.id, e.kind, e.pubkey, e.created_at, null, JSON.stringify(e), now(), "test").run();
 const call = async (path: string, x: Record<string, string>) => worker.fetch(new Request(`https://example.com${path}`), { ...env, ...x } as never, { waitUntil() {}, passThroughOnException() {}, props: {} } as never);
 
-beforeEach(async () => { for (const t of ["takedown_notices", "takedown_hides", "nostr_events", "reviews"]) await DB().prepare(`DELETE FROM ${t}`).run(); });
+beforeEach(async () => { for (const t of ["nostr_events", "reviews", "experiences"]) await DB().prepare(`DELETE FROM ${t}`).run(); });
 
 describe("M4 S7 takedown", () => {
   it("migration is append-only and hash-only (no text/name/email columns)", () => {
@@ -62,5 +67,44 @@ describe("M4 S7 takedown", () => {
   });
   it("info text says what we can't do (other relays) and logs hashes only", () => {
     const i = takedownInfo(); expect(i.what_we_do).toMatch(/other relays/); expect(i.log).toMatch(/hashes/);
+  });
+  it("restore after a counter-notice re-shows the event (a new row, never a delete) and a later notice can hide it again", async () => {
+    const sk = secp.utils.randomSecretKey();
+    const a = sign({ kind: 422, created_at: now(), content: "r", tags: [["d", "td.example.com"]] }, sk);
+    await store(a);
+    await notice("rs1", a.pubkey, 1, now()); await hide(a.id, "rs1");
+    expect(await feed()).toEqual([]);
+    await restore(a.id, "rs1");
+    expect(await feed()).toEqual([a.id]);
+    expect((await DB().prepare("SELECT COUNT(*) AS n FROM takedown_hides WHERE event_id = ?").bind(a.id).first<{ n: number }>())!.n).toBe(1);
+    await notice("rs2", a.pubkey, 1, now()); await hide(a.id, "rs2");
+    expect(await feed()).toEqual([]);
+  });
+  it("restored notices stop counting toward the repeat-offender rule", async () => {
+    const pk = secp.utils.randomSecretKey(); const k = bytesToHex(secp.schnorr.getPublicKey(pk));
+    for (const h of ["ro1", "ro2", "ro3"]) await notice(h, k, 1, now());
+    expect(await isRepeatOffender(DB(), k, now())).toBe(true);
+    await restore("f".repeat(64), "ro3");
+    expect(await isRepeatOffender(DB(), k, now())).toBe(false);
+  });
+  it("append-only triggers: UPDATE and DELETE on takedown tables abort", async () => {
+    await notice("ap1", "a".repeat(64), 1, now());
+    for (const sql of ["UPDATE takedown_notices SET valid = 0 WHERE notice_hash = 'ap1'", "DELETE FROM takedown_notices WHERE notice_hash = 'ap1'", "DELETE FROM takedown_hides", "DELETE FROM takedown_restores"])
+      await expect(DB().prepare(sql).run()).rejects.toThrow(/append-only/);
+    for (const t of ["snapshot_nodes", "snapshot_leaves", "store_trust_obs", "live_seen_domains", "ship_policy_obs", "takedown_notices", "takedown_hides", "takedown_restores", "trust_buys", "trust_complaints", "trust_dismissals", "trust_graph_heads", "trust_graph_members"])
+      for (const op of ["update", "delete"]) expect(MIG27).toContain(`${t}_no_${op}`);
+  });
+  it("hidden events are excluded from internal scoring: key age, tips and flags", async () => {
+    const sk = secp.utils.randomSecretKey();
+    const e = sign({ kind: 422, created_at: now(), content: "s", tags: [["d", "td.example.com"]] }, sk);
+    await store(e);
+    await DB().prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(e.id, 422, "td.example.com", e.pubkey, now(), 1, "s", JSON.stringify(e), "post", "2026-11-01", "visit").run();
+    expect((await keyFirstSeen(DB())).has(e.pubkey)).toBe(true);
+    expect((await loadTips(DB())).author.has(e.id)).toBe(true);
+    expect((await scanFlags(DB())).size >= 0).toBe(true);
+    await notice("sc1", e.pubkey, 1, now()); await hide(e.id, "sc1");
+    expect((await keyFirstSeen(DB())).has(e.pubkey)).toBe(false);
+    expect((await loadTips(DB())).author.has(e.id)).toBe(false);
+    expect([...(await scanFlags(DB())).keys()]).not.toContain(e.id);
   });
 });

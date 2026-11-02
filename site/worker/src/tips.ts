@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 /** Tips on 422 reviews / shopping-experience notes: NIP-57 zap receipts (kind 9735) whose `e` tag points at a note.
  * Display counts every receipt; ranking weight counts only DISTINCT tippers with a validated receipt, ignores self-zaps,
  * and is capped (see TIP_WEIGHT). Read-only over nostr_events; nothing is published. */
@@ -77,19 +78,19 @@ export async function loadTips(db: D1Database | undefined, d?: string): Promise<
   const byNote = new Map<string, Tip[]>(); const author = new Map<string, string>(); const noteDomain = new Map<string, string>();
   if (!db) return { byNote, author, noteDomain };
   try {
-    const notes = await db.prepare(`SELECT id, pubkey, d FROM experiences${d ? " WHERE d = ?" : ""}`).bind(...(d ? [d] : [])).all<{ id: string; pubkey: string; d: string }>();
+    const notes = await db.prepare(`SELECT id, pubkey, d FROM experiences WHERE ${visibleSql("experiences")}${d ? " AND d = ?" : ""}`).bind(...(d ? [d] : [])).all<{ id: string; pubkey: string; d: string }>();
     for (const n of notes.results ?? []) { author.set(n.id, n.pubkey); noteDomain.set(n.id, n.d); }
-    const rv = await db.prepare(`SELECT id, pubkey, d FROM reviews${d ? " WHERE d = ?" : ""}`).bind(...(d ? [d] : [])).all<{ id: string; pubkey: string; d: string }>();
+    const rv = await db.prepare(`SELECT id, pubkey, d FROM reviews WHERE ${visibleSql("reviews")}${d ? " AND d = ?" : ""}`).bind(...(d ? [d] : [])).all<{ id: string; pubkey: string; d: string }>();
     for (const n of rv.results ?? []) { author.set(n.id, n.pubkey); noteDomain.set(n.id, n.d); }
     if (!author.size) return { byNote, author, noteDomain };
-    const { results } = await db.prepare("SELECT raw_json FROM nostr_events WHERE kind = ?").bind(ZAP_RECEIPT).all<{ raw_json: string }>();
+    const { results } = await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind = ? AND ${visibleSql("nostr_events")}`).bind(ZAP_RECEIPT).all<{ raw_json: string }>();
     // key history for the bonus rule: a visit note, other activity (not reports/receipts), or old enough
     const hist = new Set<string>();
     const nowS = Math.floor(Date.now() / 1000);
     // KM-003: notes and profiles are mintable by throwaway keys, so only ingest-time key age counts as history.
     for (const q of [
       // KM-003/KM-007: key age is when KlickyMart first saw the key (first_seen), not an author-set created_at.
-      db.prepare("SELECT pubkey FROM nostr_events GROUP BY pubkey HAVING MIN(first_seen) <= ?").bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
+      db.prepare(`SELECT pubkey FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey HAVING MIN(first_seen) <= ?`).bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
       for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
     const zapKeys = new Map<string, string | null>();
     for (const a of new Set(author.values())) zapKeys.set(a, await cachedZapKey(db, await lud16Of(db, a)));

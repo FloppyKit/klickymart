@@ -1,3 +1,4 @@
+import { wipe } from "./helpers/wipe";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { QUEUE_DAILY_CAP, appendObs, crawlQueueEnabled, obsId, queueDomains, validateObs } from "../src/trust-obs";
@@ -35,7 +36,7 @@ describe("trust observations: fixed format", () => {
 });
 
 describe("store_trust_obs: append-only", () => {
-  beforeEach(async () => { await env.DB.prepare("DELETE FROM store_trust_obs").run(); });
+  beforeEach(async () => { await wipe(env.DB, ["store_trust_obs"]); });
   it("same value twice = one row (first observation kept); changed value = new row; bad rows rejected", async () => {
     expect((await appendObs(env.DB, [mk(), mk({ observed_at: AT + 86400 })])).inserted).toBe(1);
     const r = await appendObs(env.DB, [mk({ value_json: '{"window_days":14}', quote: "14 days." }), { nope: 1 }]);
@@ -46,7 +47,7 @@ describe("store_trust_obs: append-only", () => {
 });
 
 describe("live_seen_domains: domain only, flag default off", () => {
-  beforeEach(async () => { await env.DB.prepare("DELETE FROM live_seen_domains").run(); });
+  beforeEach(async () => { await wipe(env.DB, ["live_seen_domains"]); });
   const n = async () => (await env.DB.prepare("SELECT COUNT(*) AS c FROM live_seen_domains").first<{ c: number }>())!.c;
   it("off by default: writes nothing", async () => {
     expect(crawlQueueEnabled({})).toBe(false);

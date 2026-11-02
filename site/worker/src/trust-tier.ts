@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 /** M4 S4: trust tiers. "new-and-risky" (default) or "established". Tiers only LIFT a store in ranking; nothing is hidden.
  * established = ALL of: first seen by us >= 90 days ago, domain registered >= 1 year ago, >= 5 distinct in-graph buyers
  * (completed 420 -> 421 -> 422 threads; never the store's own keys; amounts/tips ignored), and no undismissed in-graph
@@ -144,7 +145,7 @@ export async function runTrustJob(env: JobEnv, q: RelayQuery | null, nowS: numbe
   const db = env.DB;
   const claims = (await db.prepare("SELECT domain, pubkey FROM store_claims WHERE status = 'active'").all<{ domain: string; pubkey: string }>()).results ?? [];
   const storeKeys = new Map(claims.map((c) => [c.pubkey.toLowerCase(), c.domain]));
-  const evRows = (await db.prepare("SELECT raw_json FROM nostr_events WHERE kind IN (420,421,422) ORDER BY created_at DESC LIMIT 5000").all<{ raw_json: string }>()).results ?? [];
+  const evRows = (await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind IN (420,421,422) AND ${visibleSql("nostr_events")} ORDER BY created_at DESC LIMIT 5000`).all<{ raw_json: string }>()).results ?? [];
   // nostr_events rows were signature-checked at ingest (relay-ingest.ts); skip re-verifying to stay inside cron CPU limits.
   const buys = deriveBuys(evRows.map((r) => JSON.parse(r.raw_json) as NostrEventLine), storeKeys, { checkSig: false });
   const threadDomain = new Map(buys.map((b) => [b.thread_root, b.store_domain]));

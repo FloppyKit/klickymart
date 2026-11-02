@@ -1,3 +1,4 @@
+import { wipe } from "./helpers/wipe";
 import { describe, expect, it, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import * as secp from "@noble/secp256k1";
@@ -98,7 +99,7 @@ describe("merkle: tamper detection", () => {
 });
 
 describe("KM_SNAPSHOT_DIGEST (D1 + routes)", () => {
-  beforeEach(async () => { for (const t of ["snapshot_heads", "snapshot_nodes", "snapshot_leaves"]) await env.DB.prepare(`DELETE FROM ${t}`).run(); });
+  beforeEach(async () => { await wipe(env.DB, ["snapshot_heads", "snapshot_nodes", "snapshot_leaves"]); });
   const count = async (t: string) => (await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${t}`).first<{ c: number }>())!.c;
   it("default off: only 1/true/on enables", () => {
     expect(snapshotDigestEnabled({})).toBe(false); expect(snapshotDigestEnabled({ KM_SNAPSHOT_DIGEST: "off" })).toBe(false);

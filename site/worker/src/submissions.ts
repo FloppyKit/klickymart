@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { hmac } from "@noble/hashes/hmac.js";
 import { takeAll } from "./ratelimit";
 import { BIG_NIP05_PROVIDERS } from "./nip05";
@@ -342,12 +343,12 @@ export async function computeTrustTiers(db: D1Database | undefined, domains: str
         if (!opts.skipRep && isTierFlagged(f)) rep.set(r.submitter, (rep.get(r.submitter) ?? 0) - 2);
       }
     } catch { /* migration pending */ }
-    try { notes = ((await db.prepare("SELECT id, d, pubkey, created_at, proof_status, kind FROM experiences WHERE kind = 422 AND basis = 'visit'").all<B>()).results ?? []); } catch { /* */ }
-    try { notes.push(...((await db.prepare("SELECT id, d, pubkey, created_at, NULL AS proof_status, kind FROM nostr_events WHERE kind = 421 AND d IS NOT NULL AND pubkey != '138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb' AND id NOT IN (SELECT id FROM revoked_events)").all<B>()).results ?? [])); } catch { /* */ }
+    try { notes = ((await db.prepare(`SELECT id, d, pubkey, created_at, proof_status, kind FROM experiences WHERE kind = 422 AND basis = 'visit' AND ${visibleSql("experiences")}`).all<B>()).results ?? []); } catch { /* */ }
+    try { notes.push(...((await db.prepare(`SELECT id, d, pubkey, created_at, NULL AS proof_status, kind FROM nostr_events WHERE kind = 421 AND d IS NOT NULL AND pubkey != '138fdf32b9275166bf20083f97e1fa31a6c271dd0c15725a26258084c3b52dcb' AND id NOT IN (SELECT id FROM revoked_events) AND ${visibleSql("nostr_events")}`).all<B>()).results ?? [])); } catch { /* */ }
     try { for (const r of (await db.prepare("SELECT id, weight, reasons_json FROM note_flags").all<{ id: string; weight: number; reasons_json: string }>()).results ?? []) if (r.reasons_json !== "[]") flagW.set(r.id, r.weight); } catch { /* */ }
     // KM-007: a key's age is when KlickyMart first saw it (ingest time), not the author-chosen created_at.
-    try { for (const r of (await db.prepare("SELECT pubkey, MIN(first_seen) AS t FROM nostr_events GROUP BY pubkey").all<{ pubkey: string; t: number }>()).results ?? []) firstSeen.set(r.pubkey, r.t); } catch { /* */ }
-    try { for (const r of (await db.prepare("SELECT pubkey, MIN(received_day) AS day FROM experiences GROUP BY pubkey").all<{ pubkey: string; day: string }>()).results ?? []) {
+    try { for (const r of (await db.prepare(`SELECT pubkey, MIN(first_seen) AS t FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey`).all<{ pubkey: string; t: number }>()).results ?? []) firstSeen.set(r.pubkey, r.t); } catch { /* */ }
+    try { for (const r of (await db.prepare(`SELECT pubkey, MIN(received_day) AS day FROM experiences WHERE ${visibleSql("experiences")} GROUP BY pubkey`).all<{ pubkey: string; day: string }>()).results ?? []) {
       const t = Math.floor(Date.parse(`${r.day}T00:00:00Z`) / 1000); const cur = firstSeen.get(r.pubkey);
       if (Number.isFinite(t) && (cur === undefined || t < cur)) firstSeen.set(r.pubkey, t);
     } } catch { /* */ }

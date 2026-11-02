@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 /** KM-007: key age is when KlickyMart first saw a key (ingest time), never an author-set created_at, so a backdated
  * note or kind 0 cannot make a fresh key look old. Day-granular sources (received_day) count from the END of that UTC
  * day, so they never make a key look older than it is. */
@@ -5,9 +6,9 @@ export const MIN_RANK_KEY_AGE_S = 7 * 86400;
 export async function keyFirstSeen(db: D1Database): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const qs = [
-    "SELECT pubkey, MIN(first_seen) AS t FROM nostr_events GROUP BY pubkey",
-    "SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM experiences GROUP BY pubkey",
-    "SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM reviews GROUP BY pubkey",
+    `SELECT pubkey, MIN(first_seen) AS t FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey`,
+    `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM experiences WHERE ${visibleSql("experiences")} GROUP BY pubkey`,
+    `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM reviews WHERE ${visibleSql("reviews")} GROUP BY pubkey`,
   ];
   for (const q of qs) {
     const { results } = await db.prepare(q).all<{ pubkey: string; t: number | null }>().catch(() => ({ results: [] as { pubkey: string; t: number | null }[] }));
@@ -22,9 +23,9 @@ export async function keyRankStatus(db: D1Database | undefined, pubkey: string, 
   let t = Math.floor(nowS / 86400) * 86400 + 86399;
   if (db) {
     const qs = [
-      "SELECT MIN(first_seen) AS t FROM nostr_events WHERE pubkey = ?",
-      "SELECT MIN(unixepoch(received_day)) + 86399 AS t FROM experiences WHERE pubkey = ?",
-      "SELECT MIN(unixepoch(received_day)) + 86399 AS t FROM reviews WHERE pubkey = ?",
+      `SELECT MIN(first_seen) AS t FROM nostr_events WHERE pubkey = ? AND ${visibleSql("nostr_events")}`,
+      `SELECT MIN(unixepoch(received_day)) + 86399 AS t FROM experiences WHERE pubkey = ? AND ${visibleSql("experiences")}`,
+      `SELECT MIN(unixepoch(received_day)) + 86399 AS t FROM reviews WHERE pubkey = ? AND ${visibleSql("reviews")}`,
     ];
     for (const q of qs) {
       const r = await db.prepare(q).bind(pubkey).first<{ t: number | null }>().catch(() => null);
