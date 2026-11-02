@@ -10,10 +10,11 @@ const viewports = [
 
 const schemes = ["dark", "light"] as const;
 
-/** F7: at first load, no scrolling, the search and the first 3 store rows are fully in the viewport. */
+/** F7 (relaxed by GO-KM-HOME-SCENE): at first load, no scrolling, the search is fully in view and the
+ *  top edge of the first store row is in view. The scene band is allowed to grow back. */
 for (const vp of viewports) {
   for (const scheme of schemes) {
-    test(`home fold ${vp.name} ${scheme}: search and first 3 rows above the fold`, async ({ page }) => {
+    test(`home fold ${vp.name} ${scheme}: search and first row top edge above the fold`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.addInitScript((s) => localStorage.setItem("km-theme", s as string), scheme);
@@ -35,13 +36,16 @@ for (const vp of viewports) {
       const scene = await page.locator(".km-home-scene-gap").boundingBox();
       expect(scene!.height).toBeGreaterThan(24);
 
+      // The search input is fully in view.
       inside(await page.locator("#q").boundingBox(), "search input");
 
+      // The top edge of the first store row is in view (a peek is enough).
       const rows = page.locator(".km-home-list .km-result-row");
-      expect(await rows.count()).toBeGreaterThanOrEqual(3);
-      for (let i = 0; i < 3; i++) {
-        inside(await rows.nth(i).boundingBox(), `store row ${i + 1}`);
-      }
+      expect(await rows.count()).toBeGreaterThanOrEqual(1);
+      const firstRow = await rows.first().boundingBox();
+      expect(firstRow, "first store row has a bounding box").not.toBeNull();
+      expect(firstRow!.y, "first store row top edge is in view").toBeGreaterThanOrEqual(0);
+      expect(firstRow!.y, "first store row top edge is above the fold").toBeLessThan(viewport.height);
 
       // F4: each first-screen label has a (?) disclosure that opens a plain-language definition.
       for (const [testid, label] of [
@@ -67,12 +71,167 @@ for (const vp of viewports) {
       inside(await page.getByTestId("def-let-agents-in").locator("summary").boundingBox(), "let agents in (?)");
       inside(await page.getByTestId("def-btc-private").locator("summary").boundingBox(), "take Bitcoin privately (?)");
 
-      const shot = vp.name === "1280" ? "home-fold-1280.png" : "home-fold-390.png";
-      if (scheme === "dark") {
-        await page.screenshot({ path: `e2e/artifacts/${shot}`, animations: "disabled", fullPage: false });
-      } else {
-        await page.screenshot({ path: `e2e/artifacts/${shot.replace(".png", "-light.png")}`, animations: "disabled", fullPage: false });
+      await page.screenshot({
+        path: `e2e/artifacts/home-scene-${vp.name}-${scheme}.png`,
+        animations: "disabled",
+        fullPage: false,
+      });
+    });
+  }
+}
+
+/** GO-KM-HOME-SCENE: the scene is not buried. Sample points above the hero text and on either side of it
+ *  must not be covered by any element with an opaque background (or by a store/hero panel). */
+for (const vp of viewports) {
+  for (const scheme of schemes) {
+    test(`home scene visible ${vp.name} ${scheme}: no opaque panel over the scene`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.addInitScript((s) => localStorage.setItem("km-theme", s as string), scheme);
+      await page.goto(`${base}/?nomotion=1`);
+      await waitFor2dLandscape(page);
+
+      const hero = await page.locator(".km-home-hero").boundingBox();
+      expect(hero, "hero has a bounding box").not.toBeNull();
+      const h = hero!;
+      const points: [number, number][] =
+        vp.width >= 1000
+          ? [
+              [h.x + h.width * 0.25, h.y - 24],
+              [h.x + h.width * 0.75, h.y - 24],
+              [h.x - 40, h.y + h.height * 0.3],
+              [h.x - 40, h.y + h.height * 0.7],
+              [h.x + h.width + 40, h.y + h.height * 0.3],
+              [h.x + h.width + 40, h.y + h.height * 0.7],
+            ]
+          : [
+              [h.x + h.width * 0.2, h.y - 20],
+              [h.x + h.width * 0.5, h.y - 20],
+              [h.x + h.width * 0.8, h.y - 20],
+            ];
+      expect(points.length).toBe(vp.width >= 1000 ? 6 : 3);
+
+      const hits = await page.evaluate((pts) => {
+        const panelSel = [".km-store", ".km-result-row", ".km-hero-panel", ".km-home-hero", ".km-home-scrim"];
+        const alphaOf = (css: string) => {
+          const c = document.createElement("canvas");
+          c.width = c.height = 1;
+          const ctx = c.getContext("2d")!;
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = css;
+          ctx.fillRect(0, 0, 1, 1);
+          return ctx.getImageData(0, 0, 1, 1).data[3]! / 255;
+        };
+        return pts.map(([x, y]) => {
+          const el = document.elementFromPoint(x, y);
+          if (!el) return { x, y, tag: null, cls: null, opaque: null, panel: null };
+          const chain: Element[] = [];
+          let n: Element | null = el;
+          while (n && n !== document.body && n !== document.documentElement) {
+            chain.push(n);
+            n = n.parentElement;
+          }
+          const opaque = chain.find((e) => alphaOf(getComputedStyle(e).backgroundColor) > 0.5);
+          const panel = chain.find((e) => panelSel.some((s) => e.matches(s)));
+          return {
+            x,
+            y,
+            tag: el.tagName,
+            cls: typeof el.className === "string" ? el.className : null,
+            opaque: opaque ? (typeof opaque.className === "string" ? opaque.className : opaque.tagName) : null,
+            panel: panel ? (typeof panel.className === "string" ? panel.className : panel.tagName) : null,
+          };
+        });
+      }, points);
+
+      for (const hit of hits) {
+        expect(hit.tag, `point ${hit.x},${hit.y} hits an element`).not.toBeNull();
+        expect(hit.opaque, `point ${hit.x},${hit.y} is not covered by an opaque background`).toBeNull();
+        expect(hit.panel, `point ${hit.x},${hit.y} is not covered by a store/hero panel`).toBeNull();
       }
     });
   }
+}
+
+/** GO-KM-HOME-SCENE: light mode is tinted to the scene, not white panels. */
+for (const vp of viewports) {
+  test(`home light mode ${vp.name}: store sheet and rows are not near-white`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.addInitScript(() => localStorage.setItem("km-theme", "light"));
+    await page.goto(`${base}/?nomotion=1`);
+    await waitFor2dLandscape(page);
+
+    const colors = await page.evaluate(() => {
+      const toRgb = (css: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0]!, d[1]!, d[2]!];
+      };
+      const store = document.querySelector(".km-page-home .km-store")!;
+      const row = document.querySelector(".km-page-home .km-result-row")!;
+      return {
+        store: toRgb(getComputedStyle(store).backgroundColor),
+        row: toRgb(getComputedStyle(row).backgroundColor),
+      };
+    });
+
+    for (const [name, rgb] of [
+      ["store sheet", colors.store],
+      ["result row", colors.row],
+    ] as const) {
+      const nearWhite = rgb[0] >= 245 && rgb[1] >= 245 && rgb[2] >= 245;
+      expect(nearWhite, `${name} background rgb(${rgb.join(",")}) must not be near-white`).toBe(false);
+    }
+  });
+}
+
+/** GO-KM-HOME-SCENE: result-row name text meets WCAG AA (4.5:1) on its row background, both schemes. */
+for (const scheme of schemes) {
+  test(`home result row name contrast ${scheme}: AA 4.5:1`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript((s) => localStorage.setItem("km-theme", s as string), scheme);
+    await page.goto(`${base}/?nomotion=1`);
+    await waitFor2dLandscape(page);
+
+    const c = await page.evaluate(() => {
+      const toRgb = (css: string) => {
+        const cv = document.createElement("canvas");
+        cv.width = cv.height = 1;
+        const ctx = cv.getContext("2d")!;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0]!, d[1]!, d[2]!];
+      };
+      const relLum = (rgb: number[]) => {
+        const f = (v: number) => {
+          v /= 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
+      };
+      const contrast = (a: number[], b: number[]) => {
+        const l1 = relLum(a);
+        const l2 = relLum(b);
+        const hi = Math.max(l1, l2);
+        const lo = Math.min(l1, l2);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const row = document.querySelector(".km-home-list .km-result-row")!;
+      const name = row.querySelector(".km-tag-id a")!;
+      const bg = toRgb(getComputedStyle(row).backgroundColor);
+      const fg = toRgb(getComputedStyle(name).color);
+      return { bg, fg, ratio: contrast(fg, bg) };
+    });
+
+    expect(c.ratio, `name text rgb(${c.fg.join(",")}) on row rgb(${c.bg.join(",")})`).toBeGreaterThanOrEqual(4.5);
+  });
 }
