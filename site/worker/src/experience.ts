@@ -233,7 +233,7 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
     // KM-007: notes from keys younger than MIN_RANK_KEY_AGE_S by ingest time don't count; no proof exempts a key (K10-001).
-    const seen = await keyFirstSeen(db); const nowS = Math.floor(now / 1000); const minAge = opts.minKeyAgeS ?? MIN_RANK_KEY_AGE_S;
+    const seen = await keyFirstSeen(db, [...by.values()].flatMap((rs) => rs.map((r) => r.pubkey))); const nowS = Math.floor(now / 1000); const minAge = opts.minKeyAgeS ?? MIN_RANK_KEY_AGE_S;
     for (const [d, rows] of by) {
       // K10-001(c): the store's own declared keys (claimants, and zap_pubkey keys in the owner's 31420) never count for rank.
       const owners = await ownerKeys(db, d);

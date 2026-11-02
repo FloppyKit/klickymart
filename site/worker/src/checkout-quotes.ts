@@ -99,7 +99,7 @@ export async function loadCheckoutQuotes(db: D1Database | undefined, d: string, 
   try {
     const { results } = await db.prepare(`SELECT id,pubkey,created_at,price,shipping,tax,total,currency,region FROM experiences WHERE d=? AND region=? AND structured=1 AND COALESCE(basis,'visit')='visit' AND depth IN ('payment','paid','delivered') ORDER BY created_at DESC LIMIT 500`).bind(d, zip3).all<QuoteRow>();
     if (!results?.length) return null;
-    const owners = await ownerKeys(db, d); const seen = await keyFirstSeen(db); const nowS = Math.floor(now / 1000);
+    const owners = await ownerKeys(db, d); const seen = await keyFirstSeen(db, results.map((r) => r.pubkey)); const nowS = Math.floor(now / 1000);
     const tips = (await loadTips(db, d)).byNote; const zaps = new Map<string, { tips: number; sats: number; distinct_tippers: number }>();
     for (const r of results) { const t = tips.get(r.id); if (t?.length) { const s = summarize(t); zaps.set(r.id, { tips: s.tips, sats: s.sats, distinct_tippers: s.distinct_tippers }); } }
     // CK-1 inputs. Flags: note_flags rows with reasons; a key with any flagged note is a flagged key.

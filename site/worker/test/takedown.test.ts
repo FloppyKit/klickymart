@@ -99,11 +99,11 @@ describe("M4 S7 takedown", () => {
     const e = sign({ kind: 422, created_at: now(), content: "s", tags: [["d", "td.example.com"]] }, sk);
     await store(e);
     await DB().prepare("INSERT INTO experiences (id,kind,d,pubkey,created_at,structured,content,raw_json,source,received_day,basis) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(e.id, 422, "td.example.com", e.pubkey, now(), 1, "s", JSON.stringify(e), "post", "2026-11-01", "visit").run();
-    expect((await keyFirstSeen(DB())).has(e.pubkey)).toBe(true);
+    expect((await keyFirstSeen(DB(), [e.pubkey])).has(e.pubkey)).toBe(true);
     expect((await loadTips(DB())).author.has(e.id)).toBe(true);
     expect((await scanFlags(DB())).size >= 0).toBe(true);
     await notice("sc1", e.pubkey, 1, now()); await hide(e.id, "sc1");
-    expect((await keyFirstSeen(DB())).has(e.pubkey)).toBe(false);
+    expect((await keyFirstSeen(DB(), [e.pubkey])).has(e.pubkey)).toBe(false);
     expect((await loadTips(DB())).author.has(e.id)).toBe(false);
     expect([...(await scanFlags(DB())).keys()]).not.toContain(e.id);
   });

@@ -3,16 +3,27 @@ import { visibleSql } from "./takedown";
  * note or kind 0 cannot make a fresh key look old. Day-granular sources (received_day) count from the END of that UTC
  * day, so they never make a key look older than it is. */
 export const MIN_RANK_KEY_AGE_S = 7 * 86400;
-export async function keyFirstSeen(db: D1Database): Promise<Map<string, number>> {
+/** D1 caps bound parameters per statement at 100; leave room for none else in these queries. */
+export const KEY_FIRST_SEEN_CHUNK = 90;
+/** First-seen time for exactly the given keys (same values the old whole-table GROUP BY gave for those keys). Scoped by
+ * `pubkey IN (...)` so the per-request cost follows the keys on the page, served by i_ne_pk / i_exp_pk / i_reviews_pk_day,
+ * instead of aggregating every row of nostr_events, experiences and reviews (2026-11-01 D1 read spike). Empty input
+ * returns an empty map without touching the DB. */
+export async function keyFirstSeen(db: D1Database, pubkeys: Iterable<string>): Promise<Map<string, number>> {
   const out = new Map<string, number>();
+  const keys = [...new Set(pubkeys)];
+  if (!keys.length) return out;
   const qs = [
-    `SELECT pubkey, MIN(first_seen) AS t FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey`,
-    `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM experiences WHERE ${visibleSql("experiences")} GROUP BY pubkey`,
-    `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM reviews WHERE ${visibleSql("reviews")} GROUP BY pubkey`,
+    (ph: string) => `SELECT pubkey, MIN(first_seen) AS t FROM nostr_events WHERE pubkey IN (${ph}) AND ${visibleSql("nostr_events")} GROUP BY pubkey`,
+    (ph: string) => `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM experiences WHERE pubkey IN (${ph}) AND ${visibleSql("experiences")} GROUP BY pubkey`,
+    (ph: string) => `SELECT pubkey, MIN(unixepoch(received_day)) + 86399 AS t FROM reviews WHERE pubkey IN (${ph}) AND ${visibleSql("reviews")} GROUP BY pubkey`,
   ];
-  for (const q of qs) {
-    const { results } = await db.prepare(q).all<{ pubkey: string; t: number | null }>().catch(() => ({ results: [] as { pubkey: string; t: number | null }[] }));
-    for (const r of results ?? []) if (typeof r.t === "number") out.set(r.pubkey, Math.min(out.get(r.pubkey) ?? Infinity, r.t));
+  for (let i = 0; i < keys.length; i += KEY_FIRST_SEEN_CHUNK) {
+    const chunk = keys.slice(i, i + KEY_FIRST_SEEN_CHUNK); const ph = chunk.map(() => "?").join(",");
+    for (const q of qs) {
+      const { results } = await db.prepare(q(ph)).bind(...chunk).all<{ pubkey: string; t: number | null }>().catch(() => ({ results: [] as { pubkey: string; t: number | null }[] }));
+      for (const r of results ?? []) if (typeof r.t === "number") out.set(r.pubkey, Math.min(out.get(r.pubkey) ?? Infinity, r.t));
+    }
   }
   return out;
 }

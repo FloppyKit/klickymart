@@ -37,9 +37,10 @@ describe("KM-007: fresh keys can't take the chart; key age is ingest time", () =
   it("first-seen ignores created_at; flags see backdated keys as new; no proof skips the gate (K10-001)", async () => {
     const sk = secp.utils.randomSecretKey(); const pk = bytesToHex(secp.schnorr.getPublicKey(sk)); const nowS = Math.floor(Date.now() / 1000);
     await env.DB.prepare("INSERT INTO nostr_events (id,kind,pubkey,created_at,d,raw_json,first_seen,relays) VALUES (?,?,?,?,?,?,?,?)").bind("ab".repeat(32), 0, pk, 1000, null, "{}", nowS, "t").run();
-    const seen = await keyFirstSeen(env.DB); expect(seen.get(pk)).toBe(nowS);
+    const seen = await keyFirstSeen(env.DB, [pk]); expect(seen.get(pk)).toBe(nowS);
     expect(countsForRank(pk, null, seen, nowS)).toBe(false); expect(countsForRank(pk, null, seen, nowS + MIN_RANK_KEY_AGE_S)).toBe(true);
     expect(countsForRank(pk, "verified-preimage", seen, nowS)).toBe(false); expect(countsForRank(pk, "verified-zap", seen, nowS)).toBe(false); expect(countsForRank("ff".repeat(32), null, seen, nowS)).toBe(false);
-    expect((await loadFlagContext(env.DB, [])).firstSeen.get(pk)).toBe(nowS);
+    const note = { id: "cd".repeat(32), d: D, pubkey: pk, created_at: 1000, content: "", depth: null, price: null, currency: null, duration_s: null, steps_n: null, blocker: null, shipping: null, tax: null, tags: [] };
+    expect((await loadFlagContext(env.DB, [note])).firstSeen.get(pk)).toBe(nowS);
   });
 });

@@ -162,12 +162,13 @@ type Row = Record<string, any>;
 export async function loadFlagContext(db: D1Database, notes: FNote[], st?: Partial<FlagStatic>): Promise<FlagCtx> {
   const ctx: FlagCtx = { firstSeen: new Map(), active: new Set(), tips: new Map(), reports: [], fulfillmentMsat: new Map(), inStoreOnly: st?.inStoreOnly, crawlPrices: st?.crawlPrices, nip05: await verifiedNip05(db) };
   try {
-    ctx.firstSeen = await keyFirstSeen(db); // KM-007 / R6-004: ingest time, not author-set created_at
     const act = await db.prepare(`SELECT DISTINCT pubkey FROM nostr_events WHERE kind != ? AND ${visibleSql("nostr_events")} UNION SELECT DISTINCT pubkey FROM experiences WHERE ${visibleSql("experiences")}`).bind(REPORT_KIND).all<{ pubkey: string }>();
     for (const r of act.results ?? []) ctx.active.add(r.pubkey);
     ctx.tips = (await loadTips(db)).byNote;
     const rep = await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind = ? AND ${visibleSql("nostr_events")}`).bind(REPORT_KIND).all<{ raw_json: string }>();
     for (const r of rep.results ?? []) { const p = parseReport(JSON.parse(r.raw_json)); if (p) ctx.reports.push(p); }
+    // KM-007 / R6-004: ingest time, not author-set created_at. computeFlags reads firstSeen only for note authors and reporters.
+    ctx.firstSeen = await keyFirstSeen(db, [...notes.map((n) => n.pubkey), ...ctx.reports.map((r) => r.pubkey)]);
     const fids = [...new Set(notes.map((n) => n.tags.find((t) => t[0] === "e" && t[3] === "fulfillment")?.[1]).filter((x): x is string => !!x))];
     for (let k = 0; k < fids.length; k += 90) {
       const chunk = fids.slice(k, k + 90);
