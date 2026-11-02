@@ -359,3 +359,60 @@ for (const scheme of schemes) {
     expect(c.ratio, `name text rgb(${c.fg.join(",")}) on row rgb(${c.bg.join(",")})`).toBeGreaterThanOrEqual(4.5);
   });
 }
+
+/** GO-KM-HOME-HERO-CLEAR: the hero tile used to sit on top of the storefront sprite, so the shop was either
+ *  blurred out or the headline was unreadable over it. The shop is drawn on #km-landscape, not as a DOM
+ *  element, so its box is computed from the drawing code (public/km-landscape.js storeGeom):
+ *  sprite is SW(90) x SH(50) logical px at p = 2 under 520px wide and 3 under 1500px, placed at
+ *  round(h*(0.52+reach*0.04) - SH*p + p) with `reach` from the canvas data-reach attribute. */
+function storefrontSpriteBox(vp: { width: number; height: number }, reach: number) {
+  const p = vp.width < 520 ? 2 : vp.width < 1500 ? 3 : 4;
+  const width = 90 * p;
+  const height = 50 * p;
+  const horizon = vp.height * (0.52 + reach * 0.04);
+  return {
+    x: Math.round(vp.width * 0.5 - (3 + 66 / 2) * p),
+    y: Math.round(horizon - height + p),
+    width,
+    height,
+  };
+}
+
+for (const vp of viewports) {
+  for (const scheme of schemes) {
+    test(`home hero clear of the storefront ${vp.name} ${scheme}: hero box and shop sprite do not overlap`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.addInitScript((s) => localStorage.setItem("km-theme", s as string), scheme);
+      await page.goto(`${base}/?nomotion=1`);
+      await waitFor2dLandscape(page);
+
+      // The scene is viewport-fixed, so both boxes are read at the top of the page.
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+      const reach = Number(await page.locator("#km-landscape").getAttribute("data-reach"));
+      expect(Number.isFinite(reach), "the landscape canvas reports its reach").toBe(true);
+      const shop = storefrontSpriteBox(vp, reach);
+
+      const hero = await page.locator(".km-home-hero").boundingBox();
+      expect(hero, "hero has a bounding box").not.toBeNull();
+      const h = hero!;
+
+      const overlaps =
+        h.x < shop.x + shop.width && shop.x < h.x + h.width && h.y < shop.y + shop.height && shop.y < h.y + h.height;
+      expect(
+        overlaps,
+        `hero box ${JSON.stringify(h)} must not overlap the storefront sprite ${JSON.stringify(shop)}`,
+      ).toBe(false);
+
+      // Above the shop, not below it, with the >= 8px of sky the GO asks for.
+      const sky = shop.y - (h.y + h.height);
+      expect(sky, `sky between the hero box and the shop sprite`).toBeGreaterThanOrEqual(8);
+
+      // The search stays on the first screen, above the shop.
+      const input = await page.locator("#q").boundingBox();
+      expect(input, "search input has a bounding box").not.toBeNull();
+      expect(input!.y + input!.height, "search input sits above the shop").toBeLessThanOrEqual(shop.y);
+    });
+  }
+}
