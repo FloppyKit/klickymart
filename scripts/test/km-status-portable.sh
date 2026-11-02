@@ -30,7 +30,7 @@ EOF
 cat > "$BIN/wrangler" <<'EOF'
 #!/bin/bash
 case "$*" in
-  *whoami*) echo "You are logged in with an API Token. Account ID: 0123456789abcdef0123456789abcdef";;
+  *whoami*) echo "You are logged in with an API Token. Account ID: FAKE-ACCOUNT-ID";;
   *"deployments list"*--json*) echo '[{"annotations":{"workers/message":"git:0123456"},"versions":[{"version_id":"11111111-1111-1111-1111-111111111111"}],"created_on":"2026-11-01T12:00:00Z"}]';;
   *"deployments list"*) echo "Created: 2026-11-01";;
   *"versions list"*--json*) echo '[{"annotations":{"workers/tag":"v1","workers/message":"git:0123456"},"metadata":{"source":"wrangler"}}]';;
