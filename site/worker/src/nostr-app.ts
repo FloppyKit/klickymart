@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 /** Nostr-app features: NIP-98-style login (kind 27235 signed challenge, never a key), feed reads over our D1 index,
  * NIP-51 feed-subscription lists (verified here, never stored or published by KlickyMart), tip-ready badges and the
  * optional value-for-value site tip slot. KlickyMart never sees secret keys, holds funds or publishes events. */
@@ -138,7 +139,7 @@ export async function readFeed(db: D1Database | undefined, f: FeedFilter, extra:
   const seen = new Set<string>();
   const push = (ev: Ev) => { if (!seen.has(ev.id) && feedMatch(ev, f) && verifyNostrEvent(ev as never, ev.kind).ok) { seen.add(ev.id); out.push(ev); } };
   if (db) {
-    const where = [`kind IN (${f.kinds.map(() => "?").join(",")})`, "id NOT IN (SELECT id FROM revoked_events)", "id NOT IN (SELECT id FROM tombstones WHERE tombstones.pubkey = nostr_events.pubkey)"];
+    const where = [`kind IN (${f.kinds.map(() => "?").join(",")})`, "id NOT IN (SELECT id FROM revoked_events)", "id NOT IN (SELECT id FROM tombstones WHERE tombstones.pubkey = nostr_events.pubkey)", visibleSql("nostr_events")]; // M4 S7
     const binds: unknown[] = [...f.kinds];
     if (f.authors.length) { where.push(`pubkey IN (${f.authors.map(() => "?").join(",")})`); binds.push(...f.authors); }
     if (f.until) { where.push("created_at <= ?"); binds.push(f.until); }

@@ -7,6 +7,7 @@ import { MCP_SNIPPETS, REVIEW_GUIDE } from "../llms";
 import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
 import { renderAgentPolicy, renderCheckoutDetail, renderV5, renderWhy } from "../explain";
+import { takedownInfo } from "../takedown";
 import { awning, esc, eyebrow, gradeBadge, jsonForScript, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
 import type { TrustInfo } from "../submissions";
@@ -808,3 +809,17 @@ export function renderApp(origin: string, shell: PageShell, o: { mints: string[]
   return pageLayout({ title: "Feeds", origin, version: "—", tsMin: 0, tsMax: 0, body, path: "/app" }, shell);
 }
 const APP_RELAYS_HTML = APP_RELAYS.map((r) => `<code>${esc(r)}</code>`).join(", ");
+
+/** M4 S7: takedown page (only routed when KM_TAKEDOWN is on). */
+export function renderTakedown(origin: string, shell: PageShell): string {
+  const i = takedownInfo();
+  const body = `<h1>Takedown requests</h1>
+<p class="km-lead">Email <a href="mailto:${esc(i.contact)}">${esc(i.contact)}</a>. JSON: <a href="/takedown.json">/takedown.json</a>.</p>
+<h2>Include</h2><ul>${i.send.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
+<h2>What happens</h2><p>${esc(i.what_we_do)}</p>
+<h2>Repeat offenders</h2><p>${esc(i.repeat_offender)}</p>
+<h2>Mistakes</h2><p>${esc(i.counter_notice)}</p>
+<h2>Records</h2><p>${esc(i.log)}</p>
+<p class="km-muted">Designated agent: ${esc(i.designated_agent)}.</p>`;
+  return pageLayout({ title: "Takedown", origin, version: "\u2014", tsMin: 0, tsMax: 0, body, path: "/takedown" }, shell);
+}

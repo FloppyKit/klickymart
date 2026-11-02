@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { countsForRank, keyFirstSeen, MIN_RANK_KEY_AGE_S } from "./key-age";
 import { claimedKeys, storeBindings } from "./pay-binding";
 import { flagSummary, readFlagCache, type NoteFlag } from "./flags";
@@ -224,7 +225,7 @@ export async function loadAggregates(db: D1Database | undefined, domains?: strin
   const out = new Map<string, StoreAggregate>();
   if (!db) return out;
   try {
-    const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")})` : `SELECT ${COLS} FROM experiences`;
+    const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")}) AND ${visibleSql("experiences")}` : `SELECT ${COLS} FROM experiences WHERE ${visibleSql("experiences")}`; // M4 S7
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
     const tips = (await loadTips(db)).byNote;
     const flags = await readFlagCache(db); // computed on write (refreshFlagCache)

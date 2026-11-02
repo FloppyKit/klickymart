@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { takeAll } from "./ratelimit";
 /** Kind 422 merchant reviews: validation, storage (D1), and reads. Reviews are signed claims, not verified by KlickyMart
  * unless they reference a 421 and carry a payment proof (and even then only the proof is checkable, not the opinion). */
@@ -90,10 +91,10 @@ export async function getReviews(db: D1Database | undefined, d: string, limit = 
   const out: ReviewSummary = { count: 0, avg_rating_5: null, items: [], note: REVIEW_NOTE };
   if (!db) return out;
   try {
-    const agg = await db.prepare("SELECT COUNT(*) AS n, AVG(rating * 5.0 / rating_max) AS a FROM reviews WHERE d = ?").bind(d).first<{ n: number; a: number | null }>();
+    const agg = await db.prepare(`SELECT COUNT(*) AS n, AVG(rating * 5.0 / rating_max) AS a FROM reviews WHERE d = ? AND ${visibleSql("reviews")}`).bind(d).first<{ n: number; a: number | null }>();
     out.count = agg?.n ?? 0;
     out.avg_rating_5 = agg?.a == null ? null : Math.round(agg.a * 10) / 10;
-    const { results } = await db.prepare("SELECT id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json,source,relays,proof_status FROM reviews WHERE d = ? ORDER BY created_at DESC LIMIT ?").bind(d, Math.min(100, limit)).all<ParsedReview & { raw_json: string; source: string; relays: string | null; proof_status: string | null }>();
+    const { results } = await db.prepare(`SELECT id,d,pubkey,created_at,rating,rating_max,attempt,pay,fulfillment,proof,content,raw_json,source,relays,proof_status FROM reviews WHERE d = ? AND ${visibleSql("reviews")} ORDER BY created_at DESC LIMIT ?`).bind(d, Math.min(100, limit)).all<ParsedReview & { raw_json: string; source: string; relays: string | null; proof_status: string | null }>();
     out.items = (results ?? []).map(({ raw_json, ...r }) => ({ ...r, verified: verifiedLabel(r), event: JSON.parse(raw_json) }));
   } catch {
     /* migration pending */

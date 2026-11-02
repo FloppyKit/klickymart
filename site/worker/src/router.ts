@@ -54,6 +54,7 @@ import { liveCatalogSearch } from "./ucp-live";
 import { queueDomains } from "./trust-obs";
 import { loadTiers } from "./trust-tier";
 import { loadShipPolicies } from "./delivered";
+import { takedownEnabled, takedownInfo } from "./takedown";
 import { linkoutsEnabled, linkoutsFor, linkoutsHtml } from "./linkouts";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
@@ -74,7 +75,7 @@ import {
   renderDashboard,
   renderMerchant,
   render404,
-  renderAbout,
+  renderAbout, renderTakedown,
   renderClaim,
   renderContribute,
   renderDocsApi,
@@ -1372,6 +1373,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       if (!validated.ok) return new Response(render404(origin, shell), { status: 400 });
       const result = querySnapshot(snap, validated.params);
       return new Response(renderDashboard(snap, origin, url.searchParams, result.items, result.total, shell, await allTiers().catch(() => undefined)), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    if ((path === "/takedown" || path === "/takedown.json") && takedownEnabled(env)) { // M4 S7
+      if (path === "/takedown.json") return Response.json(takedownInfo());
+      return new Response(renderTakedown(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (path === "/about") return new Response(renderAbout(origin, snap, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (path === "/contribute") return new Response(renderContribute(origin, shell), { headers: { "Content-Type": "text/html; charset=utf-8" } });

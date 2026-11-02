@@ -132,6 +132,8 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/.well-known/mcp.json": { get: { summary: "MCP discovery", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/.well-known/nostr.json": { get: { summary: "NIP-05", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/": { get: { summary: "Home (HTML)", responses: { "200": { description: "HTML or text" } } } },
+      "/takedown": { get: { summary: "M4 S7 takedown request page (HTML); 404 unless KM_TAKEDOWN is on", responses: { "200": { description: "HTML" }, "404": { description: "disabled" } } } },
+      "/takedown.json": { get: { summary: "M4 S7 takedown contact, required notice contents, repeat-offender rule and designated-agent status; 404 unless KM_TAKEDOWN is on", responses: { "200": { description: "JSON" }, "404": { description: "disabled" } } } },
       "/about": { get: { summary: "About and data credits (HTML)", responses: { "200": { description: "HTML or text" } } } },
       "/dashboard": { get: { summary: "Dashboard (HTML)", responses: { "200": { description: "HTML or text" } } } },
       "/docs/api": { get: { summary: "API docs (HTML)", responses: { "200": { description: "HTML or text" } } } },

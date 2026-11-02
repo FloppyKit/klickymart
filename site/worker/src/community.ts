@@ -1,3 +1,4 @@
+import { visibleSql } from "./takedown";
 import { flagSummary, readFlagCache, FLAG_RULES } from "./flags";
 /** Per-merchant community view from relay/POST events. Never overwrites crawl fields; weights by distinct pubkeys. */
 import { NOSTR_KIND_FULFILLMENT, NOSTR_KIND_NEED } from "./nostr-kinds";
@@ -70,7 +71,7 @@ export async function getCommunity(db: D1Database | undefined, d: string, ourPub
     }).sort((a, b) => b.agents - a.agents);
     const hs = await db.prepare("SELECT kind, COUNT(DISTINCT pubkey) AS n FROM nostr_events WHERE d = ? AND kind IN (?, ?) GROUP BY kind").bind(d, NOSTR_KIND_NEED, NOSTR_KIND_FULFILLMENT).all<{ kind: number; n: number }>();
     for (const r of hs.results ?? []) { if (r.kind === NOSTR_KIND_NEED) out.handshake.needs = r.n; else out.handshake.fulfillments = r.n; }
-    const recs = await db.prepare("SELECT pubkey, id, created_at, raw_json, relays FROM site_records WHERE d = ?").bind(d).all<{ pubkey: string; id: string; created_at: number; raw_json: string; relays: string }>();
+    const recs = await db.prepare(`SELECT pubkey, id, created_at, raw_json, relays FROM site_records WHERE d = ? AND ${visibleSql("site_records")}`).bind(d).all<{ pubkey: string; id: string; created_at: number; raw_json: string; relays: string }>();
     for (const r of recs.results ?? []) {
       if (r.pubkey === ourPubkey) { out.our_record_on_relays = { id: r.id, created_at: r.created_at, relays: r.relays.split(",") }; continue; }
       let c: Record<string, unknown> = {};
