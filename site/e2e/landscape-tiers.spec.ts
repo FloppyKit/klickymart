@@ -83,11 +83,11 @@ test("tier 0 scene desktop shows road grid in lower band", () => {
 });
 
 test("tier 0 with hero still shows road above card", () => {
-  // Measured 2026-11-02 (folded layout, 1280x720): the road/horizon now reads at y 0.48..0.64
-  // of the viewport (neon horizon at ~0.50, grid lines through ~0.64) instead of 0.36..0.58.
-  // Rows 0.08..0.24 above the card are sky only (green avg 0.2..1.3, no road pixels).
-  // Measured green avg in 0.48..0.64 = 164.3 -> min 124 (75%).
-  expectRoadPixelsInBand(path.join(art, "landscape-tier0-dark-desktop.png"), 0.48, 0.64, 124);
+  // Re-measured 2026-11-02 for GO-KM-HOME-SCENE (1280x720): the home hero is now a transparent
+  // scrim, so the old 0.48..0.64 band no longer includes the light hero panel that used to inflate
+  // the green average (it measured 164.3 mostly from that panel). The neon horizon/road at ~0.50 is
+  // still visible through the hero; band 0.495..0.515 measured green avg 166.1 -> min 125 (75%).
+  expectRoadPixelsInBand(path.join(art, "landscape-tier0-dark-desktop.png"), 0.495, 0.515, 125);
 });
 
 test("default home dark desktop 2d shows neon grid and road", () => {
