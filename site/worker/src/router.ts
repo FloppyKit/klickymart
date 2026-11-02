@@ -54,6 +54,7 @@ import { liveCatalogSearch } from "./ucp-live";
 import { queueDomains } from "./trust-obs";
 import { loadTiers } from "./trust-tier";
 import { loadShipPolicies } from "./delivered";
+import { linkoutsEnabled, linkoutsFor, linkoutsHtml } from "./linkouts";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
@@ -133,6 +134,10 @@ export interface Env {
   KM_TRUST_RELAY?: string;
   /** M4 S5 (default OFF): delivered price per row + observed shipping policies (ship_policy_obs) for stores without one. */
   KM_DELIVERED_PRICE?: string;
+  /** M4 S6 (default OFF): static Amazon/Target search links (never fetched; a person must place the order). */
+  KM_LINKOUTS?: string;
+  /** M4 S7 (default OFF): /takedown page + intake contact. Hides recorded in takedown_hides apply regardless. */
+  KM_TAKEDOWN?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -733,6 +738,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       }
       (r.body as Record<string, unknown>).live_shopify_catalog = lv;
     }
+    if (r.ok && q.q && linkoutsEnabled(env)) (r.body as Record<string, unknown>).linkouts = linkoutsFor(q.q); // M4 S6: static, never fetched
     if (r.ok && q.domain) {
       const b = r.body as { items: unknown[]; live_shopify_catalog?: { items?: unknown[] } };
       if (!b.items.length && !(b.live_shopify_catalog?.items ?? []).length) (r.body as Record<string, unknown>).coverage_note = coverageNote(q.domain, live && !!q.q);
@@ -1359,7 +1365,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       const params = validated.ok ? validated.params : {};
       if (q) params.q = q.toLowerCase();
       const result = querySnapshot(snap, { ...params, limit: 20 });
-      return new Response(renderHome(snap, origin, q, result.items, shell), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+      return new Response(renderHome(snap, origin, q, result.items, shell).replace("</main>", `${linkoutsEnabled(env) ? linkoutsHtml(q) : ""}</main>`), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     }
     if (path === "/dashboard") {
       const validated = validateQueryParams(url.searchParams);
