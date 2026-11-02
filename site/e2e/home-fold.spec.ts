@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { waitFor2dLandscape } from "./landscape-helpers";
 
 const base = process.env.KM_BASE ?? "http://127.0.0.1:8787";
@@ -112,7 +113,7 @@ for (const vp of viewports) {
       expect(points.length).toBe(vp.width >= 1000 ? 6 : 3);
 
       const hits = await page.evaluate((pts) => {
-        const panelSel = [".km-store", ".km-result-row", ".km-hero-panel", ".km-home-hero", ".km-home-scrim"];
+        const panelSel = [".km-store", ".km-result-row", ".km-hero-panel", ".km-home-hero"];
         const alphaOf = (css: string) => {
           const c = document.createElement("canvas");
           c.width = c.height = 1;
@@ -188,6 +189,129 @@ for (const vp of viewports) {
       const nearWhite = rgb[0] >= 245 && rgb[1] >= 245 && rgb[2] >= 245;
       expect(nearWhite, `${name} background rgb(${rgb.join(",")}) must not be near-white`).toBe(false);
     }
+  });
+}
+
+/** GO-KM-HOME-SCENE-FIX (N3): an OS-light first visit has no saved theme, so km.js leaves `data-theme` off
+ *  the root. The warm home must still be warm (never near-white), the grade chip and footer links must be AA,
+ *  and the whole page must pass axe color-contrast on that path too. */
+for (const vp of viewports) {
+  test(`home os-light first visit ${vp.name}: warm sheet, AA chip and footer, no saved theme`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.goto(`${base}/?nomotion=1`);
+    await waitFor2dLandscape(page);
+
+    const firstVisit = await page.evaluate(() => ({
+      osLight: matchMedia("(prefers-color-scheme: light)").matches,
+      savedTheme: localStorage.getItem("km-theme"),
+      dataTheme: document.documentElement.getAttribute("data-theme"),
+    }));
+    expect(firstVisit.osLight, "OS reports a light color scheme").toBe(true);
+    expect(firstVisit.savedTheme, "no saved km-theme on a first visit").toBeNull();
+    expect(firstVisit.dataTheme, "no data-theme attribute on a first visit").toBeNull();
+
+    const colors = await page.evaluate(() => {
+      const toRgb = (css: string) => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 1;
+        const ctx = c.getContext("2d")!;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0]!, d[1]!, d[2]!];
+      };
+      const store = document.querySelector(".km-page-home .km-store")!;
+      const row = document.querySelector(".km-page-home .km-result-row")!;
+      const footer = document.querySelector(".km-page-home .km-footer")!;
+      return {
+        store: toRgb(getComputedStyle(store).backgroundColor),
+        row: toRgb(getComputedStyle(row).backgroundColor),
+        footer: toRgb(getComputedStyle(footer).backgroundColor),
+      };
+    });
+
+    for (const [name, rgb] of [
+      ["store sheet", colors.store],
+      ["result row", colors.row],
+      ["footer", colors.footer],
+    ] as const) {
+      const nearWhite = rgb[0] >= 245 && rgb[1] >= 245 && rgb[2] >= 245;
+      expect(nearWhite, `${name} background rgb(${rgb.join(",")}) must not be near-white on an OS-light first visit`).toBe(false);
+    }
+
+    // The two AA misses in the light-home axe run: the BTC grade chip ink and the footer links.
+    const ratios = await page.evaluate(() => {
+      const toRgb = (css: string) => {
+        const cv = document.createElement("canvas");
+        cv.width = cv.height = 1;
+        const ctx = cv.getContext("2d")!;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0]!, d[1]!, d[2]!];
+      };
+      const alphaOf = (css: string) => {
+        const cv = document.createElement("canvas");
+        cv.width = cv.height = 1;
+        const ctx = cv.getContext("2d")!;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        return ctx.getImageData(0, 0, 1, 1).data[3]! / 255;
+      };
+      // Background actually seen behind the text: the nearest ancestor with a mostly-opaque fill.
+      const effBg = (el: Element) => {
+        let n: Element | null = el;
+        while (n) {
+          const bg = getComputedStyle(n).backgroundColor;
+          if (alphaOf(bg) > 0.5) return toRgb(bg);
+          n = n.parentElement;
+        }
+        return [255, 255, 255];
+      };
+      const relLum = (rgb: number[]) => {
+        const f = (v: number) => {
+          v /= 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * f(rgb[0]!) + 0.7152 * f(rgb[1]!) + 0.0722 * f(rgb[2]!);
+      };
+      const measure = (el: Element) => {
+        const bg = effBg(el);
+        const fg = toRgb(getComputedStyle(el).color);
+        const l1 = relLum(fg);
+        const l2 = relLum(bg);
+        return { bg, fg, ratio: (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05) };
+      };
+      const chips = Array.from(document.querySelectorAll(".km-page-home .km-grade")).map(measure);
+      const footerLinks = Array.from(document.querySelectorAll(".km-page-home .km-footer a")).map(measure);
+      const worst = (xs: { bg: number[]; fg: number[]; ratio: number }[]) =>
+        xs.length ? xs.reduce((a, b) => (b.ratio < a.ratio ? b : a)) : { bg: [255, 255, 255], fg: [0, 0, 0], ratio: 0 };
+      return { chips: chips.length, grade: worst(chips), footerLink: worst(footerLinks) };
+    });
+
+    expect(ratios.chips, "the home store list renders BTC grade chips").toBeGreaterThanOrEqual(1);
+    expect(
+      ratios.grade.ratio,
+      `weakest grade chip rgb(${ratios.grade.fg.join(",")}) on rgb(${ratios.grade.bg.join(",")})`,
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      ratios.footerLink.ratio,
+      `weakest footer link rgb(${ratios.footerLink.fg.join(",")}) on rgb(${ratios.footerLink.bg.join(",")})`,
+    ).toBeGreaterThanOrEqual(4.5);
+
+    await page.screenshot({
+      path: `e2e/artifacts/home-scene-${vp.name}-oslight.png`,
+      animations: "disabled",
+      fullPage: false,
+    });
+
+    const results = await new AxeBuilder({ page }).analyze();
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious).toEqual([]);
   });
 }
 
