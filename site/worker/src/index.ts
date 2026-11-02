@@ -50,7 +50,7 @@ export default {
       }
       if (env.DB) await catchUp(env.DB, relayList(env.RELAY_URLS), await ingestCtx(e));
       // M2: one signed-results head per daily cron run, only when KM_SIGNED_RESULTS is on (no-op otherwise).
-      if (env.DB) { try { await writeDailyHead(e, (await loadSnapshot(e)).version, Math.floor(Date.now() / 1000)); } catch { /* head stays stale; routes 503 */ } }
+      if (env.DB) { try { const s = await loadSnapshot(e); await writeDailyHead(e, s.version, Math.floor(Date.now() / 1000), s.rows); } catch { /* head stays stale; routes 503 */ } }
     })());
   },
 };

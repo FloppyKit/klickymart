@@ -8,6 +8,7 @@ export { signedResultsEnabled } from "./signed-result";
 import { recordSnapshotHead, signedResultsEnabled as _sre } from "./signed-result";
 import * as secp from "@noble/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { MAX_TREE_ROWS, loadProof, snapshotDigestEnabled, treeStatements, treeFor, treeRowCount } from "./snapshot-tree";
 import { keyRecordsEnabled, loadKeyRecords, verifyKeyRecords } from "./key-records";
 
 /** M3: GET /open-store/keys (only when KM_KEY_RECORDS is on; else 404). Public records in order, no secrets. */
@@ -23,16 +24,16 @@ const H = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 const unavailable = (why: string) => Response.json({ ok: false, error: "unavailable", reason: why }, { status: 503, headers: H });
 
 export async function openStoreRoute(path: string, url: URL, env: Env): Promise<Response> {
-  if (path !== "/open-store/head" && path !== "/open-store/binding") return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
+  const isProof = path === "/open-store/proof" && snapshotDigestEnabled(env);
+  if (path !== "/open-store/head" && path !== "/open-store/binding" && !isProof) return Response.json({ ok: false, error: "not found" }, { status: 404, headers: H });
   const sk = env.KM_RESULT_SK_HEX;
   if (!sk || !/^[0-9a-f]{64}$/.test(sk)) return unavailable("no result-signing key configured");
   if (!env.DB) return unavailable("no database");
   const nowS = Math.floor(Date.now() / 1000);
   const head = await latestHead(env.DB, nowS);
   if (!head) return unavailable("no fresh snapshot head");
-  // Guard (Satoshi 2026-11-01): a label-only head must never be public. Until the snapshot step can commit to the data
-  // (snapshot_digest; M4), KM_SIGNED_RESULTS=on still serves nothing.
-  if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (digest pending M4)");
+  // Guard (Satoshi 2026-11-01): a label-only head must never be public. Digest heads come from KM_SNAPSHOT_DIGEST (M4 S2).
+  if (!head.snapshot_digest) return unavailable("head has no snapshot_digest: label-only heads are not served (enable KM_SNAPSHOT_DIGEST)");
   // M3: with KM_KEY_RECORDS on, the signing key must be the active current key of the records; cert_hash names its pin
   // or latest rotate. Anything else fails closed (503).
   if (keyRecordsEnabled(env)) {
@@ -43,6 +44,14 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   }
   const sh = signHead(head, sk);
   if (path === "/open-store/head") return Response.json(sh, { headers: H });
+  // M4 S2: GET /open-store/proof?d=<domain>: the signed head plus the stored inclusion proof for that record.
+  if (isProof) {
+    const d = (url.searchParams.get("d") ?? "").trim().toLowerCase();
+    if (!/^[a-z0-9.-]{1,253}$/.test(d)) return Response.json({ ok: false, error: "d must be a domain" }, { status: 400, headers: H });
+    const proof = await loadProof(env.DB, head.sequence, d);
+    if (!proof) return Response.json({ ok: false, error: "not in this snapshot (or no stored tree)" }, { status: 404, headers: H });
+    return Response.json({ head: sh, proof }, { headers: H });
+  }
   const pubkey = url.searchParams.get("pubkey") ?? "";
   const nonce = url.searchParams.get("nonce") ?? "";
   if (!/^[0-9a-f]{64}$/.test(pubkey)) return Response.json({ ok: false, error: "pubkey must be 64 lowercase hex" }, { status: 400, headers: H });
@@ -51,11 +60,28 @@ export async function openStoreRoute(path: string, url: URL, env: Env): Promise<
   return Response.json({ head: sh, result: signResult(buildResult(state, pubkey, nonce, head, nowS, head.cert_hash ?? null), sk) }, { headers: H });
 }
 
-/** Daily snapshot step (M2): called once from the existing daily cron after relay catch-up. Writes one head row only when
- * KM_SIGNED_RESULTS is on; otherwise does nothing. snapshot_id = "<snapshot data version>@<cron unix seconds>": the spec
- * does not yet define what a head commits to, so this is a LABEL (which data version + when), not a content commitment
- * (no Merkle root / digest). Flagged for Satoshi; M4 owns the real snapshot step. */
-export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string }, snapshotVersion: string, nowS: number): Promise<number | null> {
+/** Daily snapshot step. Called once from the existing daily cron after relay catch-up; writes one head row only when
+ * KM_SIGNED_RESULTS is on. snapshot_id = "<snapshot data version>@<cron unix seconds>" (a label).
+ * M4 S2: with KM_SNAPSHOT_DIGEST also on and the served rows given, the head carries the real snapshot_digest (Merkle
+ * digest over every served record, see merkle.ts) and the tree rows (snapshot_nodes / snapshot_leaves) are written in the same atomic batch as the head, so
+ * proofs are only read later. Tree over MAX_TREE_ROWS (free-tier write budget) or any error → label-only head (not served). */
+export async function writeDailyHead(env: { DB?: D1Database; KM_SIGNED_RESULTS?: string; KM_SNAPSHOT_DIGEST?: string }, snapshotVersion: string, nowS: number, rows?: { d: string; raw_json: string }[]): Promise<number | null> {
   if (!_sre(env) || !env.DB) return null;
-  try { return await recordSnapshotHead(env.DB, `${snapshotVersion}@${nowS}`, nowS); } catch { return null; }
+  const label = `${snapshotVersion}@${nowS}`;
+  if (snapshotDigestEnabled(env) && rows) {
+    try {
+      const t = treeFor(rows);
+      if (treeRowCount(t) <= MAX_TREE_ROWS) {
+        const last = await env.DB.prepare("SELECT sequence, snapshot_id FROM snapshot_heads ORDER BY sequence DESC LIMIT 1").first<{ sequence: number; snapshot_id: string }>();
+        const seq = (last?.sequence ?? -1) + 1;
+        if (!Number.isSafeInteger(seq)) return null;
+        // Tree rows + head in ONE atomic batch: a failed head (e.g. same-second rerun, UNIQUE snapshot_id) leaves no orphan rows.
+        await env.DB.batch([...treeStatements(env.DB, seq, t),
+          env.DB.prepare("INSERT INTO snapshot_heads (sequence, snapshot_id, snapshot_digest, created_at, prev_head, merkle_leaf_count) VALUES (?,?,?,?,?,?)").bind(seq, label, t.digest, nowS, last ? `${last.sequence}:${last.snapshot_id}` : null, t.count)]);
+        return seq;
+      }
+      return await recordSnapshotHead(env.DB, label, nowS); // over budget: label-only (not served)
+    } catch { return null; } // same-second rerun or write error: no head this run (never a half-written tree)
+  }
+  try { return await recordSnapshotHead(env.DB, label, nowS); } catch { return null; }
 }

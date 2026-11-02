@@ -197,7 +197,7 @@ export async function latestHead(db: D1Database, nowS: number): Promise<HeadPayl
   } catch { return null; }
 }
 
-/** Snapshot step helper. M2: the daily cron calls it via writeDailyHead (open-store.ts) when KM_SIGNED_RESULTS is on; M4 owns the real step. Sequence strictly increases; never reused. */
+/** Snapshot step helper. M2: the daily cron calls it via writeDailyHead (open-store.ts) when KM_SIGNED_RESULTS is on; M4 S2: digest heads are written by writeDailyHead itself (tree + head in one batch). Sequence strictly increases; never reused. */
 export async function recordSnapshotHead(db: D1Database, snapshotId: string, nowS: number, snapshotDigest: string | null = null): Promise<number> {
   const last = await db.prepare("SELECT sequence, snapshot_id FROM snapshot_heads ORDER BY sequence DESC LIMIT 1").first<{ sequence: number; snapshot_id: string }>();
   const seq = (last?.sequence ?? -1) + 1;

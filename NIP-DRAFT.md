@@ -597,7 +597,6 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   - Residual (accepted): whoever holds the current key can rotate to a key they choose. The honest operator's
     kill switch is a conflicting rotate from the same `prev` (fork → fail closed), plus revoke.
   - FROST threshold custody is planned later as its own milestone, entered via the same rotate step.
-- **Not yet:** snapshot heads written by the daily snapshot step (M4).
 - **Head writes (M2):** the existing daily cron writes one head after relay catch-up, only when `KM_SIGNED_RESULTS` is on.
   `HEAD_TTL_S` = 90000 (25 h: daily write + 1 h slack for cron jitter; Satoshi 2026-11-01); `RESULT_TTL_S` stays 600. No
   on-demand writes, no extra cron; a missed day fails closed (503). Freeze-window tradeoff: a frozen or replayed head can
@@ -607,7 +606,15 @@ open PRs and relay usage not checked for 31431. Nothing is published under it. I
   two datasets under one `snapshot_id` label yield different signed heads (equivocation is detectable). The Worker has no
   snapshot data files to hash at head-write time (data comes from KV/D1/embedded fixtures), so M2 writes label-only heads
   (`snapshot_digest` null) and **never serves them**: with `KM_SIGNED_RESULTS` on, `/open-store/*` answers 503 "head has no
-  snapshot_digest", and `verifyResult` rejects a head without one. The digest source and Merkle inclusion proofs are M4.
+  snapshot_digest", and `verifyResult` rejects a head without one.
+- **snapshot_digest (M4 S2, `KM_SNAPSHOT_DIGEST`, default off):** the daily head commits to every served record. Leaf
+  fields (fixed, required): `d` and `raw_sha256` = sha256(canonical JSON of the record); leaves sorted by `d`, duplicates
+  rejected. Hashes are domain-separated: leaf = sha256(0x00‖"klickymart/snapshot/v1/leaf"‖0x00‖d‖0x00‖raw_sha256),
+  node = sha256(0x01‖"klickymart/snapshot/v1/node"‖L‖R), empty root = sha256(0x02‖"klickymart/snapshot/v1/empty"),
+  `snapshot_digest` = sha256(0x03‖"klickymart/snapshot/v1/digest"‖u64be(leaf_count)‖root). An odd last node is promoted,
+  never duplicated. The tree is stored append-only (`snapshot_nodes`, `snapshot_leaves`) in the same atomic batch as the
+  head; `GET /open-store/proof?d=` returns the signed head plus `{v,d,raw_sha256,leaf_index,leaf_count,path[{side,hash}],
+  root,snapshot_digest}` (exact fields). Over 20,000 tree rows (free-tier write budget) → label-only head (not served).
 - **Ignored counter:** counts each distinct ignored event id once (re-receipts are duplicates); stale replays (lower version,
   or known content re-signed with an earlier created_at) count. Only event ids are kept (capped), never content.
 - **Switches:** `KM_ENDPOINT_BINDINGS`, `KM_SIGNED_RESULTS` default OFF; only `1`/`true`/`on` enables them. Kind 31431 is an internal placeholder pending the NIP kind-collision check; nothing is published to Nostr under it.

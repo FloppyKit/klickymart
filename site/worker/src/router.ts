@@ -118,6 +118,8 @@ export interface Env {
   KM_SIGNED_RESULTS?: string;
   /** M3 switch: "1"/"true"/"on" enables GET /open-store/keys and cert_hash on heads/results. Default OFF. */
   KM_KEY_RECORDS?: string;
+  /** M4 S2 switch: "1"/"true"/"on" makes daily heads carry a real snapshot_digest (Merkle) and enables GET /open-store/proof. Default OFF. */
+  KM_SNAPSHOT_DIGEST?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
