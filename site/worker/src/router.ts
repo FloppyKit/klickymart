@@ -956,8 +956,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const live = url.searchParams.get("live") === "1";
     const r = await offersFor(q, live);
     if (!r.ok) return err400("q", r.message);
+    // GO-KM-TIPS-ZERO-R6-F1A A2: GET /offers takes pay= (the same filter MCP find_offers has always applied), so the
+    // documented param and the MCP tool ("same as GET /offers") really do the same thing: store.pay only, unobserved left out.
+    const body = filterOffersByPay(origin, r.body, url.searchParams.get("pay")) as Record<string, unknown>;
     // Shopify Catalog results must never be cached or stored: live responses are no-store end to end.
-    return Response.json({ ...licenseMetaBlock(), ...r.body }, { headers: { ...apiHeaders(snap.version, 0), ...(live ? { "Cache-Control": "no-store" } : {}) } });
+    return Response.json({ ...licenseMetaBlock(), ...body }, { headers: { ...apiHeaders(snap.version, 0), ...(live ? { "Cache-Control": "no-store" } : {}) } });
   }
 
   if (path === "/recheck" && (request.method === "GET" || request.method === "POST")) {

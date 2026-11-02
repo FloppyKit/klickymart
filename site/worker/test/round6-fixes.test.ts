@@ -13,6 +13,9 @@ import { rowsToSnapshot } from "../src/index-mem";
 import { ingestFromNdjsonText } from "../src/ingest";
 import { findAlternatives } from "../src/alternatives";
 import REAL from "../../../data/records.ndjson?raw";
+import TIPS_SRC from "../src/tips.ts?raw";
+import NIP_DRAFT from "../../../NIP-DRAFT.md?raw";
+import { TIP_WEIGHT, tipWeight } from "../src/tips";
 
 const D = "store.google.com";
 const A = "31420:" + "a".repeat(64) + ":" + D;
@@ -325,5 +328,86 @@ describe("GO-KM-TIPS-ZERO-R6-F1 N2: openapi POST /reviews field names match a re
     // created_at text now points at the real window direction
     const req = o.paths["/reviews"]!.post as unknown as { requestBody: { content: { "application/json": { schema: { properties: { created_at: { description: string } } } } } } };
     expect(req.requestBody.content["application/json"].schema.properties.created_at.description).toMatch(/older than 7 days/i);
+  });
+});
+
+/** GO-KM-TIPS-ZERO-R6-F1A (A1-A4): the fix-round-1 additions. Docs and comments only, plus the A1 constant drop and the A2
+ * GET /offers pay= wiring, all checked against the real served text and a real dry-run response. */
+type OpenApi = { paths: Record<string, { get?: { parameters?: { name: string; description?: string }[] }; post?: { responses: Record<string, { description: string }> } }> };
+
+describe("GO-KM-TIPS-ZERO-R6-F1A A1: TIP_WEIGHT drops the retired multiplier, the comment points at M1", () => {
+  it("TIP_WEIGHT has no PER/CAP and tipWeight() still returns 1", () => {
+    expect(Object.keys(TIP_WEIGHT).sort()).toEqual(["IN_EFFECT", "WEIGHT"]);
+    expect(TIP_WEIGHT.IN_EFFECT).toBe(false);
+    expect(TIP_WEIGHT.WEIGHT).toBe(0);
+    for (const n of [0, 1, 3, 9]) expect(tipWeight(n)).toBe(1);
+  });
+  it("tips.ts states the approved M1 terms (b(t), B = min(1, sum b(t)), +0.2 x B, +20%) and no retired numbers", () => {
+    expect(TIPS_SRC).toContain("M1");
+    expect(TIPS_SRC).toContain("b(t)");
+    expect(TIPS_SRC).toContain("B = min(1, sum b(t))");
+    expect(TIPS_SRC).toContain("0.2 x B");
+    expect(TIPS_SRC).toContain("+20%");
+    for (const dead of ["TIP_WEIGHT.PER", "TIP_WEIGHT.CAP", "PER: 0.1", "CAP: 0.5", "+10%", "min(0.5", "+50%"]) expect(TIPS_SRC).not.toContain(dead);
+  });
+});
+
+describe("GO-KM-TIPS-ZERO-R6-F1A A2: GET /offers pay= is documented and behaves like MCP find_offers", () => {
+  it("openapi /offers and the llms.txt /offers line document pay= (unobserved left out, not assumed; Link note)", async () => {
+    const o = await getJson<OpenApi>("/openapi.json");
+    const p = o.paths["/offers"]!.get!.parameters!.find((x) => x.name === "pay")!;
+    expect(p).toBeDefined();
+    expect(String(p.description)).toMatch(/never observed/i);
+    expect(String(p.description)).toMatch(/left out/i);
+    expect(String(p.description)).toMatch(/one_time_link_card/i);
+    const llms = await (await SELF.fetch("https://example.com/llms.txt")).text();
+    const line = llms.split("\n").find((l) => l.includes("/offers?gtin="))!;
+    expect(line).toContain("pay=<code>");
+    expect(line).toMatch(/left out, not assumed/);
+    expect(line).toContain("one_time_link_card");
+  });
+  it("GET /offers?pay=link with no matches returns count 0 and the /q empty_note one_time_link_card text", async () => {
+    const b = await getJson<{ count: number; total: number; items: unknown[]; pay_filter?: { note: string }; empty_note?: { one_time_link_card: string } }>("/offers?q=headphones&pay=link");
+    expect(b.count).toBe(0);
+    expect(b.items).toEqual([]);
+    expect(b.empty_note?.one_time_link_card).toMatch(/one-time card/);
+    expect(b.pay_filter?.note).toMatch(/not observed|left out/);
+    // the same query without pay= does return offers: the note is about the filter, not an empty catalog
+    expect((await getJson<{ count: number }>("/offers?q=headphones")).count).toBeGreaterThan(0);
+    // a pay code those stores were never observed taking keeps nothing either (unknown, never assumed)
+    const card = await getJson<{ count: number; empty_note?: unknown }>("/offers?q=headphones&pay=card");
+    expect(card.count).toBe(0);
+    expect(card.empty_note).toBeUndefined();
+  });
+});
+
+describe("GO-KM-TIPS-ZERO-R6-F1A A3: the POST /reviews 200 doc matches a real dry-run response field for field", () => {
+  it("every field the dry run returns is named in the doc, with the real limit numbers", async () => {
+    const o = await getJson<OpenApi>("/openapi.json");
+    const text = o.paths["/reviews"]!.post!.responses["200"]!.description;
+    const r = await post(sign(expTags([["rating", "4", "5"]]), "F1A dry-run field diff"), "?dry_run=1");
+    expect(r.status).toBe(200);
+    const b = await r.json<Record<string, unknown>>();
+    for (const k of Object.keys(b)) expect(new RegExp(`\\b${k}\\b`).test(text)).toBe(true);
+    const lim = b.limits_would_apply as Record<string, unknown>;
+    expect(lim).toBeDefined();
+    expect(lim).not.toHaveProperty("dry_run"); // no nested dry-run budget object: the doc must not promise one
+    for (const [k, v] of Object.entries(lim)) {
+      expect(text).toContain(k);
+      if (k === "any_limit_would_hit" || k === "note") continue;
+      const l = v as { limit: number; used: number; would_hit: boolean };
+      expect(text).toContain(`limit ${l.limit}`); // generated from REVIEW_LIMITS, checked against the live object
+      expect(text).toContain("would_hit");
+    }
+  });
+});
+
+describe("GO-KM-TIPS-ZERO-R6-F1A A4: no leftover text says tips add rank weight today", () => {
+  const DEAD = ["min(0.5", "+50%", "1.5x", "tip multiplier", "tips add weight"];
+  it("served docs, tips.ts and NIP-DRAFT.md are free of the retired tip-multiplier wording", async () => {
+    const served = await Promise.all(["/llms.txt", "/openapi.json", "/tips.json", "/chart.json?limit=5"].map(async (u) => (await SELF.fetch(`https://example.com${u}`)).text()));
+    for (const text of [...served, TIPS_SRC, NIP_DRAFT]) for (const dead of DEAD) expect(text).not.toContain(dead);
+    // and the one wording that is right stays
+    expect(served[0]).toContain("Tips are shown but add no ranking weight");
   });
 });
