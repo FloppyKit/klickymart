@@ -85,7 +85,9 @@ export function parseExperience(input: unknown, knownDomain: (d: string) => bool
   if (!Array.isArray(tags) || !tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string"))) return fail("bad_tags", "tags must be arrays of strings");
   const nowS = Math.floor(now / 1000);
   if (ev.created_at > nowS + 600) return fail("bad_time", "created_at is in the future");
-  if (ev.created_at < nowS - (opts.maxAgeS ?? 30 * 86400)) return fail("bad_time", "created_at older than 30 days; publish to relays instead");
+  const maxAgeS = opts.maxAgeS ?? 30 * 86400;
+  // GO-KM-TIPS-ZERO-R6 B6: say the window actually applied (POST /reviews uses the documented 7 days; relay ingest 60).
+  if (ev.created_at < nowS - maxAgeS) return fail("bad_time", `created_at older than ${Math.round(maxAgeS / 86400)} days; publish to relays instead`);
   if (typeof ev.content !== "string" || ev.content.length > 4000) return fail("too_long", "content over 4000 chars");
   const d = expDomain(tags);
   if (!d) return fail("missing_store", 'need ["a","31420:<record-author>:<domain>"] or ["r","<domain>"]');

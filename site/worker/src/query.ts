@@ -43,7 +43,11 @@ export interface QueryParams {
   ag_min?: number;
   co_min?: number;
   ease_min?: number;
+  /** guest=1: drops stores known to require an account, keeps unknown (guest null) after confirmed-guest ones.
+   * guest=0: only stores known to require an account. guest_strict (guest=confirmed): only stores CONFIRMED to allow
+   * guest checkout (row.guest === 1); unknown and account-required stores are both dropped. */
   guest?: number;
+  guest_strict?: boolean;
   tos?: string;
   kyc?: string;
   cat?: string[];
@@ -211,10 +215,10 @@ export function validateQueryParams(searchParams: URLSearchParams): { ok: true; 
 
   const guest = searchParams.get("guest");
   if (guest !== null) {
-    if (guest !== "1" && guest !== "0") {
-      return { ok: false, param: "guest", message: "guest must be 0 or 1" };
-    }
-    params.guest = parseInt(guest, 10);
+    // GO-KM-TIPS-ZERO-R6 B4: guest=confirmed is the strict form (confirmed guest checkout only, guest=true-only).
+    if (guest === "confirmed") { params.guest = 1; params.guest_strict = true; }
+    else if (guest === "1" || guest === "0") params.guest = parseInt(guest, 10);
+    else return { ok: false, param: "guest", message: "guest must be 0 or 1, or confirmed (= guest=true only)" };
   }
 
   const tos = searchParams.get("tos");
@@ -422,7 +426,11 @@ function matches(row: IndexRow, p: QueryParams): boolean {
   }
 
   if (p.guest !== undefined) {
-    if (row.guest !== p.guest) return false;
+    // B4: guest=1 matches llms.txt line 56/123: drop stores KNOWN to require an account, keep unknown (null).
+    if (p.guest === 1) {
+      if (p.guest_strict) { if (row.guest !== 1) return false; }
+      else if (row.guest === 0) return false;
+    } else if (row.guest !== 0) return false;
   }
 
   if (p.tos) {
@@ -473,6 +481,7 @@ function sortKey(row: IndexRow, field: string): number | string | null {
     case "btc": val = row.btc; break;
     case "ag": val = row.ag; break;
     case "co": val = row.co; break;
+    case "guest": val = row.guest; break;
     case "ease": val = row.ease; break;
     case "ts": val = row.ts; break;
     case "status": val = row.status_code; break;
@@ -521,7 +530,8 @@ export function querySnapshot(snap: Snapshot, params: QueryParams): QueryResult 
     if (matches(row, params)) matched.push(row);
   }
 
-  const sortFields = params.sort ?? DEFAULT_SORT;
+  // B4: with guest=1 the kept-but-unknown stores (guest null) rank after the ones known to allow guest checkout.
+  const sortFields = params.guest === 1 ? ["-guest", ...(params.sort ?? DEFAULT_SORT)] : (params.sort ?? DEFAULT_SORT);
   matched.sort((a, b) => compareRows(a, b, sortFields));
 
   const total = matched.length;

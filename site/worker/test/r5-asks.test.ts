@@ -71,7 +71,9 @@ describe("tip rules documented (r5 e)", () => {
     const t = await (await SELF.fetch("https://example.com/tips.json")).json() as { bonus_rules: { min_sats_per_zap: number } };
     expect(t.bonus_rules.min_sats_per_zap).toBe(21);
     const l = await (await SELF.fetch("https://example.com/llms.txt")).text();
-    expect(l).toMatch(/at least 21 sats AND a key with history/);
+    // GO-KM-TIPS-ZERO-R6: the 21-sat + history rule still describes the BONUS tipper count (display only, tip weight 0).
+    expect(l).toMatch(/at least 21 sats from a key with history/);
+    expect(l).toMatch(/add no ranking weight/);
   });
 });
 

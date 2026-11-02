@@ -64,7 +64,7 @@ export function resolveCategory(input: string): string | null {
   return null;
 }
 
-export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; limit?: number; include_indirect?: boolean; include_blocked?: boolean }
+export interface AltParams { domain?: string; category?: string; sub?: string; pay?: string; guest?: boolean; /** B4: guest=confirmed = confirmed guest checkout only (guest true); unknown is dropped too */ guest_strict?: boolean; limit?: number; include_indirect?: boolean; include_blocked?: boolean }
 
 export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   let cats: string[] = [];
@@ -78,7 +78,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   }
   if (p.category && !cats.length) {
     const c = resolveCategory(p.category);
-    if (!c) return { ok: true as const, body: { from: p.domain ?? null, categories: [] as string[], sub: null, filters: { pay: p.pay ?? null, guest: !!p.guest }, count: 0, total: 0, items: [] as never[], turned_away: [] as never[], turned_away_note: "",
+    if (!c) return { ok: true as const, body: { from: p.domain ?? null, categories: [] as string[], sub: null, filters: { pay: p.pay ?? null, guest: !!p.guest, ...(p.guest_strict ? { guest_strict: true } : {}) }, count: 0, total: 0, items: [] as never[], turned_away: [] as never[], turned_away_note: "",
       note: `We have no category for "${p.category}" yet, so there are no alternatives to list. Use one of valid_categories or a product word like headphones.`,
       valid_categories: [...new Set([...COARSE_CATEGORIES, ...Object.keys(AN_ALT_CATEGORIES)])], valid_subs: [...SUBCATEGORIES] } };
     cats = [c];
@@ -120,6 +120,7 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
     if (want && !pays.some((x) => want.includes(x)) && !indirect) continue;
     // pay=btc means the store's own checkout takes bitcoin. Indirect-only stores appear only when asked for (include_indirect=1).
     if (indirect && !p.include_indirect) { indirectExcluded.push(row.d); continue; }
+    if (p.guest_strict && row.guest !== 1) continue; // guest=confirmed: only stores CONFIRMED to allow guest checkout
     if (p.guest && row.guest === 0) continue; // account required: excluded; unknown kept but ranked lower
     rows.push({ row, raw, pays, subRank, indirect, blocked });
   }
@@ -153,12 +154,12 @@ export function findAlternatives(snap: Snapshot, origin: string, p: AltParams) {
   return {
     ok: true as const,
     body: {
-      from, categories: cats, sub, filters: { pay: p.pay ?? null, guest: !!p.guest, ...(wantsBtc ? { include_indirect: !!p.include_indirect } : {}) }, count: items.length, total: rows.length,
+      from, categories: cats, sub, filters: { pay: p.pay ?? null, guest: !!p.guest, ...(p.guest_strict ? { guest_strict: true } : {}), ...(wantsBtc ? { include_indirect: !!p.include_indirect } : {}) }, count: items.length, total: rows.length,
       ...(sub && !rows.some((r) => r.subRank > 0) ? { sub_note: `No indexed store is tagged as selling ${sub} yet. ${rows.length ? `These are ${cats.join("/")} stores whose product families are not recorded; they may not carry ${sub}.` : ""}${sub === "handbags" ? " Luxury and designer resale stores are not indexed yet (many ban automated access in their terms)." : ""}`.trim() } : {}),
       ...(wantsBtc ? { btc_semantics: "pay filters match native acceptance (the store's own checkout takes bitcoin/Lightning). Stores where bitcoin works only through a third-party processor or a gift card are excluded unless include_indirect=1, then labelled btc_route=indirect and ranked last.",
         indirect_excluded: p.include_indirect ? [] : indirectExcluded, ...(indirectExcluded.length && !p.include_indirect ? { indirect_hint: `${indirectExcluded.length} store(s) take bitcoin only indirectly (${indirectExcluded.join(", ")}); add include_indirect=1 to list them` } : {}) } : {}),
       ranking: "checkout reached (co) desc, terms-restricted stores after equals, major retailer first among equals, product family is the store's main line, agent access (ag) desc, guest confirmed (if guest=1), BTC grade desc, ease desc",
-      note: "Store-level, not product-level: a match means the store sells that product family (signed `sub` in v0.4 records), not that a specific item is in stock. guest=1 excludes stores known to require an account; unknown guest status is kept and marked null. B2B wholesale stores are excluded.",
+      note: "Store-level, not product-level: a match means the store sells that product family (signed `sub` in v0.4 records), not that a specific item is in stock. guest=1 excludes stores known to require an account; unknown guest status is kept and marked null. guest=confirmed is the strict form: only stores confirmed to allow guest checkout (unknown is dropped too). category= (or q=) with no domain= resolves a product word to the same sub as the domain= form (headphones -> audio, category electronics). B2B wholesale stores are excluded.",
       items,
       include_blocked: !!p.include_blocked, blocked_excluded: p.include_blocked ? [] : blockedExcluded.slice(0, 20),
       ...(blockedExcluded.length && !p.include_blocked ? { blocked_hint: `${blockedExcluded.length} store(s) in this category have checkout blocked (bot wall or refusal); add include_blocked=1 to list them last.` } : {}),

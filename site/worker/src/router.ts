@@ -60,10 +60,11 @@ import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
 import { take, takeAll } from "./ratelimit";
+import { canonPay } from "./vocab";
 import { getReviews, parseReviewEvent, rateLimitCheck, storeReview, REVIEW_LIMITS } from "./reviews";
 import { crawlerPubkeyHexFromSnapshot } from "./crawler-pubkey";
 import { NOSTR_KIND_CRAWL_RECORD as K31420 } from "./nostr-kinds";
-import { agentStats, recordAgentVisit, visitsToday } from "./agent-visits";
+import { agentStats, recordAgentVisit, visitsToday, utcDay } from "./agent-visits";
 import { buildPageShell, isPreviewDataMode } from "./render/page-shell";
 import { landscapeFromSnapshot, landscapeFormulaInputs } from "./landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD } from "./nostr-kinds";
@@ -91,6 +92,32 @@ import {
 /** R12-005: production = ENVIRONMENT "production" or the klickymart.com origin. */
 /** Customer audit 2026-10-31 (Linkly/Scout): in a dry run, counts_toward_chart describes the note IF published; say so. */
 const DRY_RUN_NOTE = (counts: boolean) => ({ would_count_toward_chart: counts, dry_run_note: `dry run: nothing was stored. counts_toward_chart / would_count_toward_chart say whether this note WOULD count once really published (${counts ? "yes: basis=visit" : "no: only basis=visit notes about indexed stores count"}), subject to the 7-day key-age gate.` });
+/** Audit #32 / GO-KM-TIPS-ZERO-R6 B10: an empty Link (by Stripe) result says why and where to go instead. One text for the
+ * JSON /q body (empty_note), /q?format=ndjson and the MCP search_merchants / find_offers text lines. */
+export const linkEmptyNote = (origin: string, pay: string | string[] | undefined, total: number) => {
+  if (total !== 0) return null;
+  const pays = (Array.isArray(pay) ? pay : pay ? [pay] : []).map((p) => canonPay(String(p)));
+  if (!pays.includes("link")) return null;
+  return { why: "No indexed store has been observed offering a Link (by Stripe) button at checkout.",
+    one_time_link_card: "A one-time card issued by Link (approved by the person on their phone) is an ordinary Visa/Mastercard number: it works at any guest checkout with a card-number field. Try pay=card&reachable=1 (or guest=1) and check pay_link=false is fine.",
+    try: `${origin}/q?pay=card&reachable=1` };
+};
+/** B4/B5: a compact /q item carries the same guest (true | false | null) and co that /check reports for the store. */
+const guestField = (g: number | null) => (g === null ? null : g === 1);
+/** B10: MCP find_offers pay= filter. Matches the payment methods KlickyBot observed at the store (the store card's pay
+ * list), the same code vocabulary /q pay= uses; a store whose pay methods were never observed is left out (unknown, never
+ * assumed). An empty result carries the same one_time_link_card note as the JSON /q empty_note. */
+export const filterOffersByPay = (origin: string, body0: unknown, pay: unknown) => {
+  const body = body0 as { items?: { store?: { pay?: string[] | null } | null }[] } & Record<string, unknown>;
+  const pays = (Array.isArray(pay) ? pay : pay === undefined || pay === null ? [] : [pay]).map((x) => canonPay(String(x))).filter(Boolean);
+  if (!pays.length) return body0;
+  const all = body.items ?? [];
+  const items = all.filter((i) => (i.store?.pay ?? []).some((c) => pays.includes(canonPay(String(c)))));
+  const emptyNote = items.length === 0 ? linkEmptyNote(origin, pays, 0) : null;
+  return { ...body, count: items.length, total: items.length, items,
+    pay_filter: { pay: pays, note: "matched against the payment methods KlickyBot observed at the store (store.pay, same codes as /q pay=); stores whose pay methods were not observed are left out (unknown, not none)" },
+    ...(emptyNote ? { empty_note: emptyNote } : {}) };
+};
 export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
 export const saltRequiredButMissing = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string; SUBMIT_SALT?: string }) => isProduction(env) && !env.SUBMIT_SALT;
 export interface Env {
@@ -350,6 +377,38 @@ export async function enqueuePending(env: Env, d: string, pubkey: string | null,
   return { queued_at: v.queued_at, status: "pending check" };
 }
 
+/** GO-KM-TIPS-ZERO-R6 B7: a dry run must not use up the real limits (1 per key per merchant per day, 5 per key per day,
+ * global intake). Dry runs get their own small budget: DRY_RUN_LIMITS.perHour per key and per salted IP hash (IPs are
+ * kept only as a salted hash, like every other counter). The same validation path runs either way. */
+export const DRY_RUN_LIMITS = { perHour: 20 };
+async function dryRunOverBudget(env: Env, pubkey: string | null, ip: string | null, now = Date.now()): Promise<boolean> {
+  if (!env.DB || !pubkey) return false;
+  const hour = Math.floor(now / 3_600_000);
+  const items = [{ k: `rd:pk:${pubkey}:${hour}`, limit: DRY_RUN_LIMITS.perHour, ttlS: 7200 }];
+  if (ip) items.push({ k: `rd:ip:${await sha(`${env.SUBMIT_SALT ?? ""}|${ip}`)}:${hour}`, limit: DRY_RUN_LIMITS.perHour, ttlS: 7200 });
+  try { return !!(await takeAll(env.DB, items)); } catch { return false; }
+}
+/** B7: read-only. Which limits a REAL submit would hit right now (used / limit and would_hit); nothing is taken. */
+async function limitsPreview(env: Env, pubkey: string, d: string, now = Date.now()) {
+  const day = utcDay(now);
+  const out = { per_key_per_day: { limit: REVIEW_LIMITS.perPubkeyPerDay, used: 0, would_hit: false },
+    per_key_per_merchant_per_day: { limit: REVIEW_LIMITS.perPubkeyPerDomainPerDay, used: 0, would_hit: false },
+    global_per_day: { limit: REVIEW_LIMITS.globalPerDay, used: 0, would_hit: false },
+    per_key_notes_per_day: { limit: REVIEW_LIMITS.perPubkeyPerDay, used: 0, would_hit: false },
+    any_limit_would_hit: [] as string[],
+    note: `these are read-only: the dry run took nothing. A real submit would use one slot of each ${REVIEW_LIMITS.perPubkeyPerDay}-per-key-per-day and ${REVIEW_LIMITS.perPubkeyPerDomainPerDay}-per-key-per-merchant-per-day limit.` };
+  if (!env.DB) return out;
+  try {
+    const r = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(d = ?) AS nd FROM reviews WHERE pubkey = ? AND received_day = ?").bind(d, pubkey, day).first<{ n: number; nd: number | null }>();
+    out.per_key_per_day.used = r?.n ?? 0; out.per_key_per_merchant_per_day.used = r?.nd ?? 0;
+  } catch { /* migration pending */ }
+  try { out.global_per_day.used = (await env.DB.prepare("SELECT COUNT(*) AS n FROM reviews WHERE received_day = ?").bind(day).first<{ n: number }>())?.n ?? 0; } catch { /* migration pending */ }
+  try { out.per_key_notes_per_day.used = (await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(pubkey, day).first<{ n: number }>())?.n ?? 0; } catch { /* migration pending */ }
+  for (const [k, v] of Object.entries(out)) if (k !== "any_limit_would_hit" && k !== "note" && (v as { limit: number; used: number }).used >= (v as { limit: number }).limit) {
+    (v as { would_hit: boolean }).would_hit = true; out.any_limit_would_hit.push(k);
+  }
+  return out;
+}
 /** Truthful chart status (KM-007 / K10-001): a basis=visit note about an indexed store still counts only once its key
  * clears the key-age gate that loadAggregates() applies. counts_after says when. */
 async function keyAgeBody(db: D1Database | undefined, pubkey: string, eligible: boolean): Promise<{ counts_toward_chart: boolean; counts_after?: string; key_age_note?: string }> {
@@ -364,7 +423,9 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   const p = parseReviewEvent(body, (d) => known.has(d));
   // #4/#28: experience notes may name a store we have not indexed yet (e.g. one a live search surfaced). They are kept,
   // marked store_indexed:false, and the domain joins the pending-crawl queue (robots.txt first when KlickyBot gets to it).
-  const x = parseExperience(body, (d) => known.has(d) || isQueueableHost(d));
+  // B6: the documented created_at window (7 days back, 600 s of skew forward) applies to every POST /reviews body, including
+  // the shopping-experience path (it used to accept up to 30 days here). Relay ingest keeps its own 60-day window.
+  const x = parseExperience(body, (d) => known.has(d) || isQueueableHost(d), Date.now(), { maxAgeS: REVIEW_LIMITS.maxAgeS });
   const unindexed = x.ok && !known.has(x.value.d);
   const queueOn = unindexed && x.ok && env.PENDING_QUEUE_ENABLED === "true";
   // PQ-1: read-only here; the queue entry is written only on the accepted (201) path below.
@@ -378,11 +439,29 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     } catch { /* migration pending */ }
   }
   if (!p.ok && !x.ok) return { status: 400, body: { ok: false, error: { code: x.code === "not_an_experience" || x.code === "bad_kind" ? p.code : x.code, message: x.code === "not_an_experience" || x.code === "bad_kind" ? p.message : x.message } } };
+  // B7: one dry-run path for both shapes: same validation, no real limit used, own 20/hour key+IP budget, and a read-only
+  // report of the limits a real submit would hit. Nothing below (counts, takes, storage) runs for a dry run.
+  if (dryRun) {
+    const pk0 = p.ok ? p.value.pubkey : x.ok ? x.value.pubkey : null;
+    const d0 = p.ok ? p.value.d : x.ok ? x.value.d : null;
+    if (!env.DB) return { status: 503, body: { ok: false, dry_run: true, error: { code: "no_db", message: "storage unavailable" } } };
+    if (await dryRunOverBudget(env, pk0, ip)) return { status: 429, body: { ok: false, dry_run: true, stored: false, error: { code: "rate_limited", message: `dry runs are limited to ${DRY_RUN_LIMITS.perHour} per hour per key and per IP; nothing was stored and no review limit was used. A real submit has its own limits (${REVIEW_LIMITS.perPubkeyPerDay} per key per day, ${REVIEW_LIMITS.perPubkeyPerDomainPerDay} per key per merchant per day) and is not affected by this one` } } };
+    const lim = pk0 && d0 ? await limitsPreview(env, pk0, d0) : null;
+    const extra: Record<string, unknown> = { dry_run: true, stored: false, ...(lim ? { limits_would_apply: lim } : {}) };
+    if (!p.ok && x.ok) {
+      const ka = await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit" && !unindexed);
+      return { status: 200, body: { ok: true, ...extra, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, ...ka, ...DRY_RUN_NOTE(ka.counts_toward_chart), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), ...ux, warnings: x.value.warnings } };
+    }
+    if (p.ok) {
+      const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, ...(await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit")), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
+      return { status: 200, body: { ok: true, ...extra, id: p.value.id, d: p.value.d, ...xb, ...(x.ok ? DRY_RUN_NOTE(Boolean((xb as { counts_toward_chart?: boolean }).counts_toward_chart)) : {}) } };
+    }
+    return { status: 400, body: { ok: false, dry_run: true, error: { code: "bad_event", message: "body must be a signed kind 422 event" } } }; // unreachable: both shapes failed above
+  }
   if (!p.ok && x.ok) {
     // Structured shopping-experience 422 (or #klickymart kind 1) without the legacy review tags
     if (!env.DB) return { status: 503, body: { ok: false, error: { code: "no_db", message: "storage unavailable" } } };
     const ka = await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit" && !unindexed);
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: x.value.id, d: x.value.d, structured: x.value.structured, basis: x.value.basis, ...ka, ...DRY_RUN_NOTE(ka.counts_toward_chart), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), ...ux, stored: false, warnings: x.value.warnings } };
     try {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM experiences WHERE pubkey = ? AND received_day = ?").bind(x.value.pubkey, new Date().toISOString().slice(0, 10)).first<{ n: number }>();
       if ((n?.n ?? 0) >= REVIEW_LIMITS.perPubkeyPerDay) return { status: 429, body: { ok: false, error: { code: "rate_limited", message: `max ${REVIEW_LIMITS.perPubkeyPerDay} notes per key per day` } } };
@@ -401,7 +480,6 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
     const rl = await rateLimitCheck(env.DB, p.value);
     if (rl) return { status: 429, body: { ok: false, error: rl } };
     const xb = x.ok ? { structured: x.value.structured, basis: x.value.basis, ...(await keyAgeBody(env.DB, x.value.pubkey, x.value.basis === "visit")), ...(x.value.basis === "visit" ? {} : { chart_note: `basis "${x.value.basis}": kept and shown with the store, but only basis=visit notes count toward the chart` }), warnings: x.value.warnings } : {};
-    if (dryRun) return { status: 200, body: { ok: true, dry_run: true, id: p.value.id, d: p.value.d, stored: false, ...xb, ...(x.ok ? DRY_RUN_NOTE(Boolean((xb as { counts_toward_chart?: boolean }).counts_toward_chart)) : {}) } };
     let proof_status: string | null = null;
     if (p.value.fulfillment || p.value.proof) {
       const get = async (id?: string | null) => { if (!id) return null; const r = await env.DB.prepare("SELECT raw_json FROM nostr_events WHERE id = ?").bind(id).first<{ raw_json: string }>(); return r ? (JSON.parse(r.raw_json) as Ev) : null; };
@@ -655,7 +733,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const altParams = (sp: URLSearchParams | Record<string, unknown>) => {
     const g = (k: string) => (sp instanceof URLSearchParams ? sp.get(k) : (sp[k] as string | undefined)) ?? undefined;
     const guest = g("guest");
-    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guest === "1" || guest === "true" || (guest as unknown) === true,
+    const guestStrict = guest === "confirmed"; // B4: guest=confirmed = confirmed guest checkout only
+    return { domain: g("domain") || undefined, category: g("category") || g("q") || undefined, sub: g("sub") || undefined, pay: g("pay") || undefined, guest: guestStrict || guest === "1" || guest === "true" || (guest as unknown) === true, guest_strict: guestStrict,
       include_indirect: ["1", "true"].includes(String(g("include_indirect") ?? g("btc_indirect") ?? "")) || (sp as Record<string, unknown>).include_indirect === true,
       include_blocked: ["1", "true"].includes(String(g("include_blocked") ?? "")) || (sp as Record<string, unknown>).include_blocked === true, limit: g("limit") ? Number(g("limit")) : undefined };
   };
@@ -984,7 +1063,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (minTrust && !(TIERS as readonly string[]).includes(minTrust)) return err400("min_trust", "min_trust is flagged | unverified | seen | verified");
     const result = querySnapshot(await trustSnap(minTrust), validated.params);
     const tq = await allTiers();
-    const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) }));
+    const items = result.items.map((r) => ({ ...rowToCompact(r, origin), guest: guestField(r.guest), ...tierFields(tq.get(r.d)) }));
+    const emptyNote = linkEmptyNote(origin, validated.params.pay, result.total);
     const body = {
       ...licenseMetaBlock(),
       version: snap.version,
@@ -992,13 +1072,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       count: result.count,
       next: result.next,
       filter_ms: result.filter_ms,
+      ...(validated.params.guest !== undefined ? { guest_filter: { guest: validated.params.guest === 1 ? true : false, strict: !!validated.params.guest_strict, note: validated.params.guest_strict ? "guest=confirmed: only stores CONFIRMED to allow guest checkout (guest true); unknown and account-required stores are both dropped" : validated.params.guest === 1 ? "guest=1: stores known to REQUIRE an account are dropped; unknown guest status is kept (guest null) and ranked after confirmed-guest stores. Add strict=1 via guest=confirmed for guest=true only." : "guest=0: only stores known to require an account" } } : {}),
       items,
       // Audit #32: an empty Link result says why and where to go instead.
-      ...(result.total === 0 && validated.params.pay?.includes("link") ? { empty_note: {
-        why: "No indexed store has been observed offering a Link (by Stripe) button at checkout.",
-        one_time_link_card: "A one-time card issued by Link (approved by the person on their phone) is an ordinary Visa/Mastercard number: it works at any guest checkout with a card-number field. Try pay=card&reachable=1 (or guest=1) and check pay_link=false is fine.",
-        try: `${origin}/q?pay=card&reachable=1`,
-      } } : {}),
+      ...(emptyNote ? { empty_note: emptyNote } : {}),
     };
     if (url.searchParams.get("format") === "ndjson") {
       const stream = new ReadableStream({
@@ -1226,8 +1303,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (!v.ok) throw new InputError(`${v.param}: ${v.message}`);
         const result = querySnapshot(await trustSnap(minTrust), v.params);
         const tq = await allTiers();
-        const items = result.items.map((r) => ({ ...rowToCompact(r, origin), ...tierFields(tq.get(r.d)) }));
-        return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms }, filter_ms: result.filter_ms };
+        const items = result.items.map((r) => ({ ...rowToCompact(r, origin), guest: guestField(r.guest), ...tierFields(tq.get(r.d)) }));
+        // B10: the same empty Link note the JSON /q body carries, so the MCP text line can repeat it.
+        const emptyNote = linkEmptyNote(origin, v.params.pay, result.total);
+        return { body: { version: snap.version, total: result.total, count: result.count, items, filter_ms: result.filter_ms, ...(emptyNote ? { empty_note: emptyNote } : {}) }, filter_ms: result.filter_ms };
       },
       checkDomain: async (domain) => { const r = checkDomain(snap, domain, origin); if (r.ok && r.body.verdict !== "not-in-index") Object.assign(r.body, checkTrustFields(r.body, tierFields((await tiersFor([String(r.body.domain)])).get(String(r.body.domain))))); return r; },
       findAlternatives: async (args) => {
@@ -1244,7 +1323,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       findOffers: async (args) => {
         const q = offerQuery((k) => (args[k] === undefined || args[k] === null ? null : String(args[k])));
         if (typeof q === "string") return { ok: false as const, message: q };
-        return offersFor(q, args.live === true);
+        const r = await offersFor(q, args.live === true);
+        if (!r.ok || args.pay === undefined || args.pay === null) return r;
+        return { ok: true as const, body: filterOffersByPay(origin, r.body, args.pay) as Record<string, unknown> };
       },
       getCheckoutMap: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase() || r.d === `www.${domain.toLowerCase()}`);

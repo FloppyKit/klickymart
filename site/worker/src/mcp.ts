@@ -24,7 +24,8 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
             { name: "status", in: "query", schema: { type: "string" } },
             { name: "category", in: "query", schema: { type: "string", enum: Q_CATEGORIES } },
             { name: "cat", in: "query", schema: { type: "string" } },
-            ...Q_BOOL_FILTERS.map((n) => ({ name: n, in: "query", schema: { type: "string", enum: ["0", "1"] } })),
+            ...Q_BOOL_FILTERS.filter((n) => n !== "guest").map((n) => ({ name: n, in: "query", schema: { type: "string", enum: ["0", "1"] } })),
+            { name: "guest", in: "query", schema: { type: "string", enum: ["0", "1", "confirmed"] }, description: "1 = drop stores known to REQUIRE an account; unknown guest status is kept (guest null) and ranked after confirmed-guest stores. confirmed = strict: only stores confirmed to allow guest checkout. 0 = only stores known to require an account" },
             { name: "pay", in: "query", schema: { type: "string" } },
             { name: "agent_native", in: "query", schema: { type: "string", enum: ["0", "1"] }, description: "1 = agent-native stores only (L402/x402 paid APIs, VPN, eSIM, VPS, gift cards, nostr-native, agent-commerce)" },
             { name: "an_cat", in: "query", schema: { type: "string", enum: [...AN_CATS, ...Object.keys(AN_ALT_CATEGORIES)] }, description: "agent-native category (vps, vpn, esim, paid-api, gift-cards, or a raw an_cat)" },
@@ -34,7 +35,7 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
           ],
           responses: {
             "200": {
-              description: "Query results",
+              description: "Query results. Every item carries d, name, co and guest (true | false | null: the same values /check reports), plus trust_tier/trust_label/trust_why/src", 
               content: {
                 "application/json": {
                   schema: {
@@ -98,7 +99,20 @@ export function buildOpenApi(origin: string): Record<string, unknown> {
       "/submit/queue.ndjson": { get: { summary: "Same queue as /submit/queue.json, one JSON object per line", responses: { "200": { description: "NDJSON" } } } },
       "/submit/{id}": { get: { summary: "Submission status with crawl state and trust_tier", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "JSON" }, "404": { description: "not found" } } } },
       "/submit/queue.json": { get: { summary: "Public gated-crawl queue of community-submitted domains (read by the box crawler)", parameters: [{ name: "state", in: "query", schema: { type: "string", enum: ["pending", "review", "crawled", "refused"] } }, { name: "since", in: "query", schema: { type: "integer" } }, { name: "limit", in: "query", schema: { type: "integer", maximum: 2000 } }], responses: { "200": { description: "JSON (also /submit/queue.ndjson)" } } } },
-      "/reviews": { get: { summary: "Agent reviews for a store", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
+      "/reviews": {
+        get: { summary: "Agent reviews for a store", parameters: [{ name: "domain", in: "query", required: true, schema: { type: "string" }, description: "Store hostname" }], responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } },
+        post: { summary: "Submit one signed kind 422 shopping-experience note or review (KlickyMart never signs or publishes for you). Same validation path for a dry run.",
+          parameters: [{ name: "dry_run", in: "query", required: false, schema: { type: "string", enum: ["1"] }, description: "1 = validate only: nothing is stored and no review limit is used up. Dry runs have their own limit (20 per hour per key and per salted IP hash). The response is dry_run:true and carries limits_would_apply, i.e. which limits a real submit would hit" }],
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", description: "one signed Nostr event: kind 422 (or #klickymart kind 1) with id, pubkey, created_at, tags, content, sig. created_at must be within the last 7 days (max 600 s of clock skew into the future); content <= 2000 chars", properties: { kind: { type: "integer", enum: [422, 1] }, created_at: { type: "integer", description: "unix seconds; within the last 7 days (larger values are rejected with bad_time)" }, tags: { type: "array", items: { type: "array", items: { type: "string" } }, description: "a or r (domain), basis, depth, rating, pay_used, guest, account_required, amounts, region, lud16..." }, content: { type: "string", maxLength: 2000 }, pubkey: { type: "string" }, id: { type: "string" }, sig: { type: "string" } } } } } },
+          responses: {
+            "201": { description: "ok:true, stored:true, id, d, basis, structured, counts_toward_chart (bool), counts_after (ISO date, when the key-age gate lets it count; absent when it counts now or never will), warnings[]" },
+            "200": { description: "not stored: duplicate (idempotent re-POST of a stored note) or dry_run:true. A dry run returns ok:true, stored:false, dry_run:true, counts_toward_chart/would_count_toward_chart, same counts_after, limits_would_apply {per_key_per_day {limit 5, used, would_hit}, per_key_per_merchant_per_day {limit 1, ...}, per_key_per_day_notes, dry_run {limit 20/hour}, any_limit_would_hit}" },
+            "400": { description: "bad_event, bad_signature, bad_kind, bad_tags, bad_time (created_at outside the last 7 days or more than 600 s in the future), missing_a, unknown_domain, bad_rating, bad_attempt, bad_pay, bad_e, too_long" },
+            "410": { description: "deleted: the author deleted this event (NIP-09) and it cannot be resubmitted" },
+            "413": { description: "too_large: body over 16 KiB" },
+            "429": { description: "rate_limited: 5 reviews per key per day, 1 per key per merchant per day, global daily intake; dry runs: 20 per hour per key and per salted IP hash. Dry runs never use up the review limits" },
+            "503": { description: "storage not ready" } } },
+      },
       "/summary.json": { get: { summary: "Counts by status and BTC grade", responses: { "200": { description: "JSON" }, "400": { description: "bad_param error" } } } },
       "/open-store/proof": { get: { summary: "M4 Merkle inclusion proof for one store record under the current signed head; 404 unless KM_SNAPSHOT_DIGEST (and KM_SIGNED_RESULTS) is on", parameters: [{ name: "d", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "JSON {head, proof}" }, "404": { description: "disabled or not in snapshot" }, "503": { description: "no key or fresh digest head" } } } },
       "/open-store/keys": { get: { summary: "M3 key records (pin/rotate/revoke) for the result-signing key, in order, read-only; 404 unless KM_KEY_RECORDS is on", responses: { "200": { description: "JSON {records, state}" }, "404": { description: "disabled" } } } },
@@ -178,7 +192,7 @@ export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
             pay_group: { type: "string", enum: PAY_GROUP_NAMES },
             scope: { type: "string", enum: ["online", "instore", "unscoped", "any"] },
             ag_min: { type: "integer" }, co_min: { type: "integer" }, ease_min: { type: "integer" },
-            guest: { type: "integer", enum: [0, 1] },
+            guest: { type: ["integer", "string"], enum: [0, 1, "confirmed"], description: "1 (or true) = drop stores known to REQUIRE an account; a store whose guest status is unknown is kept (guest: null) and ranked after confirmed-guest stores. confirmed = strict: only stores confirmed to allow guest checkout. 0 = only stores known to require an account. Items carry guest (true|false|null) and co" },
             tos: { type: "string", enum: ["ok", "bans-automation", "unknown"] },
             btc_indirect: { type: "integer", enum: [0, 1], description: "1 = stores where bitcoin works only indirectly (third-party processor such as BitPay/Confirmo/Coinbase Commerce/OpenNode, or a gift card bought with BTC); not native acceptance" },
             ship_pre: { type: "integer", enum: [0, 1], description: "1 = shows shipping and tax before the payment step (observed by the probe)" },
@@ -212,7 +226,7 @@ export function mcpToolsList(opts: { facilitate?: boolean } = {}): unknown {
       {
         name: "find_offers",
         description: "Product-level offers KlickyBot observed on store pages (schema.org JSON-LD or Shopify JSON): price, currency, stock, URL, checked_at. Match by gtin (UPC/EAN), mpn, or name words (q). Optional zip adds a landed-cost estimate; live=true also returns a live (uncached) Shopify Catalog search for q.",
-        inputSchema: { type: "object", properties: { gtin: { type: "string" }, mpn: { type: "string" }, q: { type: "string" }, domain: { type: "string" }, zip: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 100 } } },
+        inputSchema: { type: "object", properties: { gtin: { type: "string" }, mpn: { type: "string" }, q: { type: "string" }, domain: { type: "string" }, zip: { type: "string" }, in_stock: { type: "boolean" }, max_price: { type: "number" }, pay: { type: "string", description: "keep only offers from stores whose observed payment methods include this code (any code or alias, e.g. link, ln, card; same codes as /q pay=). Stores with unobserved pay methods are left out. pay=link with nothing left returns the one_time_link_card note" }, live: { type: "boolean" }, limit: { type: "integer", maximum: 100 } } },
       },
       {
         name: "get_landed_price",
@@ -359,8 +373,12 @@ export function createMcpHandler(deps: {
         const limit = parseInt(sp.get("limit") ?? "50", 10);
         if (limit > 100) sp.set("limit", "100");
         const { body } = await deps.runQuery(sp);
-        const items = (body as { items?: { d: string; name: string | null; record: string }[] }).items ?? [];
-        const text = items.map((i) => `${i.d} ${i.name ?? ""} ${i.record}`.trim()).join("\n") || "no matches: 0 results for these filters";
+        const b0 = body as { items?: { d: string; name: string | null; record: string }[]; empty_note?: { why: string; one_time_link_card: string; try: string } };
+        const items = b0.items ?? [];
+        // B10: an empty pay=link result carries the same one_time_link_card note as the JSON /q empty_note.
+        const note = b0.empty_note;
+        const noteText = note ? `\n${note.why} ${note.one_time_link_card} Try ${note.try}` : "";
+        const text = (items.map((i) => `${i.d} ${i.name ?? ""} ${i.record}`.trim()).join("\n") || "no matches: 0 results for these filters") + noteText;
         return {
           ...base,
           result: {
@@ -430,10 +448,13 @@ export function createMcpHandler(deps: {
       if (p.name === "find_offers" && deps.findOffers) {
         const r = await deps.findOffers(p.arguments ?? {});
         if (!r.ok) return { ...base, error: { code: -32602, message: r.message } };
-        const items = (r.body as { items: { domain: string; name: string; price: number; currency: string; stock: string | null; url: string }[] }).items;
+        const rb = r.body as { items: { domain: string; name: string; price: number; currency: string; stock: string | null; url: string }[]; empty_note?: { why: string; one_time_link_card: string; try: string }; pay_filter?: unknown };
+        const items = rb.items;
         const live = (r.body as { live_shopify_catalog?: { ok?: boolean; error?: string; filter_note?: string; items?: { title?: string; price?: number; currency?: string; stock?: string | null; url?: string; store?: { indexed?: boolean; co?: number | null; guest?: boolean | null; pay?: string[] } ; landed?: { est_total?: number | null } }[] } }).live_shopify_catalog;
         const liveLines = live ? (live.ok ? [...(live.items ?? []).map((i) => `[Shopify Catalog live, not stored] ${i.currency ?? ""} ${i.price ?? "?"} ${i.stock ?? "?"} ${i.title ?? ""} ${i.url ?? ""} | store: ${i.store?.indexed ? `co=${i.store.co ?? "?"} guest=${i.store.guest ?? "?"} pay=${(i.store.pay ?? []).join(",") || "?"}` : "not indexed"}${i.landed ? ` | est_total=${i.landed.est_total ?? "unknown"}` : ""}`), ...(live.filter_note ? [live.filter_note] : [])] : [`[Shopify Catalog live] error: ${live.error ?? "unknown"}`]) : [];
-        return { ...base, result: { content: [{ type: "text", text: [...items.map((i) => `${i.domain} ${i.currency} ${i.price} ${i.stock ?? "?"} ${i.name} ${i.url}`), ...liveLines].join("\n") || "no offers observed" }], structuredContent: r.body } };
+        // B10: pay=link with nothing left carries the same one_time_link_card note as the JSON /q empty_note.
+        const payNote = rb.empty_note ? `\n${rb.empty_note.why} ${rb.empty_note.one_time_link_card} Try ${rb.empty_note.try}` : "";
+        return { ...base, result: { content: [{ type: "text", text: ([...items.map((i) => `${i.domain} ${i.currency} ${i.price} ${i.stock ?? "?"} ${i.name} ${i.url}`), ...liveLines].join("\n") || "no offers observed") + payNote }], structuredContent: r.body } };
       }
       if (p.name === "get_checkout_map" && deps.getCheckoutMap) {
         const b = await deps.getCheckoutMap(String(p.arguments?.domain ?? ""));
