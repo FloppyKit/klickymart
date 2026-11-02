@@ -11,8 +11,9 @@ const viewports = [
 
 const schemes = ["dark", "light"] as const;
 
-/** F7 (relaxed by GO-KM-HOME-SCENE): at first load, no scrolling, the search is fully in view and the
- *  top edge of the first store row is in view. The scene band is allowed to grow back. */
+/** F7 (relaxed by GO-KM-HOME-SCENE, then by GO-KM-HOME-SHEET-DOWN): at first load, no scrolling, the search is
+ *  fully in view. GO-KM-HOME-SHEET-DOWN pushes the store sheet down past the shop and its road band, so on
+ *  desktop the first store row only peeks at the bottom edge and on phones it may start below the fold. */
 for (const vp of viewports) {
   for (const scheme of schemes) {
     test(`home fold ${vp.name} ${scheme}: search and first row top edge above the fold`, async ({ page }) => {
@@ -40,13 +41,20 @@ for (const vp of viewports) {
       // The search input is fully in view.
       inside(await page.locator("#q").boundingBox(), "search input");
 
-      // The top edge of the first store row is in view (a peek is enough).
+      // GO-KM-HOME-SHEET-DOWN: desktop keeps a first-row peek; on phones the first row may drop below the fold,
+      // so only the search has to be fully in view there.
       const rows = page.locator(".km-home-list .km-result-row");
       expect(await rows.count()).toBeGreaterThanOrEqual(1);
       const firstRow = await rows.first().boundingBox();
       expect(firstRow, "first store row has a bounding box").not.toBeNull();
-      expect(firstRow!.y, "first store row top edge is in view").toBeGreaterThanOrEqual(0);
-      expect(firstRow!.y, "first store row top edge is above the fold").toBeLessThan(viewport.height);
+      expect(firstRow!.y, "first store row top edge is not scrolled off the top").toBeGreaterThanOrEqual(0);
+      if (vp.width >= 1000) {
+        expect(firstRow!.y, "desktop: the first store row top edge peeks above the fold").toBeLessThan(viewport.height);
+      } else {
+        expect(firstRow!.y, "phone: the first store row starts below the search field").toBeGreaterThan(
+          (await page.locator("#q").boundingBox())!.y,
+        );
+      }
 
       // F4: each first-screen label has a (?) disclosure that opens a plain-language definition.
       for (const [testid, label] of [
@@ -362,20 +370,19 @@ for (const scheme of schemes) {
 
 /** GO-KM-HOME-HERO-CLEAR: the hero tile used to sit on top of the storefront sprite, so the shop was either
  *  blurred out or the headline was unreadable over it. The shop is drawn on #km-landscape, not as a DOM
- *  element, so its box is computed from the drawing code (public/km-landscape.js storeGeom):
- *  sprite is SW(90) x SH(50) logical px at p = 2 under 520px wide and 3 under 1500px, placed at
- *  round(h*(0.52+reach*0.04) - SH*p + p) with `reach` from the canvas data-reach attribute. */
-function storefrontSpriteBox(vp: { width: number; height: number }, reach: number) {
-  const p = vp.width < 520 ? 2 : vp.width < 1500 ? 3 : 4;
-  const width = 90 * p;
-  const height = 50 * p;
-  const horizon = vp.height * (0.52 + reach * 0.04);
-  return {
-    x: Math.round(vp.width * 0.5 - (3 + 66 / 2) * p),
-    y: Math.round(horizon - height + p),
-    width,
-    height,
-  };
+ *  element, so public/km-landscape.js exports the sprite box it draws into as `window.__kmLandscapeStore`
+ *  (a read-only geometry export; GO-KM-HOME-SHEET-DOWN replaced the copied storeGeom constants here). */
+type LandscapeStoreBox = { x: number; y: number; w: number; h: number; scale: number; horizon: number };
+type ShopperBox = { x: number; y: number; w: number; h: number; depth: number; alpha?: number; orange?: boolean };
+
+async function landscapeGeometry(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const w = window as unknown as { __kmLandscapeStore?: unknown; __kmShoppers?: unknown };
+    return {
+      store: (w.__kmLandscapeStore ?? null) as null | { x: number; y: number; w: number; h: number; scale: number; horizon: number },
+      shoppers: (w.__kmShoppers ?? []) as { x: number; y: number; w: number; h: number; depth: number }[],
+    };
+  });
 }
 
 for (const vp of viewports) {
@@ -390,16 +397,15 @@ for (const vp of viewports) {
       // The scene is viewport-fixed, so both boxes are read at the top of the page.
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
 
-      const reach = Number(await page.locator("#km-landscape").getAttribute("data-reach"));
-      expect(Number.isFinite(reach), "the landscape canvas reports its reach").toBe(true);
-      const shop = storefrontSpriteBox(vp, reach);
+      const { store } = await landscapeGeometry(page);
+      expect(store, "the landscape exports the storefront sprite box").not.toBeNull();
+      const shop = store!;
 
       const hero = await page.locator(".km-home-hero").boundingBox();
       expect(hero, "hero has a bounding box").not.toBeNull();
       const h = hero!;
 
-      const overlaps =
-        h.x < shop.x + shop.width && shop.x < h.x + h.width && h.y < shop.y + shop.height && shop.y < h.y + h.height;
+      const overlaps = h.x < shop.x + shop.w && shop.x < h.x + h.width && h.y < shop.y + shop.h && shop.y < h.y + h.height;
       expect(
         overlaps,
         `hero box ${JSON.stringify(h)} must not overlap the storefront sprite ${JSON.stringify(shop)}`,
@@ -413,6 +419,68 @@ for (const vp of viewports) {
       const input = await page.locator("#q").boundingBox();
       expect(input, "search input has a bounding box").not.toBeNull();
       expect(input!.y + input!.height, "search input sits above the shop").toBeLessThanOrEqual(shop.y);
+    });
+  }
+}
+
+/** GO-KM-HOME-SHEET-DOWN: the store-list sheet used to start at 499px (1280x800) / 539px (390x844), which cut
+ *  the shop off mid-road and hid the shopper robots walking in front of it. The sheet now starts below the road
+ *  band, and the hero sits ~20px above the storefront sprite instead of ~50px. Both boxes are read from the
+ *  landscape's own geometry export (`window.__kmLandscapeStore` / `window.__kmShoppers`), never from copies of
+ *  the drawing constants, so a change to storeGeom or the walker layout moves these boxes with it. */
+for (const vp of viewports) {
+  for (const scheme of schemes) {
+    test(`home sheet down ${vp.name} ${scheme}: sheet clears the shop and the walking robots`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.addInitScript((s) => localStorage.setItem("km-theme", s as string), scheme);
+      await page.goto(`${base}/?nomotion=1`);
+      await waitFor2dLandscape(page);
+
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+      const geom = await landscapeGeometry(page);
+      expect(geom.store, "the landscape exports the storefront sprite box").not.toBeNull();
+      const shop: LandscapeStoreBox = geom.store!;
+      expect(shop.h, "the exported storefront box has a height").toBeGreaterThan(0);
+      const shopBottom = shop.y + shop.h;
+
+      const sheet = await page.locator(".km-page-home .km-store").boundingBox();
+      expect(sheet, "the store sheet has a bounding box").not.toBeNull();
+      const sheetTop = sheet!.y;
+
+      // 1. The sheet starts below the whole storefront sprite, with the GO's 8px of clearance.
+      expect(
+        sheetTop,
+        `store sheet top ${sheetTop} must be at least 8px below the storefront bottom ${shopBottom}`,
+      ).toBeGreaterThanOrEqual(shopBottom + 8);
+
+      // 2. At least one walking robot sprite is above the sheet top, and no robot is cut off by it.
+      const shoppers: ShopperBox[] = geom.shoppers;
+      expect(shoppers.length, "the landscape exports the walking shoppers").toBeGreaterThanOrEqual(1);
+      const above = shoppers.filter((b) => b.y + b.h <= sheetTop);
+      expect(
+        above.length,
+        `at least one robot sprite is fully above the sheet top ${sheetTop}; robots ${JSON.stringify(shoppers)}`,
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        shoppers.filter((b) => b.y >= sheetTop),
+        `no robot sprite starts below the sheet top ${sheetTop}`,
+      ).toEqual([]);
+
+      // 3. The hero was pulled down to the shop: ~16-24px of sky between the hero box and the sprite (the GO's
+      //    band; 8px is the hard floor the HERO-CLEAR test enforces). The upper bound leaves room for a higher
+      //    `reach`, which lifts the horizon and so the sprite.
+      const hero = await page.locator(".km-home-hero").boundingBox();
+      expect(hero, "hero has a bounding box").not.toBeNull();
+      const sky = shop.y - (hero!.y + hero!.height);
+      expect(sky, `sky between the hero box and the shop sprite`).toBeGreaterThanOrEqual(8);
+      expect(sky, `sky between the hero box and the shop sprite`).toBeLessThanOrEqual(48);
+
+      // 4. The search is still fully on the first screen.
+      const input = await page.locator("#q").boundingBox();
+      expect(input, "search input has a bounding box").not.toBeNull();
+      expect(input!.y + input!.height, "search input bottom" ).toBeLessThanOrEqual(vp.height);
     });
   }
 }
