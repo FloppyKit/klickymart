@@ -11,7 +11,7 @@
 # After deploy: one km-smoke.sh run (60s cap); on failure one `wrangler rollback`, no retry.
 # Usage: km-deploy.sh [--check] [--allow-schedule]   (--check runs all gates and exits 0/1 before any Cloudflare write)
 set -euo pipefail
-REPO=${KM_REPO:-/workspace/klickymart-public}
+REPO=${KM_REPO:-$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)}
 ALLOWED_WORKERS=${KM_ALLOWED_WORKERS:-"klickymart klickymart-production"}
 ALLOWED_DO_BINDINGS=${KM_ALLOWED_DO_BINDINGS:-"INGESTER"}
 DAY_MS=86400000

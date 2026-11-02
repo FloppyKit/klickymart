@@ -11,7 +11,7 @@
 #                                        https://developers.cloudflare.com/d1/platform/pricing/
 # Budget = 50% of each (chuck.md guardrail 3). Over 80% => km-deploy rollback only.
 # Log prune (7 days, move to logs/_old, never delete): scripts/km-prune.sh
-REPO=${KM_REPO:-/workspace/klickymart-public}
+REPO=${KM_REPO:-$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)}
 ALLOWED_WORKERS=${KM_ALLOWED_WORKERS:-"klickymart klickymart-production"}
 PROD=${KM_PROD_WORKER:-klickymart-production}
 export TZ=America/Chicago
@@ -107,13 +107,24 @@ for n,v,l in rows:
 print("  CHECK usage_under_50pct:", "PASS" if ok else "FAIL")'
 }
 jobs_and_keys(){
-echo; echo "== Own background jobs (wrangler/esbuild/workerd/node under /workspace)"
+# Roots that actually exist on this host: the checkout (wherever it lives) plus the legacy /workspace paths.
+ROOTS=()
+for r in "$REPO" /workspace/klickymart-public /workspace/nostr-market /workspace/nostr-market.ARCHIVED /workspace/km-verify; do
+  [ -d "$r" ] || continue
+  case " ${ROOTS[*]-} " in *" $r "*) continue;; esac
+  ROOTS+=("$r")
+done
+ROOTS_LABEL=${ROOTS[*]:-none}
+echo; echo "== Own background jobs (wrangler/esbuild/workerd/node under $ROOTS_LABEL)"
 J=$(ps -eo pid,lstart,etime,cmd | grep -E 'wrangler|esbuild|workerd|klickymart|km-verify|nostr-market|mock-servers|lnurlp' | grep -vE 'grep|km-status' | cut -c1-180)
 if [ -n "$J" ]; then echo "$J" | sed 's/^/  /'; else echo "  (none)"; fi
-echo; echo "== Key files under /workspace (paths only, never contents)"
+echo; echo "== Key files under $ROOTS_LABEL (paths only, never contents)"
 R=$(find /workspace/research -xdev -type f -name '*.pem' 2>/dev/null)
 [ -n "$R" ] && echo "  INFO third-party test fixtures (not checked): $(echo $R | wc -w) .pem under /workspace/research"
-K=$(find /workspace/klickymart-public /workspace/nostr-market /workspace/nostr-market.ARCHIVED /workspace/km-verify -xdev \( -name node_modules -o -name '.venv*' -o -name site-packages -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
+K=""
+if [ ${#ROOTS[@]} -gt 0 ]; then
+K=$(find "${ROOTS[@]}" -xdev \( -name node_modules -o -name '.venv*' -o -name site-packages -o -name _archive \) -prune -o -type f \( -name '*.nsec' -o -name '*.token' -o -name '*ed25519*' -o -name '*.pem' \) -print 2>/dev/null)
+fi
 if [ -n "$K" ]; then echo "$K" | sed 's/^/  /'; echo "  CHECK no_keys_under_workspace: FAIL ($(echo "$K" | wc -l) file(s))"; else echo "  CHECK no_keys_under_workspace: PASS"; fi
 }
 { main; jobs_and_keys; } 2>&1 | scrub
