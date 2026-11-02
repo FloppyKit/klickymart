@@ -1,9 +1,9 @@
 /** M4 S6: static Amazon / Target search link-outs. Flag KM_LINKOUTS (default OFF).
  * Built from the query string only: KlickyMart never fetches amazon.com or target.com (no automated requests, final for
- * M4), shows no price or stock for them, and says a person must place the order. */
+ * M4), shows no price or stock for them, and passes along each store's own terms. */
 const on = (v?: string) => { const s = (v ?? "").trim().toLowerCase(); return s === "1" || s === "true" || s === "on"; };
 export const linkoutsEnabled = (env: { KM_LINKOUTS?: string }) => on(env.KM_LINKOUTS);
-export const LINKOUT_NOTE = "A person must place this order. KlickyMart does not fetch this site and shows no price or stock for it; the link opens that store's own search.";
+export const LINKOUT_NOTE = "KlickyMart doesn't fetch this site. If your agent shops here, follow the store's terms below.";
 export const LINKOUT_HOSTS = ["www.amazon.com", "www.target.com"] as const;
 /** Each retailer's own published warning, passed along as static text (never fetched at runtime). Fixed format. */
 export interface RetailerNotice { source_url: string; quote: string | null; fetched_at: string | null; note: string }
@@ -17,17 +17,17 @@ export const RETAILER_NOTICES: Record<"amazon.com" | "target.com", RetailerNotic
   // Associates, so it is not presented as Amazon's general rule.)
   "amazon.com": { source_url: "https://www.amazon.com/gp/help/customer/display.html?nodeId=508088", quote: null, fetched_at: null, note: `Terms could not be retrieved; read before shopping. ${OWN_CHOICE}` },
 };
-export interface Linkout { store: "amazon.com" | "target.com"; url: string; note: string; person_must_order: true; price: null; stock: null; fetched: false; retailer_notice: RetailerNotice }
+export interface Linkout { store: "amazon.com" | "target.com"; url: string; note: string; price: null; stock: null; fetched: false; retailer_notice: RetailerNotice }
 export function linkoutsFor(q: string | null | undefined): Linkout[] {
   const t = (q ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   if (!t) return [];
   const e = encodeURIComponent(t);
-  const mk = (store: Linkout["store"], url: string): Linkout => ({ store, url, note: LINKOUT_NOTE, person_must_order: true, price: null, stock: null, fetched: false, retailer_notice: RETAILER_NOTICES[store] });
+  const mk = (store: Linkout["store"], url: string): Linkout => ({ store, url, note: LINKOUT_NOTE, price: null, stock: null, fetched: false, retailer_notice: RETAILER_NOTICES[store] });
   return [mk("amazon.com", `https://www.amazon.com/s?k=${e}`), mk("target.com", `https://www.target.com/s?searchTerm=${e}`)];
 }
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 export function linkoutsHtml(q: string | null | undefined): string {
   const l = linkoutsFor(q);
   if (!l.length) return "";
-  return `<section class="km-linkouts"><h2>Also search elsewhere</h2><p class="km-muted">${esc(LINKOUT_NOTE)}</p><ul>${l.map((x) => `<li><a href="${esc(x.url)}" rel="nofollow noopener noreferrer" target="_blank">Search ${esc(x.store)}</a> (a person must place the order)<br><small>${esc(x.retailer_notice.quote ? `${x.store} terms: “${x.retailer_notice.quote.split("\n")[0]!.slice(0, 280)}…”` : x.retailer_notice.note)} <a href="${esc(x.retailer_notice.source_url)}" rel="nofollow noopener noreferrer">source</a></small></li>`).join("")}</ul></section>`;
+  return `<section class="km-linkouts"><h2>Also search elsewhere</h2><p class="km-muted">${esc(LINKOUT_NOTE)}</p><ul>${l.map((x) => `<li><a href="${esc(x.url)}" rel="nofollow noopener noreferrer" target="_blank">Search ${esc(x.store)}</a><br><small>${esc(x.retailer_notice.quote ? `${x.store} terms: “${x.retailer_notice.quote.split("\n")[0]!.slice(0, 280)}…”` : x.retailer_notice.note)} <a href="${esc(x.retailer_notice.source_url)}" rel="nofollow noopener noreferrer">source</a></small></li>`).join("")}</ul></section>`;
 }

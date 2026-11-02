@@ -135,7 +135,7 @@ export interface Env {
   KM_TRUST_RELAY?: string;
   /** M4 S5 (default OFF): delivered price per row + observed shipping policies (ship_policy_obs) for stores without one. */
   KM_DELIVERED_PRICE?: string;
-  /** M4 S6 (default OFF): static Amazon/Target search links (never fetched; a person must place the order). */
+  /** M4 S6 (default OFF): static Amazon/Target search links (never fetched; each store's own terms passed along). */
   KM_LINKOUTS?: string;
   /** M4 S7 (default OFF): /takedown page + intake contact. Hides recorded in takedown_hides apply regardless. */
   KM_TAKEDOWN?: string;
