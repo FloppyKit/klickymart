@@ -147,7 +147,7 @@ describe("wrangler production config", () => {
     expect(toml).toContain("custom_domain = true");
     expect(toml).toContain('pattern = "www.klickymart.com"');
     expect(toml).toContain("RELAY_URLS");
-    expect(toml).not.toContain("relay.klickymart.com");
+    expect(toml).not.toMatch(/^RELAY_URLS\s*=.*relay\.klickymart\.com/m);
     expect(toml).toContain('RELAY_URLS = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net"');
   });
 });

@@ -100,7 +100,7 @@ KM_TRUST_SEED_NPUB = "npub132wd743y4jldsgy56k25zd7hl67g78zpl89drnnxt005qgm0mrjqf
 KM_DELIVERED_PRICE = "off"  # M4 S5: delivered price + observed shipping policies off by default
 KM_LINKOUTS = "off"  # M4 S6: static Amazon/Target links, never fetched
 KM_TAKEDOWN = "off"  # M4 S7: takedown page + intake
-KM_TRUST_RELAY = ""  # our own relay (wss://...) for kind-3/kind-1 reads; empty = trust job does nothing
+KM_TRUST_RELAY = "wss://relay.klickymart.com"  # our own relay (wss://...) for kind-3/kind-1 reads; empty = trust job does nothing
 SITE_ORIGIN = "https://klickymart.com"
 ENVIRONMENT = "production"  # R12-005: with this, a missing SUBMIT_SALT secret makes rate-limited endpoints return 503
 # Value-for-value: footer tip slot + zap@klickymart.com forwarding (public addresses, not secrets; KlickyMart holds no funds).
