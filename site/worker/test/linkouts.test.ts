@@ -3,7 +3,7 @@ import { SELF, env } from "cloudflare:test";
 const createExecutionContext = () => { const ps: Promise<unknown>[] = []; return { ps, waitUntil: (p: Promise<unknown>) => { ps.push(p); }, passThroughOnException: () => {}, props: {} }; };
 const waitOnExecutionContext = async (c: { ps: Promise<unknown>[] }) => { await Promise.allSettled(c.ps); };
 import worker from "../src/index";
-import { linkoutsEnabled, linkoutsFor, linkoutsHtml, LINKOUT_NOTE } from "../src/linkouts";
+import { RETAILER_NOTICES, TARGET_APPROVED_AGENTS_QUOTE, linkoutsEnabled, linkoutsFor, linkoutsHtml, LINKOUT_NOTE } from "../src/linkouts";
 import SRC from "../src/linkouts.ts?raw";
 
 const call = async (path: string, extra: Record<string, string>) => {
@@ -37,5 +37,15 @@ describe("M4 S6 Amazon/Target link-outs (KM_LINKOUTS)", () => {
     const h = async (x: Record<string, string>) => { const ctx = createExecutionContext(); const r = await worker.fetch(new Request("https://example.com/?q=pasta", { headers: { accept: "text/html" } }), { ...env, ...x } as never, ctx as never); await waitOnExecutionContext(ctx); return r.text(); };
     expect(await h({ KM_LINKOUTS: "on" })).toContain("https://www.target.com/s?searchTerm=pasta");
     expect(await h({})).not.toContain("km-linkouts");
+  });
+  it("retailer_notice: fixed format; Target quotes its Approved Agents clause; Amazon has no invented quote", () => {
+    const [a, t] = linkoutsFor("rice");
+    for (const x of [a!, t!]) { expect(Object.keys(x.retailer_notice).sort()).toEqual(["fetched_at", "note", "quote", "source_url"]); expect(x.retailer_notice.note).toMatch(/does not fetch this site.*own choice.*terms/); }
+    expect(t!.retailer_notice).toMatchObject({ source_url: "https://www.target.com/c/terms-conditions/-/N-4sr7l", fetched_at: "2026-11-02T02:08:26Z" });
+    expect(TARGET_APPROVED_AGENTS_QUOTE).toContain("The current Approved Agents are: Target’s AI Shopping Assistant, OAI, Google and Microsoft.");
+    expect(TARGET_APPROVED_AGENTS_QUOTE).toContain("All other Agentic Commerce Tools are unauthorized, expressly prohibited");
+    expect(a!.retailer_notice).toEqual({ source_url: "https://www.amazon.com/gp/help/customer/display.html?nodeId=508088", quote: null, fetched_at: null, note: expect.stringMatching(/^Terms could not be retrieved; read before shopping\./) });
+    expect(JSON.stringify(RETAILER_NOTICES)).not.toMatch(/Agent\//); // Associates-only rule not presented as general
+    expect(SRC).not.toMatch(/fetch\(/);
   });
 });
