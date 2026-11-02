@@ -8,11 +8,11 @@ import { SIMULATED_SHOPPER_FLOOR, VISITS_PER_SHOPPER } from "../agent-visits";
 import type { IndexRow, Snapshot } from "../index-mem";
 import { renderAgentPolicy, renderCheckoutDetail, renderV5, renderWhy } from "../explain";
 import { takedownInfo } from "../takedown";
-import { awning, esc, eyebrow, gradeBadge, jsonForScript, layout, statusPill } from "./layout";
+import { awning, esc, gradeBadge, jsonForScript, layout, statusPill } from "./layout";
 import type { PageShell } from "./page-shell";
 import type { TrustInfo } from "../submissions";
 import { computeStats, merchantUrl, parseRaw, payLabel, rowToCompact, uniquePayLabels } from "../records-api";
-import { computeStoryCounts, landscapeFormulaInputs, storyLine } from "../landscape-metrics";
+import { computeStoryCounts, landscapeFormulaInputs, PRIVATE_BTC_MIN_GRADE, storyLine } from "../landscape-metrics";
 import { NOSTR_KIND_CRAWL_RECORD, NIP_CRAWL_NAMESPACE } from "../nostr-kinds";
 
 const ANW_LABELS: Record<string, string> = {
@@ -77,15 +77,29 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
   const body = `
 <div class="km-home-scene-gap" aria-hidden="true"></div>
 <section class="km-hero km-hero-panel km-home-hero">
-  ${eyebrow("OPEN DATA · SIGNED RECORDS · NO LOGIN")}
+  <div class="km-eyebrow">OPEN DATA · SIGNED RECORDS <details class="km-def" data-testid="def-signed-records"><summary aria-label="What signed records means">(?)</summary><p>Each store record is a signed Nostr event (<a href="/docs/nostr-tags">kind ${NOSTR_KIND_CRAWL_RECORD}</a>), and anyone can <a href="/export.ndjson">check every record in /export.ndjson</a>.</p></details> · NO LOGIN</div>
   <h1>Where agents shop.</h1>
   <p class="km-story" data-testid="story-line">${esc(storyLine(story))}</p>
-  <p class="km-story-key">The road fills in as stores open to agents; the sun rises as private Bitcoin spreads.</p>
+  <div class="km-story-defs">
+    <details class="km-def" data-testid="def-let-agents-in"><summary>(?) let agents in</summary><p>A store counts when our crawler reached it (<code>status</code> is <code>crawled</code>) and its agent-access score <code>ag</code> is 1 or more: ag 1 is browse only, 2 product and cart pages, 3 the payment screen.</p></details>
+    <details class="km-def" data-testid="def-btc-private"><summary>(?) take Bitcoin privately</summary><p>BTC privacy grade ${PRIVATE_BTC_MIN_GRADE} or more out of 4 (<code>PRIVATE_BTC_MIN_GRADE</code>): paying without an account or KYC.</p></details>
+  </div>
   <form class="km-search" method="get" action="/">
     <label class="km-sr-only" for="q">Search</label>
     <input id="q" name="q" value="${esc(q ?? "")}" placeholder="Search merchants or domains">
     <button type="submit">Search</button>
   </form>
+</section>
+<div class="km-store">
+<section class="km-section km-home-list" aria-label="Stores">
+  <div class="km-tag-legend km-muted"><span>Agent access</span><span>BTC privacy grade 0–4 <span class="km-legend-priv">3+ = private</span></span></div>
+  <ul class="km-results">${rows || `<li class="km-empty">No sites match. Try fewer filters.</li>`}</ul>
+</section>
+<section class="km-section km-home-quick">
+  <h2 class="km-sr-only">Start with</h2>
+  <ul class="km-quick">${quick.map((l) => `<li><a class="km-btn km-btn-ghost" href="${esc(l.href)}">${esc(l.label)}</a></li>`).join("")}</ul>
+</section>
+<section class="km-section km-home-forms">
   <form class="km-search km-check" method="get" action="/check" data-testid="check-form">
     <label for="check-domain">Can my agent shop here?</label>
     <input id="check-domain" name="domain" placeholder="example.com" autocomplete="off" required>
@@ -102,16 +116,7 @@ export function renderHome(snap: Snapshot, origin: string, q: string | null, ite
     <button type="submit">Find</button>
   </form>
 </section>
-<div class="km-store">
 ${awning("On the shelves", "Which stores a software agent can reach, how checkout works, and every way they let you pay. Bitcoin graded 0–4 for privacy; every record links to the page it came from.")}
-<section class="km-section km-home-quick">
-  <h2 class="km-sr-only">Start with</h2>
-  <ul class="km-quick">${quick.map((l) => `<li><a class="km-btn km-btn-ghost" href="${esc(l.href)}">${esc(l.label)}</a></li>`).join("")}</ul>
-</section>
-<section class="km-section km-home-list" aria-label="Stores">
-  <div class="km-tag-legend km-muted"><span>Agent access</span><span>BTC privacy grade 0–4 <span class="km-legend-priv">3+ = private</span></span></div>
-  <ul class="km-results">${rows || `<li class="km-empty">No sites match. Try fewer filters.</li>`}</ul>
-</section>
 <section class="km-section km-agents km-staff">
   <p class="km-staff-label">STAFF ONLY · FOR AGENTS</p>
   <h2 class="km-h2">For agents</h2>
