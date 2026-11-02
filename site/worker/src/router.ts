@@ -51,6 +51,7 @@ import { liveItems, findOffers, parseOffers, type OfferQuery } from "./offers";
 import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
+import { queueDomains } from "./trust-obs";
 import { getCommunity, ingestStats } from "./community";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
@@ -120,6 +121,8 @@ export interface Env {
   KM_KEY_RECORDS?: string;
   /** M4 S2 switch: "1"/"true"/"on" makes daily heads carry a real snapshot_digest (Merkle) and enables GET /open-store/proof. Default OFF. */
   KM_SNAPSHOT_DIGEST?: string;
+  /** M4 S3 switch (default OFF): KM_CRAWL_QUEUE queues live-result domains (domain only, no result data). */
+  KM_CRAWL_QUEUE?: string;
   /** M2: KlickyMart result-signing secret key (wrangler secret, 64 hex). Never logged or echoed. Lifecycle is M3. */
   KM_RESULT_SK_HEX?: string;
   /** Salt for submission rate-limit hashes (wrangler secret). REQUIRED in production (R12-005). */
@@ -713,6 +716,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           filter_note: `Scanned ${scanned} live products over ${pages} page(s) (max ${MAX_PAGES}); KlickyMart applied ${[...li.filters_applied_after_fetch, ...(q.condition ? ["condition"] : []), ...(q.type ? ["type"] : [])].join(", ") || "no filters"} after fetching (dropped ${li.dropped_by_filters + pf.dropped}); ${relDropped} below the relevance floor (no query word in the title).${pf.rows.length === 0 ? " 0 matches in the scanned pages; this is not proof none exist, try a narrower query." : ""}` };
         delete lv.results; delete lv.pagination; // normalized items only; raw catalog payload is not re-served or stored
         await markPending(lv.items as Record<string, any>[]);
+        // M4 S3: domain names only (no result data) go to live_seen_domains when KM_CRAWL_QUEUE is on.
+        await queueDomains(env, (lv.items as { domain?: string | null }[]).map((x) => x.domain), Math.floor(Date.now() / 1000));
       }
       (r.body as Record<string, unknown>).live_shopify_catalog = lv;
     }
