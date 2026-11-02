@@ -1,6 +1,6 @@
 /** R7-007: SRI for the site scripts; test/nostr-app.test.ts recomputes these from public/. */
 export const KM_JS_SRI = "sha384-S3m0mzA8ypc57LZuVF0IajyqKB2l4YmHtk88vNbD5Sdqpegm+pPzTge4/LOeUpPN";
-export const KM_LANDSCAPE_SRI = "sha384-379j43ps8jMXjuJIqiKUODoXVgKyJ1adKX4Kaee0XM+rIJxkI/T0bdlrOz8H3hAZ";
+export const KM_LANDSCAPE_SRI = "sha384-MDFrfWEIBo3ZMmRoEe8BYY1YygCxhsqKm25YPz+vn0ojTp3btM51h8CKrjBMz0pY";
 import { shopperSplit } from "../agent-visits";
 export function esc(s: string | null | undefined): string {
   if (s == null) return "";

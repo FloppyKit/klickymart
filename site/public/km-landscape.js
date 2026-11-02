@@ -536,6 +536,9 @@
 
   function drawStore(w, horizon, light) {
     var g = storeGeom(w, horizon);
+    // Read-only geometry export (GO-KM-HOME-SHEET-DOWN): the sprite box the store is drawn into, so tests and
+    // screenshots can measure the shop instead of copying these constants. No effect on drawing.
+    window.__kmLandscapeStore = { x: g.bx, y: g.by, w: g.W, h: g.H, scale: g.p, horizon: horizon };
     var lit = 0.25 + reach * 0.75;
     var litPanes = Math.max(0, Math.min(6, Math.round(reach * 6 + 0.15)));
     var openOn = Math.max(0, Math.min(1, (reach - 0.4) / 0.25));
@@ -686,6 +689,7 @@
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(spr, ox, oy, BOT_W * px, BOT_H * px);
     ctx.restore();
+    return { x: ox, y: oy, w: BOT_W * px, h: BOT_H * px };
   }
 
   function drawShoppers(w, h, horizon, t) {
@@ -693,6 +697,9 @@
     canvas2d.dataset.shoppers = String(counts.n);
     canvas2d.dataset.shoppersOrange = String(counts.orange);
     if (counts.real !== undefined) { canvas2d.dataset.shoppersLiveReal = String(counts.real); canvas2d.dataset.shoppersLiveSimulated = String(counts.simulated); }
+    // Read-only position export (GO-KM-HOME-SHEET-DOWN): one box per walking shopper, in canvas/CSS pixels.
+    var boxes = [];
+    window.__kmShoppers = boxes;
     if (!counts.n) return;
     var floorH = h - horizon;
     var roadW = 0.2 + reach * 0.05;
@@ -716,7 +723,11 @@
       var px = Math.max(1, Math.round(s.depth * (floorH / 34)));
       var alpha = Math.max(0, Math.min(1, s.f / 0.06, (1 - s.f) / 0.06));
       var frame = still ? (s.i % 2 ? 2 : 0) : Math.floor((t || 0) / 150 + s.i) % 4;
-      drawShopper(x, y, px, frame, s.i < counts.orange, alpha, s.side < 0 ? "b" : "f");
+      var box = drawShopper(x, y, px, frame, s.i < counts.orange, alpha, s.side < 0 ? "b" : "f");
+      box.depth = s.depth;
+      box.alpha = alpha;
+      box.orange = s.i < counts.orange;
+      boxes.push(box);
     });
   }
 
