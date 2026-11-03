@@ -7,9 +7,10 @@
  * Rules this file keeps:
  * - Only keyless, session-free, public GETs (plus the three read-only MCP tools) are cached. POST routes, auth, /reviews,
  *   /submit and anything that already answers no-store are never cached.
- * - The key is the route plus ONLY its documented params, normalized: unknown params are dropped, order does not matter,
- *   values are lowercased where the docs say so, lists are sorted and documented defaults are filled. Adding junk params
- *   therefore cannot mint new cache entries (`/q?q=x&junk=1` and `/q?q=x` share one key).
+ * - The key is the route plus ONLY its documented params, normalized: unknown params are dropped, values are lowercased
+ *   where the docs say so, set-valued lists are sorted, order-sensitive lists keep the caller's order (a batch /check
+ *   answers in request order) and documented defaults are filled. Adding junk params therefore cannot mint new cache
+ *   entries (`/q?q=x&junk=1` and `/q?q=x` share one key). Every param that changes a body is in the key.
  * - Responses that depend on the request (cookies, live upstream fetches) are not cached; the handlers of the routes here
  *   read no session and make no outbound call, except /offers and MCP find_offers with live=1, which are excluded below.
  * - TTLs are per route (below) and short: 60-120 s. The served body may therefore be up to one TTL old, and nothing else.
@@ -100,6 +101,21 @@ function qKey(sp: URLSearchParams, accept: string): string {
   return `${KEY_ORIGIN}/${VERSION}/q?${sortedJson(params)}`;
 }
 
+/** GET /: the home handler builds its item list from the documented query params (q plus every querySnapshot filter) and
+ * renders the search box from q, so the key carries all of them, normalized by the route's own validator. F1 B1: without
+ * this, /?q=lamp and / shared one entry and one poisoned the other for a whole TTL. Unknown params are dropped exactly the
+ * way the handler drops them (it ignores an unvalidated query, it does not 400). */
+function homeKey(sp: URLSearchParams, accept: string): string {
+  const copy = new URLSearchParams();
+  for (const [k, v] of sp) if (KNOWN_PARAMS.has(k)) copy.append(k, v);
+  const v = validateQueryParams(copy);
+  const p: Record<string, unknown> = v.ok ? { ...v.params } : {};
+  const q = one(sp.get("q"));
+  if (q !== null) p.q = q.toLowerCase(); // the handler sets params.q = q.toLowerCase() itself
+  p.variant = variantOf(sp, accept, "home");
+  return `${KEY_ORIGIN}/${VERSION}/?${sortedJson(p)}`;
+}
+
 /** GET /offers + MCP find_offers share offerQuery's documented params. live=1 is never cached (live Shopify Catalog). */
 function offersKey(sp: URLSearchParams, accept: string): string | null {
   if (truthy(one(sp.get("live")))) return null; // live Shopify Catalog: never cached
@@ -119,7 +135,9 @@ function checkKey(sp: URLSearchParams, accept: string): string | null {
   const p: Record<string, unknown> = {};
   const domain = one(sp.get("domain")); if (domain !== null) p.domain = domain.toLowerCase();
   const many = one(sp.get("domains"));
-  if (many !== null) p.domains = many.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).sort();
+  // F1 B3: the batch handler keeps request order (`[...new Set(...)]` over the split list) and the response items follow it,
+  // so the key keeps it too: normalize (trim, lowercase, de-dupe) but never sort. domains=b,a and domains=a,b are two entries.
+  if (many !== null) p.domains = [...new Set(many.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))];
   const zip = one(sp.get("zip")); if (zip !== null) p.zip = zip;
   p.variant = variantOf(sp, accept, "check");
   if (p.domain === undefined && p.domains === undefined) return null; // 400 anyway
@@ -158,7 +176,11 @@ function pageKey(path: string, sp: URLSearchParams, accept: string): string | nu
   const m = path.match(/^\/(records|merchant)\/(.+)$/);
   if (!m) return null;
   const d = decodeURIComponent(m[2]!).toLowerCase();
-  const p: Record<string, unknown> = { d, variant: variantOf(sp, accept, "check") };
+  // F1 B2: /merchant/<d> answers HTML when Accept asks for text/html and JSON (via /records/<d>) otherwise, using exactly
+  // that header test. /records/<d> is always JSON, so the domain alone keys it. A browser and a JSON client therefore never
+  // share one entry.
+  const variant = m[1] === "merchant" ? (accept.includes("text/html") ? "html" : "json") : "json";
+  const p: Record<string, unknown> = { d, variant };
   return `${KEY_ORIGIN}/${VERSION}/${m[1]}/${encodeURIComponent(d)}?${sortedJson(p)}`;
 }
 
@@ -192,7 +214,7 @@ function routeKey(request: Request, env: Record<string, unknown>, body?: string)
   const accept = request.headers.get("Accept") ?? "";
   const sp = url.searchParams;
   if (request.method === "GET") {
-    if (path === "/") return { route: "/", key: `${KEY_ORIGIN}/${VERSION}/?${sortedJson({ variant: variantOf(sp, accept, "home") })}` };
+    if (path === "/") return { route: "/", key: homeKey(sp, accept) };
     if (path === "/chart" || path === "/chart.json") return { route: path, key: chartKey(path, sp, accept) };
     if (path === "/q") return { route: "/q", key: qKey(sp, accept) };
     if (path === "/check") return { route: "/check", key: checkKey(sp, accept) };
