@@ -43,11 +43,11 @@ import { buildLlmsTxt, withLlmsLinks } from "./llms";
 import { checkDomain, checkTrustFields } from "./check";
 import { findAlternatives } from "./alternatives";
 import { SELFTEST_DOMAIN } from "./experience";
-import { hostOf } from "./store-card";
+import { findRow, hostOf, storeCard } from "./store-card";
 import { zipToState } from "./landed";
 import { annotate, applyProductFilters, dedupe, CONDITIONS, CONDITION_FILTERS, PRODUCT_TYPES } from "./product-quality";
 import { flagPriceOutliers, flagRow } from "./row-flags";
-import { liveItems, findOffers, parseOffers, type OfferQuery } from "./offers";
+import { liveItems, findOffers, parseOffers, type Offer, type OfferQuery } from "./offers";
 import { landedFor, validZip, ZIP_ERROR } from "./landed";
 import { recheck } from "./recheck";
 import { liveCatalogSearch } from "./ucp-live";
@@ -104,18 +104,33 @@ export const linkEmptyNote = (origin: string, pay: string | string[] | undefined
 };
 /** B4/B5: a compact /q item carries the same guest (true | false | null) and co that /check reports for the store. */
 const guestField = (g: number | null) => (g === null ? null : g === 1);
-/** B10: MCP find_offers pay= filter. Matches the payment methods KlickyBot observed at the store (the store card's pay
- * list), the same code vocabulary /q pay= uses; a store whose pay methods were never observed is left out (unknown, never
- * assumed). An empty result carries the same one_time_link_card note as the JSON /q empty_note. */
-export const filterOffersByPay = (origin: string, body0: unknown, pay: unknown) => {
-  const body = body0 as { items?: { store?: { pay?: string[] | null } | null }[] } & Record<string, unknown>;
-  const pays = (Array.isArray(pay) ? pay : pay === undefined || pay === null ? [] : [pay]).map((x) => canonPay(String(x))).filter(Boolean);
-  if (!pays.length) return body0;
-  const all = body.items ?? [];
-  const items = all.filter((i) => (i.store?.pay ?? []).some((c) => pays.includes(canonPay(String(c)))));
-  const emptyNote = items.length === 0 ? linkEmptyNote(origin, pays, 0) : null;
-  return { ...body, count: items.length, total: items.length, items,
-    pay_filter: { pay: pays, note: "matched against the payment methods KlickyBot observed at the store (store.pay, same codes as /q pay=); stores whose pay methods were not observed are left out (unknown, not none)" },
+/** B10/N2: the pay= codes a /offers or MCP find_offers call asks for (canonical, deduped). Empty list = no filter. */
+export const requestedPayCodes = (pay: unknown): string[] =>
+  [...new Set((Array.isArray(pay) ? pay : pay === undefined || pay === null || pay === "" ? [] : [pay]).map((x) => String(canonPay(String(x)) ?? "")).filter(Boolean))];
+/** B10/N2: MCP find_offers / GET /offers pay= filter. Matches the payment methods KlickyBot observed at the store (the
+ * store card's pay list), the same code vocabulary /q pay= uses; a store whose pay methods were never observed is left out
+ * (unknown, never assumed). N2: the filter runs on the matched offers BEFORE findOffers' limit, so count, total and items
+ * all describe the filtered set (a match that ranked past the first page still comes back on page 1 with total 1). */
+export const offersMatchingPay = (snap: Snapshot, origin: string, offers: Offer[], pays: string[]): Offer[] => {
+  if (!pays.length) return offers;
+  const exact = new Map(snap.rows.map((r) => [r.d, r]));
+  const payCache = new Map<string, string[] | null>();
+  const payOf = (d: string): string[] | null => {
+    let v = payCache.get(d);
+    if (v === undefined) {
+      const row = exact.get(d) ?? findRow(snap, d) ?? undefined;
+      // item.store.pay is storeCard(snap, row.d).pay: the exact same source, so membership matches the response rows.
+      v = row ? ((storeCard(snap, row.d, origin) as { pay?: string[] }).pay ?? []) : null;
+      payCache.set(d, v);
+    }
+    return v;
+  };
+  return offers.filter((o) => (payOf(o.d) ?? []).some((c) => pays.includes(String(canonPay(String(c))))));
+};
+/** B10/N2: the response block that says which pay codes were applied (and the empty Link note the JSON /q empty_note carries). */
+export const payFilterBlock = (origin: string, pays: string[], total: number) => {
+  const emptyNote = linkEmptyNote(origin, pays, total);
+  return { pay_filter: { pay: pays, note: "matched against the payment methods KlickyBot observed at the store (store.pay, same codes as /q pay=); stores whose pay methods were not observed are left out (unknown, not none). The filter runs before limit, so count, total and items describe the filtered set" },
     ...(emptyNote ? { empty_note: emptyNote } : {}) };
 };
 export const isProduction = (env: { ENVIRONMENT?: string; SITE_ORIGIN?: string }) => env.ENVIRONMENT === "production" || (env.SITE_ORIGIN ?? "").replace(/\/$/, "") === "https://klickymart.com";
@@ -781,13 +796,18 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     parts.push(live ? `It is also absent from the live Shopify Catalog, which only covers Shopify stores; ${d} does not appear there.` : "Add live=1 to also search the live Shopify Catalog (Shopify stores only).");
     return parts.join(" ");
   };
-  const offersFor = async (q: OfferQuery, live: boolean) => {
+  /** N2: `pay` is the GET /offers ?pay= / MCP find_offers pay= filter. It is applied to the candidate offers BEFORE
+   * findOffers ranks and pages them, so count, total and items all describe the filtered set, and both routes share this
+   * one code path. Without pay= nothing about the response changes. */
+  const offersFor = async (q: OfferQuery, live: boolean, pay?: unknown) => {
     const { EMBEDDED_OFFERS_NDJSON } = await import("./fixture-offers");
     const allOffers = parseOffers(EMBEDDED_OFFERS_NDJSON || "");
     addKnownBrands(allOffers.map((o) => (o.b ?? "").split(/\s+/)[0] ?? "").filter((w) => w.length >= 3 && !/gift|card|the/i.test(w)));
     const tiers = await loadTiers(env, Math.floor(Date.now() / 1000)); // M4 S4: null unless KM_TRUST_LABELS is on
     const policies = await loadShipPolicies(env, Math.floor(Date.now() / 1000)); // M4 S5: null unless KM_DELIVERED_PRICE is on
-    const r = findOffers(allOffers, snap, origin, q, tiers, policies);
+    const pays = requestedPayCodes(pay);
+    const r = findOffers(pays.length ? offersMatchingPay(snap, origin, allOffers, pays) : allOffers, snap, origin, q, tiers, policies);
+    if (r.ok && pays.length) Object.assign(r.body as Record<string, unknown>, payFilterBlock(origin, pays, r.body.total));
     if (r.ok && live && q.q) {
       // Page through the live catalog (bounded) until filters leave enough rows. Catalog also gets price/condition natively.
       const want = Math.min(q.limit ?? 10, 50), MAX_PAGES = 4;
@@ -954,11 +974,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const q = offerQuery((k) => url.searchParams.get(k));
     if (typeof q === "string") return err400("zip", q);
     const live = url.searchParams.get("live") === "1";
-    const r = await offersFor(q, live);
+    const r = await offersFor(q, live, url.searchParams.get("pay"));
     if (!r.ok) return err400("q", r.message);
-    // GO-KM-TIPS-ZERO-R6-F1A A2: GET /offers takes pay= (the same filter MCP find_offers has always applied), so the
-    // documented param and the MCP tool ("same as GET /offers") really do the same thing: store.pay only, unobserved left out.
-    const body = filterOffersByPay(origin, r.body, url.searchParams.get("pay")) as Record<string, unknown>;
+    // GO-KM-TIPS-ZERO-R6-F1A A2 / R6 N2: GET /offers takes pay= (the same filter MCP find_offers has always applied), so the
+    // documented param and the MCP tool ("same as GET /offers") really do the same thing: store.pay only, unobserved left out,
+    // applied before the page limit inside offersFor.
+    const body = r.body as Record<string, unknown>;
     // Shopify Catalog results must never be cached or stored: live responses are no-store end to end.
     return Response.json({ ...licenseMetaBlock(), ...body }, { headers: { ...apiHeaders(snap.version, 0), ...(live ? { "Cache-Control": "no-store" } : {}) } });
   }
@@ -1326,9 +1347,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       findOffers: async (args) => {
         const q = offerQuery((k) => (args[k] === undefined || args[k] === null ? null : String(args[k])));
         if (typeof q === "string") return { ok: false as const, message: q };
-        const r = await offersFor(q, args.live === true);
-        if (!r.ok || args.pay === undefined || args.pay === null) return r;
-        return { ok: true as const, body: filterOffersByPay(origin, r.body, args.pay) as Record<string, unknown> };
+        // N2: pay= runs before the limit inside offersFor, so find_offers and GET /offers share one code path.
+        return offersFor(q, args.live === true, args.pay);
       },
       getCheckoutMap: async (domain) => {
         const row = snap.rows.find((r) => r.d === domain.toLowerCase() || r.d === `www.${domain.toLowerCase()}`);
