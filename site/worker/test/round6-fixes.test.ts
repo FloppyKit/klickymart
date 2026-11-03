@@ -400,10 +400,35 @@ describe("GO-KM-TIPS-ZERO-R6-F1A A3: the POST /reviews 200 doc matches a real dr
       expect(text).toContain("would_hit");
     }
   });
+  // GO-KM-R6-TIDY N3: the doc describes BOTH real dry-run shapes: the full one above, and the legacy review-only one
+  // (a valid legacy review that the experience validation rejects, e.g. a full ZIP in a region tag), which returns only
+  // id, d and the limits preview. The docs are diffed against both real responses.
+  it("the legacy review-only dry run returns only id, d and the limits preview, and the doc says so", async () => {
+    const o = await getJson<OpenApi>("/openapi.json");
+    const text = o.paths["/reviews"]!.post!.responses["200"]!.description;
+    const r = await post(sign(reviewTags([["pay", "card"], ["region", "66061"]]), "N3 legacy review-only dry run"), "?dry_run=1");
+    expect(r.status).toBe(200);
+    const b = await r.json<Record<string, unknown>>();
+    // the legacy shape really is that small: none of the experience fields the doc used to promise for every dry run
+    expect(Object.keys(b).sort()).toEqual(["d", "dry_run", "id", "limits_would_apply", "ok", "stored"]);
+    for (const k of ["structured", "basis", "counts_toward_chart", "would_count_toward_chart", "dry_run_note", "warnings", "counts_after", "chart_note"]) expect(b).not.toHaveProperty(k);
+    // every field it does return is named in the doc
+    for (const k of Object.keys(b)) expect(new RegExp(`\\b${k}\\b`).test(text)).toBe(true);
+    // and the doc marks which fields are full-dry-run only
+    expect(text).toMatch(/full dry run/i);
+    expect(text).toMatch(/legacy review-only/i);
+    expect(text).toMatch(/nothing else/i);
+    // the full shape carries the experience fields, and the doc names every one of them too
+    const full = await post(sign(expTags([["rating", "4", "5"]]), "N3 full dry run"), "?dry_run=1");
+    expect(full.status).toBe(200);
+    const fb = await full.json<Record<string, unknown>>();
+    for (const k of ["structured", "basis", "counts_toward_chart", "would_count_toward_chart", "dry_run_note", "warnings"]) expect(fb).toHaveProperty(k);
+    for (const k of Object.keys(fb)) expect(new RegExp(`\\b${k}\\b`).test(text)).toBe(true);
+  });
 });
 
 describe("GO-KM-TIPS-ZERO-R6-F1A A4: no leftover text says tips add rank weight today", () => {
-  const DEAD = ["min(0.5", "+50%", "1.5x", "tip multiplier", "tips add weight"];
+  const DEAD = ["min(0.5", "+50%", "1.5x", "tip multiplier", "tips add weight", "stop adding weight"];
   it("served docs, tips.ts and NIP-DRAFT.md are free of the retired tip-multiplier wording", async () => {
     const served = await Promise.all(["/llms.txt", "/openapi.json", "/tips.json", "/chart.json?limit=5"].map(async (u) => (await SELF.fetch(`https://example.com${u}`)).text()));
     for (const text of [...served, TIPS_SRC, NIP_DRAFT]) for (const dead of DEAD) expect(text).not.toContain(dead);

@@ -46,7 +46,7 @@ describe("anti-gaming flags (explainable, never hide)", () => {
     const fp = Array.from({ length: 3 }, (_, i) => note({ created_at: T0 + i * 50000 + i * i * 999, price: 10, duration_s: 61, steps_n: 3 }));
     expect(sig(computeFlags(fp, ctx({ firstSeen: old(fp) })), fp[0]!.id)).toContain("near-duplicate");
   });
-  it("tip rings and tip-only tippers: flagged and their tips stop adding weight", () => {
+  it("tip rings and tip-only tippers: flagged, and their tips carry no ranking weight (tips add none until buyer trust)", () => {
     const a = note(), b = note({ created_at: T0 + 99999 });
     const tips = new Map([[a.id, [tip(b.pubkey, a.id)]], [b.id, [tip(a.pubkey, b.id)]]]);
     const f = computeFlags([a, b], ctx({ firstSeen: old([a, b]), active: new Set([a.pubkey, b.pubkey]), tips }));

@@ -78,6 +78,15 @@ Who: **Matt**, **Plan** (planning bot), **Build** (build bot / cloud agent), **C
 
 **Total: 30 GOs** (P0 4, P1 5, P2 5, P3 3, P4 4, P5 5, P6 4, P7 3).
 
+## Queue (live)
+| # | item | status |
+|---|---|---|
+| 1 | GO-KM-R6-TIDY (this GO: round-6 tidy items N2, N3, N4 + this queue) | queued |
+| 2 | Confirm D1 migrations 0021–0026 are applied in production (check only) | queued |
+| 3 | Rig lint scripts: add `lint-css` and `lint-openapi` so the verify gates stop failing on missing scripts | queued |
+| 4 | Crawl data gaps from round 6 (Bose pay methods, per-ZIP shipping quotes, gift-card fees, Start9 product links, coincards probe) | queued |
+| 5 | Full M1 tips (trust-weighted `b(t)`, +20% cap), blocked on M2 buyer-trust | queued |
+
 ## Browser evaluation (GO 2.1 input)
 | option | fit | notes / sources |
 |---|---|---|
