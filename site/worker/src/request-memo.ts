@@ -5,19 +5,25 @@
  * so the second one is pure waste. This module keeps one map per request: the first caller loads, the rest await the same
  * promise. The map is dropped when the request ends, so nothing survives into a later request.
  *
+ * F1 B5: the scope is an AsyncLocalStorage store, not a module-level stack. Two requests interleaved in one isolate can no
+ * longer read or pop each other's scope (the stack version leaked: whoever resumed last saw the other request's map).
+ * A nested router call (/merchant -> /records, / -> /llms.txt) runs in its own store and hands the outer one back on the
+ * way out, exactly like a nested `run()` should.
+ *
  * It is deliberately NOT a time-based isolate cache: a write inside the request (refreshFlagCache) forgets its own keys.
- * A nested router call (/merchant -> /records, / -> /llms.txt) gets its own scope and hands it back on the way out.
  */
-const stack: Map<string, Promise<unknown>>[] = []; // one entry per open request scope; the top one is the current request
+import { AsyncLocalStorage } from "node:async_hooks";
 
-/** Open a request scope. Always pair with endRequestMemo() in a finally block. */
-export function beginRequestMemo(): void { stack.push(new Map()); }
+type Memo = Map<string, Promise<unknown>>;
+const als = new AsyncLocalStorage<Memo>();
 
-/** Close the innermost scope (the caller's scope, if any, is untouched). */
-export function endRequestMemo(): void { stack.pop(); }
+/** Run `fn` inside a fresh request scope. The scope dies with it; concurrent requests never share one. */
+export function withRequestMemoScope<T>(fn: () => Promise<T>): Promise<T> {
+  return als.run(new Map<string, Promise<unknown>>(), fn);
+}
 
-/** Current scope, or null outside a request (unit tests, cron, DO alarm). */
-function scope(): Map<string, Promise<unknown>> | null { return stack.length ? stack[stack.length - 1]! : null; }
+/** Current scope, or undefined outside a request (unit tests, cron, DO alarm). */
+function scope(): Memo | undefined { return als.getStore(); }
 
 /** Run `load` once per request for `key` and share the result, including with callers that arrive while it is in flight. */
 export function memoLoad<T>(key: string, load: () => Promise<T>): Promise<T> {

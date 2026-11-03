@@ -58,7 +58,7 @@ import { takedownEnabled, takedownInfo } from "./takedown";
 import { linkoutsEnabled, linkoutsFor, linkoutsHtml } from "./linkouts";
 import { getCommunity, ingestStats } from "./community";
 import { planEdgeCache, readEdgeCache, writeEdgeCache } from "./edge-cache";
-import { beginRequestMemo, endRequestMemo } from "./request-memo";
+import { withRequestMemoScope } from "./request-memo";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
 import { take, takeAll } from "./ratelimit";
@@ -522,7 +522,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const plan = planEdgeCache(request, env, request.method === "GET" || request.method === "HEAD" ? undefined : await request.clone().text().catch(() => ""));
   if (!plan) return withRequestMemo(request, env);
   const hit = await readEdgeCache(plan);
-  if (hit) return hit;
+  if (hit) {
+    // F1 B8: a cache hit still counts the visit. recordAgentVisit is ONE upsert (single statement) and only for the paths
+    // it counts (/mcp, /q, /check, /llms.txt, /export.ndjson); every other route writes nothing. The served body may show a
+    // visit count up to one TTL old, which is the staleness the cache already allows.
+    await recordAgentVisit(env.DB, new URL(request.url).pathname.replace(/\/$/, "") || "/", request.headers.get("User-Agent"));
+    return hit;
+  }
   const res = await withRequestMemo(request, env);
   if (res.status === 200 && !res.headers.has("Set-Cookie") && !/no-store/i.test(res.headers.get("Cache-Control") ?? "")) {
     await writeEdgeCache(plan, res.clone());
@@ -530,14 +536,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   return res;
 }
 
-/** Every request gets its own memo scope, so helpers that need the same aggregates/flags/tips/tiers load them once. */
+/** Every request gets its own memo scope, so helpers that need the same aggregates/flags/tips/tiers load them once.
+ * F1 B5: the scope is per-request async context (AsyncLocalStorage), not a module-level stack, so two requests interleaved
+ * in one isolate cannot read or pop each other's memo. */
 async function withRequestMemo(request: Request, env: Env): Promise<Response> {
-  beginRequestMemo();
-  try {
-    return await routeRequest(request, env);
-  } finally {
-    endRequestMemo();
-  }
+  return withRequestMemoScope(() => routeRequest(request, env));
 }
 
 async function routeRequest(request: Request, env: Env): Promise<Response> {
