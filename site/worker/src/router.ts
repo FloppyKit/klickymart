@@ -57,6 +57,8 @@ import { loadShipPolicies } from "./delivered";
 import { takedownEnabled, takedownInfo } from "./takedown";
 import { linkoutsEnabled, linkoutsFor, linkoutsHtml } from "./linkouts";
 import { getCommunity, ingestStats } from "./community";
+import { planEdgeCache, readEdgeCache, writeEdgeCache } from "./edge-cache";
+import { beginRequestMemo, endRequestMemo } from "./request-memo";
 import { relayList, checkProof, bindProof, type Ev } from "./relay-ingest";
 import { storeBindings } from "./pay-binding";
 import { take, takeAll } from "./ratelimit";
@@ -144,6 +146,8 @@ export interface Env {
   SITE_ORIGIN: string;
   SNAPSHOT_TTL_S: string;
   CONTACT: string;
+  /** GO-KM-D1-SCANS: edge cache for heavy public GETs; on by default, "0"/"off"/"false" turns it off. */
+  KM_EDGE_CACHE?: string;
   INGEST_TOKEN?: string;
   FIXTURE_NDJSON?: string;
   USE_TEST_FIXTURES?: string;
@@ -511,7 +515,32 @@ async function submitReview(env: Env, snap: Snapshot, body: unknown, dryRun: boo
   }
 }
 
+/** GO-KM-D1-SCANS: the heavy public GETs (and the three read-only MCP tools) answer from a short-TTL edge cache, so a
+ * repeated request costs 0 D1 rows. The key is built from the route plus only its documented, normalized params, so junk
+ * params cannot mint entries; bodies are exactly what the handler produced. Everything not in edge-cache.ts is untouched. */
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  const plan = planEdgeCache(request, env, request.method === "GET" || request.method === "HEAD" ? undefined : await request.clone().text().catch(() => ""));
+  if (!plan) return withRequestMemo(request, env);
+  const hit = await readEdgeCache(plan);
+  if (hit) return hit;
+  const res = await withRequestMemo(request, env);
+  if (res.status === 200 && !res.headers.has("Set-Cookie") && !/no-store/i.test(res.headers.get("Cache-Control") ?? "")) {
+    await writeEdgeCache(plan, res.clone());
+  }
+  return res;
+}
+
+/** Every request gets its own memo scope, so helpers that need the same aggregates/flags/tips/tiers load them once. */
+async function withRequestMemo(request: Request, env: Env): Promise<Response> {
+  beginRequestMemo();
+  try {
+    return await routeRequest(request, env);
+  } finally {
+    endRequestMemo();
+  }
+}
+
+async function routeRequest(request: Request, env: Env): Promise<Response> {
   setCustodialZapperKeys(env.CUSTODIAL_ZAPPER_KEYS);
   const url = new URL(request.url);
   const origin = env.SITE_ORIGIN || `${url.protocol}//${url.host}`;

@@ -78,7 +78,8 @@ export interface QueryResult {
 }
 
 const DEFAULT_SORT = ["-btc", "-ag", "d"];
-const KNOWN_PARAMS = new Set([
+/** Documented /q params (GO-KM-D1-SCANS: the edge cache builds its key from exactly these). */
+export const KNOWN_PARAMS = new Set([
   "q", "status", "reachable", "btc", "btc_min", "btc_any", "pay", "pay_all", "pay_group",
   "scope", "no_ar", "ar", "ag_min", "co_min", "ease_min", "guest", "tos", "kyc", "cat", "category",
   "sub", "ship_pre", "ships_us", "btc_indirect", "free_ship_max", "agent_native", "an_cat", "rail_status", "bolt11_no_browser", "protocol", "sort", "limit", "cursor", "fields", "format",
@@ -556,4 +557,3 @@ export function querySnapshot(snap: Snapshot, params: QueryParams): QueryResult 
   };
 }
 
-export { KNOWN_PARAMS };

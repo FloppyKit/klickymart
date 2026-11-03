@@ -15,9 +15,13 @@ export const ACTIVE_HIDES = "SELECT h.event_id FROM takedown_hides h WHERE NOT E
 /** Notices that count toward the repeat-offender rule: valid, within the window, and not reversed by a counter-notice restore. */
 export const COUNTED_NOTICES = (since: string) => `SELECT notice_hash, pubkey FROM takedown_notices WHERE valid = 1 AND received_at > ${since} AND notice_hash NOT IN (SELECT notice_hash FROM takedown_restores)`;
 /** SQL condition (no binds) that is true for rows that are NOT taken down. `t` = table alias or name with id/pubkey columns.
- * Used by every public reader AND every internal scoring reader (flags, tips, key age, trust, submissions). */
+ * Used by every public reader AND every internal scoring reader (flags, tips, key age, trust, submissions).
+ * GO-KM-D1-SCANS: NOT EXISTS against the primary keys of takedown_hides / takedown_restores instead of NOT IN over two
+ * separately materialized subqueries. Exactly the same rows: every column selected by those subqueries is NOT NULL
+ * (0025/0027), so NOT IN and NOT EXISTS agree, and the correlated form lets SQLite use the PK index per row. */
 export function visibleSql(t: string): string {
-  return `${t}.id NOT IN (${ACTIVE_HIDES}) AND ${t}.pubkey NOT IN (SELECT pubkey FROM (${COUNTED_NOTICES(`unixepoch() - ${REPEAT_RULE.windowS}`)}) GROUP BY pubkey HAVING COUNT(*) >= ${REPEAT_RULE.notices})`;
+  return `NOT EXISTS (SELECT 1 FROM takedown_hides h WHERE h.event_id = ${t}.id AND NOT EXISTS (SELECT 1 FROM takedown_restores r WHERE r.event_id = h.event_id AND r.notice_hash = h.notice_hash))`
+    + ` AND NOT EXISTS (SELECT 1 FROM (${COUNTED_NOTICES(`unixepoch() - ${REPEAT_RULE.windowS}`)}) ro WHERE ro.pubkey = ${t}.pubkey GROUP BY ro.pubkey HAVING COUNT(*) >= ${REPEAT_RULE.notices})`;
 }
 
 export async function isRepeatOffender(db: D1Database, pubkey: string, nowS: number): Promise<boolean> {
