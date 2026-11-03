@@ -35,6 +35,9 @@ new_sqlite_classes = ["RelayIngester"]
 crons = ["15 6 * * *"]
 
 [vars]
+# GO-KM-D1-SCANS: the short-TTL edge cache for the heavy public GETs. Off in local dev and e2e (today's behaviour, no
+# stale reads between a write and a read in a test); production turns it on under [env.production.vars].
+KM_EDGE_CACHE = "off"
 KM_ENDPOINT_BINDINGS = "off"  # M2: default OFF until Matt approves; code also defaults off when unset
 KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 KM_KEY_RECORDS = "off"  # M3: /open-store/keys + cert_hash off by default
@@ -89,6 +92,8 @@ new_sqlite_classes = ["RelayIngester"]
 crons = ["15 6 * * *"]
 
 [env.production.vars]
+# GO-KM-D1-SCANS: serve repeated public GETs from the edge cache (60-120 s per route; see worker/src/edge-cache.ts).
+KM_EDGE_CACHE = "on"
 KM_ENDPOINT_BINDINGS = "off"  # M2: default OFF until Matt approves; code also defaults off when unset
 KM_SIGNED_RESULTS = "off"  # M2: /open-store routes off by default
 KM_KEY_RECORDS = "off"  # M3: /open-store/keys + cert_hash off by default

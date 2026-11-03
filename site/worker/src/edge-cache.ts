@@ -42,6 +42,19 @@ export const CACHE_TTLS = {
 
 /** Cache keys live on their own host so they can never be confused with a real request URL. */
 const KEY_ORIGIN = "https://edge-cache.klickymart.internal";
+
+/** Server config that changes these bodies. It is part of the key so a flag flipped by a deploy (or a test that passes a
+ * different env) can never be answered from the previous configuration's entry. These are the env keys the cached routes
+ * read; anything that only affects an uncached route (login, submissions, open-store) is deliberately left out. */
+const CONFIG_KEYS = [
+  "SITE_ORIGIN", "CONTACT", "ENVIRONMENT", "SITE_TIP_LUD16", "SITE_ZAP_PUBKEY_HEX", "CUSTODIAL_ZAPPER_KEYS", "CRAWLER_PUBKEY_HEX",
+  "KM_TRUST_LABELS", "KM_TRUST_BUYS", "KM_DELIVERED_PRICE", "KM_LINKOUTS", "KM_TAKEDOWN", "KM_CRAWL_QUEUE",
+  "CHECKOUT_QUOTES_ENABLED", "PENDING_QUEUE_ENABLED", "PREVIEW_DATA", "USE_TEST_FIXTURES",
+] as const;
+
+export function configTag(env: Record<string, unknown>): string {
+  return CONFIG_KEYS.map((k) => `${k}=${env[k] === undefined || env[k] === null ? "" : String(env[k])}`).join("&");
+}
 const VERSION = "v1";
 
 export interface CachePlan { key: string; ttl: number; route: string }
@@ -144,11 +157,9 @@ function pageKey(path: string, sp: URLSearchParams, accept: string): string | nu
   // /records/<domain> and /merchant/<domain>: the path already carries the domain.
   const m = path.match(/^\/(records|merchant)\/(.+)$/);
   if (!m) return null;
-  const route = `/${m[1]}` as "/records" | "/merchant";
-  void route;
   const d = decodeURIComponent(m[2]!).toLowerCase();
   const p: Record<string, unknown> = { d, variant: variantOf(sp, accept, "check") };
-  return `${KEY_ORIGIN}/${VERSION}${route}/${encodeURIComponent(d)}?${sortedJson(p)}`;
+  return `${KEY_ORIGIN}/${VERSION}/${m[1]}/${encodeURIComponent(d)}?${sortedJson(p)}`;
 }
 
 /** Read-only MCP tools: same inputs, same answer, no session. Everything else on /mcp is left uncached. */
@@ -175,7 +186,7 @@ interface RouteKey { route: keyof typeof CACHE_TTLS; key: string | null }
 
 /** The cache key this request maps to, from its route plus its documented params only, or null when the route is not
  * cacheable at all (live=1, a POST that is not an MCP read tool, anything else). Pure: it does not gate on validity. */
-function routeKey(request: Request, body?: string): RouteKey | null {
+function routeKey(request: Request, env: Record<string, unknown>, body?: string): RouteKey | null {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const accept = request.headers.get("Accept") ?? "";
@@ -195,12 +206,19 @@ function routeKey(request: Request, body?: string): RouteKey | null {
   return null;
 }
 
+/** routeKey() plus the config fingerprint, so two configurations never share an entry. */
+function keyedRoute(request: Request, env: Record<string, unknown>, body?: string): RouteKey | null {
+  const rk = routeKey(request, env, body);
+  if (!rk || rk.key === null) return rk;
+  return { ...rk, key: `${rk.key}&cfg=${encodeURIComponent(configTag(env))}` };
+}
+
 /** Decide whether this request may be served from / stored in the edge cache. `body` is only needed for POST /mcp.
  * A request the route itself will reject (a 400, e.g. /q with an unknown param) is NOT cached: its response is already
  * free of D1 work, and serving a cached 200 for it would change what the caller sees. */
 export function planEdgeCache(request: Request, env: { KM_EDGE_CACHE?: string }, body?: string): CachePlan | null {
   if (!edgeCacheOn(env)) return null;
-  const rk = routeKey(request, body);
+  const rk = keyedRoute(request, env as unknown as Record<string, unknown>, body);
   if (!rk || rk.key === null) return null;
   if (new URL(request.url).pathname.replace(/\/$/, "") === "/q") {
     const sp = new URLSearchParams(new URL(request.url).searchParams);
@@ -268,6 +286,6 @@ export async function forgetEdgeCache(key: string): Promise<void> {
 /** The key a request maps to, or null when its route is not cacheable. This is the key-discipline entry point: it drops
  * unknown params, so /q?q=x&junk=1 and /q?q=x both point at the one entry for /q?q=x (the junk request is answered 400
  * by the route itself, unchanged, and is never stored). */
-export function cacheKeyFor(request: Request, _env: { KM_EDGE_CACHE?: string } = {}, body?: string): string | null {
-  return routeKey(request, body)?.key ?? null;
+export function cacheKeyFor(request: Request, env: { KM_EDGE_CACHE?: string } = {}, body?: string): string | null {
+  return keyedRoute(request, env as unknown as Record<string, unknown>, body)?.key ?? null;
 }
