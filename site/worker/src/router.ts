@@ -106,7 +106,7 @@ export const linkEmptyNote = (origin: string, pay: string | string[] | undefined
 const guestField = (g: number | null) => (g === null ? null : g === 1);
 /** B10/N2: the pay= codes a /offers or MCP find_offers call asks for (canonical, deduped). Empty list = no filter. */
 export const requestedPayCodes = (pay: unknown): string[] =>
-  [...new Set((Array.isArray(pay) ? pay : pay === undefined || pay === null || pay === "" ? [] : [pay]).map((x) => String(canonPay(String(x)) ?? "")).filter(Boolean))];
+  [...new Set((Array.isArray(pay) ? pay : pay === undefined || pay === null || pay === "" ? [] : [pay]).map((x) => canonPay(String(x))).filter(Boolean))];
 /** B10/N2: MCP find_offers / GET /offers pay= filter. Matches the payment methods KlickyBot observed at the store (the
  * store card's pay list), the same code vocabulary /q pay= uses; a store whose pay methods were never observed is left out
  * (unknown, never assumed). N2: the filter runs on the matched offers BEFORE findOffers' limit, so count, total and items
@@ -125,7 +125,7 @@ export const offersMatchingPay = (snap: Snapshot, origin: string, offers: Offer[
     }
     return v;
   };
-  return offers.filter((o) => (payOf(o.d) ?? []).some((c) => pays.includes(String(canonPay(String(c))))));
+  return offers.filter((o) => (payOf(o.d) ?? []).some((c) => pays.includes(canonPay(String(c)))));
 };
 /** B10/N2: the response block that says which pay codes were applied (and the empty Link note the JSON /q empty_note carries). */
 export const payFilterBlock = (origin: string, pays: string[], total: number) => {
