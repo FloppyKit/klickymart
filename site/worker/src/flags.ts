@@ -8,6 +8,7 @@ import { takeAll, utcDayOf } from "./ratelimit";
 import { decodeBolt11 } from "./bolt11";
 import { loadTips, tipWeight, bonusEligible, type Tip } from "./tips";
 import { BIG_NIP05_PROVIDERS, verifiedNip05 } from "./nip05";
+import { memoForget, memoLoad } from "./request-memo";
 
 export const REPORT_KIND = 1984;
 export const FLAG_LIMITS = { reportsPerKeyPerDay: 10, minReporters: 2, strongReporters: 4 };
@@ -260,11 +261,17 @@ export async function refreshFlagCache(db: D1Database, st?: Partial<FlagStatic>,
     }
     for (const id of old.keys()) if (!fresh.has(id)) { stmts.push(db.prepare("DELETE FROM note_flags WHERE id = ?").bind(id)); rm++; }
     for (let k = 0; k < stmts.length; k += 100) await db.batch(stmts.slice(k, k + 100));
+    memoForget("flagcache:"); // a read earlier in this same request is now stale
     return { upserted: up, removed: rm };
   } catch { return { upserted: 0, removed: 0 }; }
 }
 
-export async function readFlagCache(db: D1Database | undefined, d?: string): Promise<Map<string, NoteFlag>> {
+/** GO-KM-D1-SCANS: memoized per request, so one response never reads note_flags twice (pass d to narrow it to one store). */
+export function readFlagCache(db: D1Database | undefined, d?: string): Promise<Map<string, NoteFlag>> {
+  return memoLoad(`flagcache:${d ?? "*"}`, () => readFlagCacheNow(db, d));
+}
+
+async function readFlagCacheNow(db: D1Database | undefined, d?: string): Promise<Map<string, NoteFlag>> {
   const m = new Map<string, NoteFlag>();
   if (!db) return m;
   try {

@@ -11,6 +11,7 @@ import { verifyNostrEvent } from "./nostr-verify";
 import { utcDay } from "./agent-visits";
 import { canonPay, isPayCode } from "./vocab";
 import { parseMoney, MAX_SHIPPING_USD, MAX_SUBTOTAL_USD } from "./checkout-quotes";
+import { memoLoad } from "./request-memo";
 
 /** Depth stages, aligned with the checkout-map stages (home/category -> browse, product, cart, checkout, shipform -> shipping, paypage -> payment). */
 export const EXP_DEPTHS = ["browse", "product", "cart", "checkout", "shipping", "payment", "paid", "delivered"] as const;
@@ -223,14 +224,23 @@ export function aggregate(d: string, rows: Row[], now = Date.now(), tips?: Map<s
 
 const COLS = "id,kind,d,pubkey,created_at,structured,depth,guest,account_required,pay_used,pay_offered,btc_route,tax_before,ship_before,price,shipping,tax,total,currency,region,steps_n,duration_s,blocker,walls,agent,delivered,delivery_days,rating5,product,proof,proof_status,content,basis";
 const fromDb = (r: Record<string, any>): Row => ({ ...r, structured: r.structured === 1, pay_offered: JSON.parse(r.pay_offered || "[]"), walls: JSON.parse(r.walls || "[]") }) as Row;
-export async function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string>; minKeyAgeS?: number } = {}): Promise<Map<string, StoreAggregate>> {
+/** GO-KM-D1-SCANS: memoized per request (a /check, /landed or MCP body can ask for the same store twice). */
+export function loadAggregates(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string>; minKeyAgeS?: number } = {}): Promise<Map<string, StoreAggregate>> {
+  const scope = [...(domains ?? [])].sort().join(",");
+  return memoLoad(`aggs:${scope}:${opts.minKeyAgeS ?? ""}`, () => loadAggregatesNow(db, domains, now, opts));
+}
+
+async function loadAggregatesNow(db: D1Database | undefined, domains?: string[], now = Date.now(), opts: { inStoreOnly?: Set<string>; minKeyAgeS?: number } = {}): Promise<Map<string, StoreAggregate>> {
   const out = new Map<string, StoreAggregate>();
   if (!db) return out;
   try {
     const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")}) AND ${visibleSql("experiences")}` : `SELECT ${COLS} FROM experiences WHERE ${visibleSql("experiences")}`; // M4 S7
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
-    const tips = (await loadTips(db)).byNote;
-    const flags = await readFlagCache(db); // computed on write (refreshFlagCache)
+    // GO-KM-D1-SCANS: one store asked for -> read only that store's tips and flags (exact: aggregate() only looks up the
+    // notes of that domain). The whole-index case (the chart) still reads them once, for every store.
+    const one = domains?.length === 1 ? domains[0] : undefined;
+    const tips = (await loadTips(db, one)).byNote;
+    const flags = await readFlagCache(db, one); // computed on write (refreshFlagCache)
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }
     // Directory-based and second-hand notes never count toward aggregates or corroboration.
@@ -362,10 +372,13 @@ export function experienceTemplate(a0: Record<string, unknown>, aTag: string | n
 }
 
 /** Keys tied to the store owner's declaration: active claimants and zap_pubkey keys from their own 31420 (pay-binding). */
-export async function ownerKeys(db: D1Database, d: string): Promise<Set<string>> {
-  const out = new Set(await claimedKeys(db, d));
-  try { for (const k of (await storeBindings(db, d)).zapKeys) out.add(k); } catch { /* */ }
-  return out;
+/** GO-KM-D1-SCANS: memoized per request (two helpers in one response ask for the same store's keys). */
+export function ownerKeys(db: D1Database, d: string): Promise<Set<string>> {
+  return memoLoad(`owners:${d}`, async () => {
+    const out = new Set(await claimedKeys(db, d));
+    try { for (const k of (await storeBindings(db, d)).zapKeys) out.add(k); } catch { /* */ }
+    return out;
+  });
 }
 
 /** record_checkout (Matt 2026-10-31): preset=checkout on build_experience_note. One call at the payment screen, before paying.

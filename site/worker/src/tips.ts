@@ -6,6 +6,7 @@ import { visibleSql } from "./takedown";
 import { decodeBolt11 } from "./bolt11";
 import { cachedZapKey, checkZapReceipt, lud16Of } from "./pay-binding";
 import { verifyNostrEvent } from "./nostr-verify";
+import { memoLoad } from "./request-memo";
 
 export const ZAP_RECEIPT = 9735;
 /** Ranking multiplier for a note. M1 rule 5 (Matt, 2026-10-31): until M2 exists, b(t) (buyer trust) is not available, so the
@@ -81,8 +82,13 @@ export function summarize(tips: Tip[]): TipSummary {
     self_zaps_ignored: tips.length - nonSelf.length, weight: tipWeight(bonus.size) };
 }
 
-/** All tips on notes (optionally only notes about domain d), keyed by note id, plus per-reviewer and per-tipper (curator) views. */
-export async function loadTips(db: D1Database | undefined, d?: string): Promise<{ byNote: Map<string, Tip[]>; author: Map<string, string>; noteDomain: Map<string, string> }> {
+/** All tips on notes (optionally only notes about domain d), keyed by note id, plus per-reviewer and per-tipper (curator) views.
+ * GO-KM-D1-SCANS: memoized per request (the community block and the experience aggregate of one response both need it). */
+export function loadTips(db: D1Database | undefined, d?: string): Promise<{ byNote: Map<string, Tip[]>; author: Map<string, string>; noteDomain: Map<string, string> }> {
+  return memoLoad(`tips:${d ?? "*"}`, () => loadTipsNow(db, d));
+}
+
+async function loadTipsNow(db: D1Database | undefined, d?: string): Promise<{ byNote: Map<string, Tip[]>; author: Map<string, string>; noteDomain: Map<string, string> }> {
   const byNote = new Map<string, Tip[]>(); const author = new Map<string, string>(); const noteDomain = new Map<string, string>();
   if (!db) return { byNote, author, noteDomain };
   try {
