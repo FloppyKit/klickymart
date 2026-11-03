@@ -236,10 +236,13 @@ async function loadAggregatesNow(db: D1Database | undefined, domains?: string[],
   try {
     const q = domains?.length ? `SELECT ${COLS} FROM experiences WHERE d IN (${domains.map(() => "?").join(",")}) AND ${visibleSql("experiences")}` : `SELECT ${COLS} FROM experiences WHERE ${visibleSql("experiences")}`; // M4 S7
     const { results } = await db.prepare(q).bind(...(domains ?? [])).all<Record<string, any>>();
-    // GO-KM-D1-SCANS: one store asked for -> read only that store's tips and flags (exact: aggregate() only looks up the
-    // notes of that domain). The whole-index case (the chart) still reads them once, for every store.
+    // GO-KM-D1-SCANS: one store asked for -> read only that store's flags (exact: aggregate() only looks up the notes of
+    // that domain). The whole-index case (the chart) still reads them once, for every store.
+    // F1 B4: tips stay GLOBAL here. GP-2/R12-002's single-receiver zapper-key proof counts how many authors DECLARE a zap
+    // key, so scoping it to one store would let a key shared with an author on another store pass as single-receiver and
+    // change validated_tippers/bonus_tippers versus base 9db84c2. Narrowing is only allowed where it is provably exact.
     const one = domains?.length === 1 ? domains[0] : undefined;
-    const tips = (await loadTips(db, one)).byNote;
+    const tips = (await loadTips(db)).byNote;
     const flags = await readFlagCache(db, one); // computed on write (refreshFlagCache)
     const by = new Map<string, Row[]>();
     for (const r of results ?? []) { const x = fromDb(r); const l = by.get(x.d) ?? []; l.push(x); by.set(x.d, l); }

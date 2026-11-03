@@ -97,28 +97,39 @@ async function loadTipsNow(db: D1Database | undefined, d?: string): Promise<{ by
     const rv = await db.prepare(`SELECT id, pubkey, d FROM reviews WHERE ${visibleSql("reviews")}${d ? " AND d = ?" : ""}`).bind(...(d ? [d] : [])).all<{ id: string; pubkey: string; d: string }>();
     for (const n of rv.results ?? []) { author.set(n.id, n.pubkey); noteDomain.set(n.id, n.d); }
     if (!author.size) return { byNote, author, noteDomain };
-    const { results } = await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind = ? AND ${visibleSql("nostr_events")}`).bind(ZAP_RECEIPT).all<{ raw_json: string }>();
+    // GO-KM-D1-SCANS §2 (F1): the receipt scan, the key-age scan, the lnurl_cache scan and the per-author profile/zapper
+    // lookups do not depend on the tip scope. One request can load tips twice (a global scope for the GP-2 proof and a
+    // store scope for the community block), so they are memoized under scope-free keys: the second scope reads no rows for
+    // them, and the answers are identical (the queries and their arguments are unchanged).
+    const results = await memoLoad("tips:receipts", async () =>
+      (await db.prepare(`SELECT raw_json FROM nostr_events WHERE kind = ? AND ${visibleSql("nostr_events")}`).bind(ZAP_RECEIPT).all<{ raw_json: string }>()).results ?? []);
     // key history for the bonus rule: a visit note, other activity (not reports/receipts), or old enough
-    const hist = new Set<string>();
     const nowS = Math.floor(Date.now() / 1000);
     // KM-003: notes and profiles are mintable by throwaway keys, so only ingest-time key age counts as history.
-    for (const q of [
-      // KM-003/KM-007: key age is when KlickyMart first saw the key (first_seen), not an author-set created_at.
-      db.prepare(`SELECT pubkey FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey HAVING MIN(first_seen) <= ?`).bind(nowS - TIP_BONUS_RULES.MIN_AGE_S)])
-      for (const r of (await q.all<{ pubkey: string }>()).results ?? []) hist.add(r.pubkey);
+    // KM-003/KM-007: key age is when KlickyMart first saw the key (first_seen), not an author-set created_at.
+    const hist = await memoLoad("tips:hist", async () => {
+      const s = new Set<string>();
+      for (const r of (await db.prepare(`SELECT pubkey FROM nostr_events WHERE ${visibleSql("nostr_events")} GROUP BY pubkey HAVING MIN(first_seen) <= ?`).bind(nowS - TIP_BONUS_RULES.MIN_AGE_S).all<{ pubkey: string }>()).results ?? []) s.add(r.pubkey);
+      return s;
+    });
+    const ludOf = (a: string) => memoLoad(`tips:lud:${a}`, () => lud16Of(db, a));
+    const zapKeyOfLud = (l: string) => memoLoad(`tips:zk:${l}`, () => cachedZapKey(db, l));
     const zapKeys = new Map<string, string | null>();
-    for (const a of new Set(author.values())) zapKeys.set(a, await cachedZapKey(db, await lud16Of(db, a)));
+    for (const a of new Set(author.values())) { const l = await ludOf(a); zapKeys.set(a, l ? await zapKeyOfLud(l) : null); }
     // R12-002 / GP-2: fail closed. A zap key counts only when it is PROVEN to serve one receiver: exactly one author in
     // scope declares it, every lnurl_cache row for it names the same single lud16, that lud16 is not on a custodial
     // domain, and the key is not deny-listed. Unknown (no cache rows, cache missing) means weight 0.
     const keyUsers = new Map<string, number>(); const authorLud = new Map<string, string | null>();
-    for (const a of new Set(author.values())) authorLud.set(a, await lud16Of(db, a));
+    for (const a of new Set(author.values())) authorLud.set(a, await ludOf(a));
     for (const k of zapKeys.values()) if (k) keyUsers.set(k, (keyUsers.get(k) ?? 0) + 1);
-    const keyLuds = new Map<string, Set<string>>();
-    try {
-      for (const r of (await db.prepare("SELECT DISTINCT nostr_pubkey AS k, lud16 AS l FROM lnurl_cache WHERE nostr_pubkey IS NOT NULL").all<{ k: string; l: string }>()).results ?? [])
-        (keyLuds.get(r.k) ?? keyLuds.set(r.k, new Set()).get(r.k)!).add(String(r.l).toLowerCase());
-    } catch { /* cache table pending: nothing is proven */ }
+    const keyLuds = await memoLoad("tips:keyluds", async () => {
+      const m = new Map<string, Set<string>>();
+      try {
+        for (const r of (await db.prepare("SELECT DISTINCT nostr_pubkey AS k, lud16 AS l FROM lnurl_cache WHERE nostr_pubkey IS NOT NULL").all<{ k: string; l: string }>()).results ?? [])
+          (m.get(r.k) ?? m.set(r.k, new Set()).get(r.k)!).add(String(r.l).toLowerCase());
+      } catch { /* cache table pending: nothing is proven */ }
+      return m;
+    });
     const keyAuthorLud = new Map<string, string | null>();
     for (const [a, k] of zapKeys) if (k) keyAuthorLud.set(k, authorLud.get(a) ?? null);
     const single = (zk: string) => {
@@ -126,7 +137,7 @@ async function loadTipsNow(db: D1Database | undefined, d?: string): Promise<{ by
       const luds = keyLuds.get(zk); const mine = keyAuthorLud.get(zk);
       return !!luds && luds.size === 1 && !!mine && luds.has(mine.toLowerCase()) && !custodialLud16(mine);
     };
-    for (const row of results ?? []) {
+    for (const row of results) {
       const t = parseTip(JSON.parse(row.raw_json) as Ev, (id) => author.get(id), (a) => zapKeys.get(a), single);
       if (!t || !author.has(t.target)) continue;
       t.eligible = !!t.tipper && hist.has(t.tipper);
