@@ -7,9 +7,15 @@ import { measure, meteredDb, meteredEnv, type MeteredDb } from "./helpers/d1-met
 
 /** GO-KM-D1-SCANS: what the heavy public reads cost in D1 rows, before the edge cache and after it.
  *
- * The numbers are `meta.rows_read` from D1 on the e2e fixture DB, i.e. the rows Cloudflare bills for. "BEFORE" is the
- * same handler with the cache turned off (today's behaviour); "AFTER first" is the first request for a key (cache miss,
- * still does the work); "AFTER repeat" is the second one inside the TTL, which must read 0 rows.
+ * The numbers are `meta.rows_read` from D1 on the e2e fixture DB, i.e. the rows Cloudflare bills for. The columns are:
+ * - "base": what BASE 9db84c2 (before this GO) read for the same request, same seed, same steady state. F1 B6: these are
+ *   constants measured by running this seed plus the routes below against the base commit's own code (a throwaway copy of
+ *   `git archive 9db84c2 site`, the same metered D1 helper), NOT this code with the cache switched off.
+ * - "cache off": this code with the edge cache off, measured live, for the body comparison.
+ * - "first": the first request for a key (cache miss, still does the work).
+ * - "repeat": the second request inside the TTL, which must read no rows. F1 B8: a hit still counts the visit, so on the
+ *   counted paths (/mcp, /q, /check) a hit runs exactly one statement, the agent_visits upsert, which reads one row at
+ *   most. Every other route reads 0 rows and runs 0 statements.
  *
  * A small, realistic amount of community data is seeded first: with an empty experiences/reviews/note_flags table every
  * query scans 0 rows and the table would say nothing about the real cost. */
@@ -80,10 +86,20 @@ async function seed(): Promise<void> {
   await env.DB.batch(stmts);
 }
 
-interface Row { label: string; before: { rows: number; queries: number }; first: { rows: number; queries: number }; repeat: { rows: number; queries: number }; sameBody: boolean }
+/** F1 B6: rows read on BASE 9db84c2 for these exact requests. Reproduce: `git archive 9db84c2 site`, symlink the same
+ * node_modules, copy worker/test/helpers/d1-meter.ts in, seed() and measure the ROUTES with the base handleRequest. */
+const BASE_ROWS: Record<string, number> = {
+  "GET /": 0, "GET /chart": 1482, "GET /chart.json": 1482, "GET /q?q=lamp": 1, "GET /check": 1639, "GET /alternatives": 0,
+  "GET /offers": 0, "GET /records (community block)": 457, "GET /tips.json": 309, "GET /flags.json": 60,
+  "GET /flags.json?domain": 21, "MCP search_merchants": 1, "MCP find_offers": 1, "MCP get_record": 1,
+};
+/** Paths recordAgentVisit counts (agent-visits.ts COUNTED_PATHS): a cache hit on one of these writes the counter. */
+const COUNTED = new Set(["/mcp", "/q", "/check", "/llms.txt", "/export.ndjson"]);
+
+interface Row { label: string; base: number; cacheOff: { rows: number; queries: number }; first: { rows: number; queries: number }; repeat: { rows: number; queries: number }; sameBody: boolean }
 
 describe("GO-KM-D1-SCANS rows-read harness (fixture DB)", () => {
-  it("BEFORE (cache off) vs AFTER (edge cache): repeat hits read 0 D1 rows, bodies unchanged", async () => {
+  it("BASE 9db84c2 vs the cache: a repeat hit scans nothing, bodies unchanged", async () => {
     await seed();
     const rows: Row[] = [];
     for (const r of ROUTES) {
@@ -95,26 +111,38 @@ describe("GO-KM-D1-SCANS rows-read harness (fixture DB)", () => {
       expect(plan, r.label).not.toBeNull();
 
       setEdgeCacheEnabled(false);
-      const before = await measure(m, () => handleRequest(r.req(), e));
-      const before2 = await measure(m, () => handleRequest(r.req(), e));
-      expect(before2.rows, `${r.label}: without the cache every request pays`).toBe(before.rows);
+      const off = await measure(m, () => handleRequest(r.req(), e));
+      const off2 = await measure(m, () => handleRequest(r.req(), e));
+      expect(off2.rows, `${r.label}: without the cache every request pays`).toBe(off.rows);
 
       setEdgeCacheEnabled(true);
       await forgetEdgeCache(plan!.key);
       const first = await measure(m, () => handleRequest(r.req(), e)); // genuine miss
       const repeat = await measure(m, () => handleRequest(r.req(), e)); // hit
-      expect(repeat.rows, `${r.label}: a repeat hit must read 0 D1 rows`).toBe(0);
-      expect(repeat.queries, `${r.label}: a repeat hit must run 0 queries`).toBe(0);
-      expect(stable(repeat.body), `${r.label}: the body must be byte-identical (up to TTL staleness)`).toBe(stable(before.body));
-      expect(stable(first.body), `${r.label}: the first hit renders exactly what the uncached path renders`).toBe(stable(before.body));
-      rows.push({ label: r.label, before: { rows: before.rows, queries: before.queries }, first: { rows: first.rows, queries: first.queries }, repeat: { rows: repeat.rows, queries: repeat.queries }, sameBody: true });
+      const path = new URL(r.req().url).pathname;
+      if (COUNTED.has(path)) {
+        // F1 B8: the hit still bumps the visit counter: one upsert, at most one row read, no scan.
+        expect(repeat.queries, `${r.label}: a counted hit runs exactly the one counter statement`).toBe(1);
+        expect(repeat.sqls[0], `${r.label}: the only statement on a hit is the visit counter`).toContain("agent_visits");
+        expect(repeat.rows, `${r.label}: the counter upsert reads one row at most`).toBeLessThanOrEqual(1);
+      } else {
+        expect(repeat.rows, `${r.label}: a repeat hit must read 0 D1 rows`).toBe(0);
+        expect(repeat.queries, `${r.label}: a repeat hit must run 0 queries`).toBe(0);
+      }
+      expect(stable(repeat.body), `${r.label}: the body must be byte-identical (up to TTL staleness)`).toBe(stable(off.body));
+      expect(stable(first.body), `${r.label}: the first hit renders exactly what the uncached path renders`).toBe(stable(off.body));
+      rows.push({ label: r.label, base: BASE_ROWS[r.label]!, cacheOff: { rows: off.rows, queries: off.queries }, first: { rows: first.rows, queries: first.queries }, repeat: { rows: repeat.rows, queries: repeat.queries }, sameBody: true });
     }
     setEdgeCacheEnabled(null);
-    const table = ["route\tbefore rows\tbefore q\tafter first rows\tafter first q\tafter repeat rows\tafter repeat q",
-      ...rows.map((x) => `${x.label}\t${x.before.rows}\t${x.before.queries}\t${x.first.rows}\t${x.first.queries}\t${x.repeat.rows}\t${x.repeat.queries}`)].join("\n");
+    const table = ["route\tbase rows (9db84c2)\tcache-off rows\tfirst rows\tfirst q\trepeat rows\trepeat q",
+      ...rows.map((x) => `${x.label}\t${x.base}\t${x.cacheOff.rows}\t${x.first.rows}\t${x.first.queries}\t${x.repeat.rows}\t${x.repeat.queries}`)].join("\n");
     // eslint-disable-next-line no-console
     console.log(`\n${table}\n`);
-    expect(rows.every((x) => x.repeat.rows === 0 && x.sameBody)).toBe(true);
+    expect(rows.every((x) => x.sameBody && x.repeat.rows <= 1)).toBe(true);
+    // §4 acceptance, measured against base: the worst route on base is /check; report how far the first hit got.
+    const check = rows.find((x) => x.label === "GET /check")!;
+    expect(check.base).toBe(1639);
+    expect(check.first.rows).toBeLessThan(check.base);
   });
 
   it("a store-scoped read only reads that store's rows (narrowed scans)", async () => {
@@ -124,10 +152,14 @@ describe("GO-KM-D1-SCANS rows-read harness (fixture DB)", () => {
       const one = await measure(m, () => handleRequest(get(`/flags.json?domain=${D}`), e));
       const all = await measure(m, () => handleRequest(get("/flags.json"), e));
       expect(one.rows).toBeLessThan(all.rows);
-      // loadAggregates for ONE store must narrow its flag and tip reads to that store (the whole-index chart still reads all)
+      // loadAggregates for ONE store narrows its FLAG read to that store (the whole-index chart still reads all).
       const check = await measure(m, () => handleRequest(get(`/check?domain=${D}`), e));
       expect(check.sqls.find((s) => s.includes("FROM note_flags")) ?? "").toContain("WHERE d = ?");
-      expect(check.sqls.find((s) => s.includes("SELECT id, pubkey, d FROM experiences")) ?? "").toContain("AND d = ?");
+      // F1 B4: the tips/author read that feeds the GP-2 single-receiver proof is NOT narrowed: the proof counts the authors
+      // who declare a zapper key across the whole index, so scoping it would change /check's tip validation.
+      const authorReads = check.sqls.filter((s) => s.includes("SELECT id, pubkey, d FROM experiences"));
+      expect(authorReads.some((s) => !s.includes("AND d = ?")), "one global proof read").toBe(true);
+      expect(authorReads.some((s) => s.includes("AND d = ?")), "plus the store-scoped community read").toBe(true);
       const chart = await measure(m, () => handleRequest(get(`/chart.json`), e));
       expect(chart.sqls.find((s) => s.includes("FROM note_flags")) ?? "").not.toContain("WHERE d = ?");
     } finally {
@@ -182,7 +214,10 @@ describe("GO-KM-D1-SCANS cache key discipline (anti-gaming)", () => {
     try {
       await (await handleRequest(get("/q?q=lamp"), e)).text();
       const same = await measure(m, () => handleRequest(get("/q?limit=50&q=lamp&scope=any"), e));
-      expect(same.rows).toBe(0); // same cache entry, served from the edge cache
+      // same cache entry, served from the edge cache: no scan. F1 B8: a hit on a counted path still runs the one
+      // agent_visits upsert, which reads at most the one conflicting counter row.
+      expect(same.rows).toBeLessThanOrEqual(1);
+      expect(same.sqls.every((s) => s.includes("agent_visits"))).toBe(true);
       expect(same.status).toBe(200);
       expect(same.body).toContain("\"total\"");
     } finally {
@@ -192,16 +227,19 @@ describe("GO-KM-D1-SCANS cache key discipline (anti-gaming)", () => {
 });
 
 describe("GO-KM-D1-SCANS one load per request", () => {
-  it("/check reads the flag cache and the tips once, not once per block", async () => {
+  it("/check reads the flag cache once and never loads the same tip scope twice", async () => {
     await seed();
     setEdgeCacheEnabled(false);
     try {
       await (await handleRequest(get(`/check?domain=${D}`), e)).text(); // warm: /check must not answer from a previous test's cache
       const r = await measure(m, () => handleRequest(get(`/check?domain=${D}`), e));
       const flagReads = r.sqls.filter((s) => s.includes("FROM note_flags")).length;
-      const tipReads = r.sqls.filter((s) => s.includes("FROM experiences") && s.includes("SELECT id, pubkey, d")).length;
       expect(flagReads).toBe(1);
-      expect(tipReads).toBe(1);
+      // F1 B4: one global scope (the GP-2 proof) plus at most one store scope (the community block), each loaded once.
+      const authorReads = r.sqls.filter((s) => s.includes("FROM experiences") && s.includes("SELECT id, pubkey, d"));
+      expect(authorReads.filter((s) => !s.includes("AND d = ?")).length, "the global proof is loaded once").toBe(1);
+      expect(authorReads.filter((s) => s.includes("AND d = ?")).length, "the store scope is loaded once").toBeLessThanOrEqual(1);
+      expect(new Set(authorReads).size, "no tip scope is read twice").toBe(authorReads.length);
     } finally {
       setEdgeCacheEnabled(null);
     }
